@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import org.agentos.runtime.acp.AcpPair
 import org.agentos.runtime.acp.response
@@ -129,9 +130,14 @@ class RuntimeStartTest {
             assertTrue(serveMillis < 500, "serveAcp took $serveMillis ms")
             val init = async { pair.initialize() }
             val session = async { init.await(); pair.newSession() }
-            delay(100)
+            // 不用固定的延时：冷 JVM、机器负载高时请求到达运行时可能超过 100 ms（A5 全量构建时出现过一次）
+            val counted = withTimeoutOrNull(5_000) {
+                while (!rt.engine.runState.value.busy) delay(5)
+                true
+            }
+            assertTrue(counted == true, "a request waiting for recovery counts")
+            delay(50)
             assertFalse(session.isCompleted, "session/new waits for recovery")
-            assertTrue(rt.engine.runState.value.busy, "a request waiting for recovery counts")
             rt.start()
             val events = pair.prompt(session.await(), "hi")
             assertEquals(StopReason.END_TURN, events.response().stopReason)
