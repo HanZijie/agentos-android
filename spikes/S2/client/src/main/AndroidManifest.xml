@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Requesting the agent's signature permission must not help: different signing key. -->
+    <uses-permission android:name="org.agentos.spike.s2.permission.SEND_SUPERVISOR_STATUS" />
+
+    <queries>
+        <package android:name="org.agentos.spike.s2" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="S2 client / intruder">
+
+        <activity
+            android:name=".ClientActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Exported on purpose: the host driver triggers it with a plain `adb shell am broadcast`
+             (shell uid, no root), so the device can stay in doze / screen-off while probing. -->
+        <receiver
+            android:name=".ProbeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.agentos.spike.s2.client.PROBE" />
+                <action android:name="org.agentos.spike.s2.client.SPOOF" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
