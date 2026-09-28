@@ -16,7 +16,8 @@ import java.util.concurrent.atomic.AtomicInteger
  *   node bundle/test/fake-llm.mjs --port 8787 &
  *   ./gradlew :desktop:run --args="contract measure real"
  *
- * Real endpoints use MINIMAX_API_KEY (minimax + minimax-cn presets) and
+ * Real endpoints use MINIMAX_API_KEY (minimax + minimax-cn presets; optional MINIMAX_ANTHROPIC_BASE_URL
+ * adds the minimax-cn preset with that base URL) and
  * OPENAI_COMPAT_BASE_URL / OPENAI_COMPAT_API_KEY / OPENAI_COMPAT_MODEL; missing
  * variables mean the target is skipped (and reported as skipped).
  */
@@ -56,6 +57,10 @@ private suspend fun runAll(args: Array<String>): Int {
         if (!minimaxKey.isNullOrBlank()) {
             targets += RealTarget("minimax", runner.presetModel("minimax", "anthropic-messages"), minimaxKey)
             targets += RealTarget("minimax-cn", runner.presetModel("minimax-cn", "anthropic-messages"), minimaxKey)
+            // Optional: the same minimax-cn preset with only the Anthropic base URL replaced (e.g. https://api.minimax.cn/anthropic)
+            System.getenv("MINIMAX_ANTHROPIC_BASE_URL")?.takeIf { it.isNotBlank() }?.let {
+                targets += RealTarget("minimax-cn@custom-base", runner.presetModel("minimax-cn", "anthropic-messages").put("baseUrl", it), minimaxKey)
+            }
         } else skipped += "minimax, minimax-cn: MINIMAX_API_KEY not set"
         val compatUrl = System.getenv("OPENAI_COMPAT_BASE_URL")
         val compatKey = System.getenv("OPENAI_COMPAT_API_KEY")
