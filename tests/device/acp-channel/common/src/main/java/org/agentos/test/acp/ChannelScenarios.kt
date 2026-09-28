@@ -31,11 +31,23 @@ interface AcpTarget {
     val acpComponent: ComponentName
     /** 能否调整服务端的通道参数；不能时只跑默认参数的用例。 */
     val supportsChannelConfig: Boolean
+
+    /**
+     * 服务端是真正的 AgentOS 宿主层（A3 起）：文字增量由宿主层按 32 ms 合并、长文字切成不超过 8,192 字符的块、
+     * 没有 _meta.seq / t，所以只能按“文字完整”校验，不能按条数和顺序号；连接断开不取消任务（F7）。
+     * 测试 Agent App（SDK 回归）逐条原样发出，按条数校验。
+     */
+    val hostRuntime: Boolean get() = false
+
     suspend fun stats(): JSONObject
     suspend fun setChannelConfig(cfg: JSONObject?)
     /** 对服务端进程发 SIGKILL。 */
     suspend fun killServer()
 }
+
+/** 假 Agent 按 [agentCommand] 输出的总字符数（chunkChars=0 时每条是 "chunk i "）。 */
+fun expectedChars(chunks: Int, chunkChars: Int, bigChunkChars: Int = 0): Long =
+    (if (chunkChars > 0) chunks.toLong() * chunkChars else (0 until chunks).sumOf { "chunk $it ".length.toLong() }) + bigChunkChars
 
 /** 测试 Agent App，经 [ITestProbe] 读状态、调参数、自杀。 */
 class ProbeTarget(private val ctx: Context) : AcpTarget {
@@ -144,8 +156,9 @@ class ChannelScenarios(
             val run = PromptRun()
             prompt(session, """{"chunks":20,"intervalMs":0}""", run)
             val cause = c.closeAndWait()
+            val textOk = if (target.hostRuntime) run.chunkChars == expectedChars(20, 0) else run.chunks == 20 && run.outOfOrder == 0
             return JSONObject()
-                .put("ok", run.stopReason == "END_TURN" && run.chunks == 20 && run.outOfOrder == 0 && cause?.kind == CloseCause.KIND_LOCAL)
+                .put("ok", run.stopReason == "END_TURN" && textOk && cause?.kind == CloseCause.KIND_LOCAL)
                 .put("agent", info.implementation?.name ?: JSONObject.NULL)
                 .put("protocolVersion", info.protocolVersion.toString())
                 .put("sessionId", session.sessionId.value)
@@ -174,9 +187,15 @@ class ChannelScenarios(
             val clientTransport = c.transport.stats()
             val cause = c.closeAndWait()
             val expected = args.optInt("chunks", 5000)
+            val textOk = if (target.hostRuntime) {
+                run.chunkChars == expectedChars(expected, args.optInt("chunkChars", 32))
+            } else {
+                run.chunks == expected && run.outOfOrder == 0
+            }
             return JSONObject()
-                .put("ok", run.stopReason == "END_TURN" && run.chunks == expected && run.outOfOrder == 0 &&
+                .put("ok", run.stopReason == "END_TURN" && textOk &&
                     BinderChannel.mainThreadBinderCalls == 0L && server.optLong("mainThreadBinderCalls") == 0L)
+                .put("expectedChars", expectedChars(expected, args.optInt("chunkChars", 32)))
                 .put("cfg", cfg.toJson())
                 .put("cmd", JSONObject(agentCommand(args)))
                 .put("prompt", run.json())
@@ -396,15 +415,24 @@ class ChannelScenarios(
             prompt(session, "w".repeat(max - 1024), b)
             out.put("B_nearLimitPrompt", JSONObject().put("ok", b.stopReason == "END_TURN").put("prompt", b.json()))
 
-            // C. 服务端要发超长通知：丢弃该条，本轮其他消息照常
+            // C. 服务端要发超长通知：测试 Agent 丢弃该条、本轮其他消息照常；AgentOS 宿主层把长文字切成不超过 8,192 字符的块，
+            //    根本不会产生超长通知。注意：宿主层的事件日志对单个超过 65,536 字符的事件按 events.md 第 5 节截断字段
+            //    （一条 65K 的增量只剩 16,384 字符），textComplete 记录这一点，不作为本用例（通道）的通过条件
             val c3 = PromptRun()
-            prompt(session, JSONObject().put("chunks", 3).put("intervalMs", 0).put("bigChunkChars", max + 100).toString(), c3)
+            val big = max + 100
+            prompt(session, JSONObject().put("chunks", 3).put("intervalMs", 0).put("bigChunkChars", big).toString(), c3)
             val server = target.stats()
             val dropped = server.optJSONArray("open")?.let { arr ->
                 (0 until arr.length()).sumOf { arr.getJSONObject(it).optJSONObject("transport")?.optLong("droppedTooLarge") ?: 0L }
             } ?: -1L
+            val cOk = if (target.hostRuntime) {
+                c3.stopReason == "END_TURN" && c3.chunks >= 2 && c3.maxChunkChars <= 8_192 && dropped == 0L
+            } else {
+                c3.stopReason == "END_TURN" && c3.chunks == 3 && dropped >= 1
+            }
             out.put("C_agentOversizeNotification", JSONObject()
-                .put("ok", c3.stopReason == "END_TURN" && c3.chunks == 3 && dropped >= 1)
+                .put("ok", cOk).put("hostSplits", target.hostRuntime)
+                .put("textComplete", c3.chunkChars == expectedChars(3, 0, big)).put("expectedChars", expectedChars(3, 0, big))
                 .put("prompt", c3.json()).put("serverDroppedTooLarge", dropped))
 
             // D. 绕过 SDK 直接往服务端的接收端塞一条超长消息：服务端判违规并关闭通道

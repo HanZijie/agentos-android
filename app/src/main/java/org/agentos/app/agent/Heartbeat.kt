@@ -58,7 +58,8 @@ class HeartbeatWriter(context: Context) {
     @Volatile var lastError: String? = null
         private set
 
-    private val bootCount: Int by lazy {
+    /** Settings.Global.BOOT_COUNT（监督契约：心跳的 boot 字段；也用来判定“监督进程未运行”）。 */
+    val bootCount: Int by lazy {
         try {
             Settings.Global.getInt(resolver, Settings.Global.BOOT_COUNT)
         } catch (e: Exception) {
