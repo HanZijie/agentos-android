@@ -190,6 +190,23 @@ class AcpAgentSideTest {
         assertTrue(pair.agentLines.all { it.length <= 65_536 }, "longest line ${pair.agentLines.maxOf { it.length }}")
     }
 
+    /**
+     * C3 在设备上发现的缺陷（oversize-C）：模型一次发来一条超过 65,536 字符的文字增量（非流式返回的厂商），事件日志按
+     * events.md 第 5 节截断，客户端丢字。TaskRunner 现在把单条增量切到不超过 coalesceMaxChars 再写日志。
+     */
+    @Test
+    fun `a single 200,000-character delta reaches the client complete, every line within 65,536 characters`() = test { pair ->
+        pair.initialize()
+        val session = pair.newSession()
+        // 引号在 JSON 里要转义成两个字符：最坏情况
+        val events = pair.prompt(session, directive("chunks" to 1, "chunkChars" to 200_000, "text" to "\""))
+        assertEquals(StopReason.END_TURN, events.response().stopReason)
+        assertEquals("\"".repeat(200_000), events.text(), "no character is lost")
+        assertTrue(pair.agentLines.all { it.length <= 65_536 }, "longest line ${pair.agentLines.maxOf { it.length }}")
+        val logged = pair.rt.engine.readEvents(session.sessionId.value).filter { it.eventType == EventTypes.MESSAGE_UPDATE }
+        assertTrue(logged.none { it.payload["truncated"] != null }, "no text_delta event was truncated")
+    }
+
     @Test
     fun `a disconnected client does not cancel the task`() = test { pair ->
         pair.initialize()

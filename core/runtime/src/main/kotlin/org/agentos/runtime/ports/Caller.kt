@@ -49,7 +49,9 @@ enum class CallerKind {
  *
  * core/runtime 不依赖 Android，所以由接线方提供：
  * - W6（Binder）：`OutboundGate { transport.awaitWritable(16_384) }`，transport 是 BinderAcpTransport；
- * - 电脑上的 stdio / socket：[NONE]。
+ * - W9（电脑端网关，抽象 socket）：`OutboundGate { transport.awaitWritable(16_384) }`，transport 是
+ *   [org.agentos.runtime.acp.LineTransport]（本地出站队列的积压，由 DesktopGatewayCore 接好）；
+ * - 电脑上的 stdio（测试）：[NONE]。
  */
 fun interface OutboundGate {
     suspend fun awaitWritable()

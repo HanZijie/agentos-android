@@ -1,7 +1,8 @@
 # 可以在电脑上跑的测试（docs/implementation-plan.md 第 2 节 CI）：
 # - Gradle：core/runtime、core/extensions 等模块的单元测试与 Android Lint
 # - core/pi-runtime：Pi Agent core 的打包与契约测试（W3 起）
-# - tests/acp-conformance：官方 TypeScript ACP 客户端经 stdio 的一致性测试（W4 起）
+# - tests/acp-conformance：官方 TypeScript ACP 客户端的一致性测试：经 stdio（W4 起），经电脑上的网关 + tools/acp-bridge，
+#   以及网关的配对与安全用例（W9 起）。手机上的用例（AGENTOS_ACP_DEVICE）需要设备，CI 里自动跳过
 # 后两项在对应工程出现之前自动跳过。
 name: portable-tests
 
@@ -83,7 +84,7 @@ jobs:
         run: npm run --if-present test
 
   acp-conformance:
-    name: ACP 一致性测试（stdio）
+    name: ACP 一致性测试（stdio、电脑端网关 + acp-bridge）
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -117,6 +118,10 @@ jobs:
       - name: 构建电脑端 Agent 进程的类路径
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         run: ./gradlew --stacktrace :core:runtime:acpConformanceClasspath -Pagentos.skipPiBundle=true
+
+      - name: 桥接命令（tools/acp-bridge，无依赖）
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        run: node tools/acp-bridge/acp-bridge.mjs --version
 
       - name: 一致性测试
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''

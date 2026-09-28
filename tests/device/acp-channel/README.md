@@ -26,22 +26,31 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | window-violation | 绕过流控连发，服务端以 `window exceeded` 关闭 |
 | stream-noflow（负向） | 关掉流控打满：允许写爆，但必须在超时内结束，不能挂住（S3 问题 1） |
 
-**`--suite app`（W6）**：AgentOS 的 `:agent`（`AcpService`、`AgentService`、`AgentControlService`）。执行器是注入 debug 包的 `inapp/`（AgentOS 自己的 UID，`:acptest` 进程），第三方身份的用例由 `client/` 跑。宿主层目前是占位实现（`PlaceholderAgentRuntime`，按同样的 JSON 指令流式输出），A3 之后换成真实现，通道用例要换成可控的假模型端点。
+**`--suite app`（W6）**：AgentOS 的 `:agent`（`AcpService`、`AgentService`、`AgentControlService`）。执行器是注入 debug 包的 `inapp/`（AgentOS 自己的 UID，`:acptest` 进程），第三方身份的用例由 `client/` 跑。宿主层是真正的 `RuntimeEngine`（A3：ACP、Store、调度、恢复），Agent core 在 B2 之前是 `ScriptedAgentCore`（app 主代码，按同样的 JSON 指令流式输出，不调模型）。
+
+与 SDK 回归的差别（`AcpTarget.hostRuntime`）：宿主层按 32 ms 合并文字增量、把长文字切成不超过 8,192 字符的块、不带 `_meta.seq / t`，所以通道用例按**文字总字符数**校验，不按条数和顺序号，也测不出端到端延迟；连接断开不取消任务（F7）。宿主层没有配置模型时拒绝任务（`model_not_configured`），所以执行器在每个非 BYOK 用例之前配置一个回环地址上的自定义端点（`ScriptedAgentCore` 不会去连它）。
 
 | 用例 | 执行器 | 通过标准 |
 |---|---|---|
-| handshake | inapp | 本 App 的 UID：initialize → session/new → prompt → close |
+| handshake | inapp | 本 App 的 UID：initialize → session/new → prompt → close，文字完整 |
 | foreign-uid-rejected | client | 第三方 UID 调 `open`：`SecurityException`，原因码 `agentos.acp.not_open`，本端不留通道 |
 | foreign-no-leak | inapp | 被拒之后 `:agent` 没有连接和通道，`rejectedOpens` ≥ 1 |
-| oversize | inapp | 同 SDK 回归的四种情况 |
-| client-kill | inapp | 执行器进程在流式中途自杀：`:agent` 以 `peer_died` 关闭，连接、通道、任务归零 |
+| oversize | inapp | A、B、D 同 SDK 回归；C：宿主层把 65,636 字符的文字切块发出，没有超长通知、没有丢弃、每块 ≤ 8,192 字符（事件日志对超过 65,536 字符的单个事件会截断字段，`textComplete` 只记录不判定） |
+| client-kill | inapp | 执行器进程在流式中途自杀：`:agent` 以 `peer_died` 关闭连接和通道；任务不随连接取消，run.py 轮询到它自己结束（`promptsActive=0`） |
 | agent-kill-rebind | inapp | 流式中途 SIGKILL `:agent`：执行器感知、prompt 不挂住；系统重建服务后重新 bind 能对话 |
-| stream-realtime / cancel-realtime / reconnect / window-violation | inapp | 同 SDK 回归 |
-| cold-task-foreground | inapp | 先杀 `:agent`，让恢复多等 1.5 s；bind 拉起冷进程后 prompt 的任务在恢复结束前就已登记（S2 整合时发现的缺陷的先后顺序）。恢复期间服务已在前台，恢复结束后直到任务结束一直在前台，心跳 `tasks=1 fg=1 state=busy`；结束后退出前台、服务停止，心跳 `tasks=0 fg=0 state=idle`，空闲停止恰好 1 次 |
+| stream-realtime / cancel-realtime / reconnect / window-violation | inapp | 同 SDK 回归（stream 按字符数） |
+| cold-task-foreground | inapp | 先杀 `:agent`，让恢复多等 1.5 s；从连接之前就采样。session/new 在恢复期间到达、已计入任务（S2 整合时发现的缺陷的先后顺序）：恢复期间服务已在前台，恢复结束后直到任务结束一直在前台，心跳 `tasks≥1 fg=1 state=busy`；结束后 2 s 宽限期过后退出前台、服务停止，心跳 `tasks=0 fg=0 state=idle`，空闲停止恰好 1 次（session/new 与 prompt 之间不退出前台） |
 | warm-task-foreground | inapp | 同上，`:agent` 已在运行 |
 | supervisor-start-idle | inapp | 监督进程的命令（`SUPERVISOR_START`、`REASON=boot`），恢复多等 1 s：服务先进前台，恢复期间不停，恢复结束后没有任务就停止，心跳 `state=idle` |
 | restart-exit-info | inapp | SIGKILL `:agent` 后用 `REASON=restart` 拉起：诊断里的上次退出原因是 `SIGNALED`、pid 对得上，`userStopped=false` |
 | control-foreign-rejected | client | 第三方绑定 `AgentControlService`、启动 `AgentService` 都被系统拒绝 |
+| user-stop-recovery | inapp + run.py | 两个会话在跑、一个排队，run.py `am force-stop`：新进程里上次退出原因 `USER_REQUESTED`，宿主层拿到 `previousExitStoppedByUser`，排队的任务取消（`by: user_stop`）、运行中的两个标为结果未知；没有任务、不进前台、心跳 `tasks=0` |
+| store-restart | inapp | 删库 → ACP 冷启动建两个会话、跑一轮 → SIGKILL 后直接读数据库文件（只读）：会话、已完成的任务、事件、Pi messages 都在，库在 CE、WAL；再冷启动：`runtime.started` / `runtime.recovered` 各加 1、系统流 sequence 连续 |
+| byok-roundtrip | inapp + run.py | IAgentControl v2：设置预设 → 读取只有首尾 4 位 → 同厂商换模型沿用 key → 8 种拒绝（换端点要 key、http、换行、Bearer、未知厂商、key 填错字段、坏 JSON）且消息里没有 key → 自定义端点 → 诊断里连掩码都没有；全程不重启 `:agent` |
+| byok-restart | inapp + run.py | SIGKILL 后冷启动：key 仍能解密、按端点匹配（`credentialResolves`），Keystore 主密钥在；`model-source.json` 在 CE、只有密文；App 的 CE / DE 私有目录下所有文件里没有明文 key |
+| byok-clear | inapp + run.py | 清除 → 重启后仍未配置，文件已删，Keystore 主密钥已删 |
+
+BYOK 用例的 key 由 run.py 每次随机生成（`agtest-` + 48 字符，不是真实 key），经 stdin 写进 App 私有目录的 `files/test/byok_key`（`adb exec-in run-as …`），执行器读完立即删除。**不要把 key 放在 `adb shell` 的命令行里**：API 37 的 adbd 会把整条命令行写进 logcat（`adbd service requested 'shell,v2,…:am start … --es args …'`），C3 就是在 API 37 上这样发现的。执行器基类回显参数时也会把 `apiKey` 换成 `<redacted>`。每个 BYOK 用例结束后 run.py 在整个 logcat（`-b all`）和结果 JSON 里搜 key 的全文和中段，命中就判失败，命中的行（key 已替换）记在 `leakScan.hitLines`。
 
 `inapp/` 的 Activity 导出但要求 `android.permission.DUMP`，只有 shell 和系统能启动；它只在 debug 包里。
 
@@ -59,3 +68,5 @@ python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app
 ```
 
 `--only a,b` 只跑指定用例。结果写在 `results/raw/`（不进仓库），定稿的结果复制到 `results/` 提交。全部通过时退出码为 0。
+
+app 用例要求 APK 里有 `assets/model-catalog.json`（BYOK 的厂商预设和自定义端点模板都来自它）：先在 `core/pi-runtime` 里 `npm ci`，构建时不加 `-Pagentos.skipPiBundle=true`，或者先单独跑一次 `node build.mjs`。

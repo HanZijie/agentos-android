@@ -24,12 +24,17 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class SchedulerTest {
+    private companion object {
+        val HUGE = ("a".repeat(8_191) + "\uD83D\uDE00").repeat(9) + "tail"
+    }
 
     /** "block" 挂起到取消；"slow" 流 20 段；其他回显。 */
     private val scripts = { ctx: FakeTurnContext ->
         when (ctx.input.text) {
             "block" -> FakeTurnScript(FakeStep.Text("working"), FakeStep.AwaitAbort)
             "slow" -> FakeTurnScript(FakeStep.Text("y".repeat(40), chunkChars = 2, intervalMs = 5))
+            // 一次到达的超长增量：73,741 字符，代理对正好跨在 8,192 的切分点上
+            "huge" -> FakeTurnScript(FakeStep.Text(HUGE, chunkChars = HUGE.length))
             "crash" -> FakeTurnScript(FakeStep.Text("x"), FakeStep.CrashCore())
             else -> FakeTurnScript(FakeStep.Text("ok: ${ctx.input.text}"))
         }
@@ -185,6 +190,23 @@ class SchedulerTest {
         val kinds = rt.engine.readEvents(s.id).filter { it.eventType == EventTypes.MESSAGE_UPDATE }
             .map { it.payload["update"].toString() }
         assertTrue(kinds.none { "text_start" in it || "toolcall_delta" in it })
+    }
+
+    @Test
+    fun `one oversized delta is split into log entries of at most 8,192 characters and nothing is truncated`() = test { rt ->
+        val s = rt.engine.createSession(TestRuntime.APP, null)
+        val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("huge"))
+        rt.engine.awaitTask(t.id)
+        val entries = rt.engine.readEvents(s.id).filter { it.eventType == EventTypes.MESSAGE_UPDATE }
+        val deltas = entries
+            .map { org.agentos.runtime.events.AgentEvent.decode(kotlinx.serialization.json.JsonObject(it.payload + ("type" to kotlinx.serialization.json.JsonPrimitive("message_update")))) }
+            .filterIsInstance<org.agentos.runtime.events.AgentEvent.MessageUpdate>()
+            .filter { it.update.kind == "text_delta" }
+            .map { it.update.delta.orEmpty() }
+        assertEquals(HUGE, deltas.joinToString(""))
+        assertTrue(deltas.size >= 9 && deltas.all { it.length <= 8_192 }, deltas.map { it.length }.toString())
+        assertTrue(deltas.none { Character.isHighSurrogate(it.last()) }, "no surrogate pair is cut")
+        assertTrue(entries.none { it.payload["truncated"] != null })
     }
 
     @Test

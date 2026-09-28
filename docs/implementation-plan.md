@@ -379,9 +379,10 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `AgentService`：有任务时前台（`specialUse`），没有任务时退出前台；写心跳文件（骨架，C2）
 - [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
 - [ ] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接
-- [ ] `AndroidStore`、`KeystoreSecrets`、`HostPortImpl`、`IAgentControl`（`IAgentControl` v1 已有：版本、运行状态、诊断、监督状态；BYOK 与确认在末尾追加）
-- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app`，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件；API 35 / 36 / 37 与 Pixel_8a 均 15/15）
-- [ ] 换成真的 `AgentRuntime`（A3）和 Pi（B2 的 PiAdapter + QuickJsEngine）
+- [x] `AndroidStore`（BundledSQLiteDriver，CE 目录 `databases/agentos-runtime.db`）、`KeystoreSecrets`（只实现 `SecretPort`）、`HostPortImpl`（工具、Skill、Hook、确认暂为“未开放”实现）、`IAgentControl` v2（BYOK）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 20 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除；API 35 / 36 / 37 与 Pixel_8a 均 20/20，logcat 与私有文件里搜不到 key）
+- [x] 换成真的 `AgentRuntime`（A3 的 `RuntimeEngine`，C3）；空闲后前台服务保留 2 s 宽限期
+- [ ] Agent 核心换成 Pi（PiAdapter + QuickJsEngine，等 B3；此前用 `ScriptedAgentCore` 占位）
 
 #### W7 模块与打包
 - [x] `customize.sh`、`uninstall.sh`、`module.prop.template`、`support-matrix.yaml`（KernelSU 最低版本暂不检查，W27 定）

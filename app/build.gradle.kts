@@ -28,6 +28,8 @@ dependencies {
     implementation(project(":sdk:binder-channel"))
     implementation(project(":sdk:acp-android"))
     implementation(project(":sdk:plugin-sdk"))
+    // W6（C3）：Store 的 SQLite 驱动（AndroidStore）。BundledSQLiteDriver，与 core:runtime 电脑测试同一份 SQLite
+    implementation(libs.androidx.sqlite.bundled)
 
     // W6 设备用例的 in-app 执行器（tests/device/acp-channel/inapp）：只进 debug 包，release 包里没有
     debugImplementation(project(":tests:device:acp-channel:inapp"))

@@ -69,6 +69,19 @@
             android:exported="false"
             android:permission="org.agentos.permission.SEND_SUPERVISOR_STATUS" />
 
+        <!-- ================= W9：电脑端接入 ================= -->
+
+        <!--
+          DesktopGateway（:agent）在抽象 socket agentos-acp 上接受电脑端连接，开关默认关闭，不需要 Manifest 条目。
+          下面是 debug 包的测试入口（tests/acp-conformance 的设备模式用它打开开关、生成配对码）：
+          要求 DUMP 权限，只有 adb shell 和系统能发；release 包（不可调试）里一律返回 not_debuggable。
+        -->
+        <receiver
+            android:name=".agent.DesktopGatewayDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":agent" />
+
     </application>
 
 </manifest>
