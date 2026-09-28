@@ -1,7 +1,5 @@
 package org.agentos.runtime.pi.testing
 
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpServer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -21,9 +19,14 @@ import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.testing.FakeScripts
 import org.agentos.runtime.testing.FakeStep
 import org.agentos.runtime.testing.FakeTurnScript
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
-import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
@@ -54,6 +57,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * [failNext] makes the next requests fail regardless of content (host retry tests). Requests
  * with a wrong key get 401. Every request is recorded in [requests].
+ *
+ * Portable: a small HTTP/1.1 server on a loopback [ServerSocket] (one request per connection,
+ * chunked responses), so the same endpoint serves the JVM tests and the instrumented tests in
+ * the app process on a device. A dropped connection is a socket closed without the terminating
+ * chunk, which the client sees as an unexpected end of stream.
  */
 class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
 
@@ -84,35 +92,54 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
 
     private val json = Json { ignoreUnknownKeys = true }
     private val executor: ExecutorService = Executors.newCachedThreadPool { r -> Thread(r, "fake-llm").apply { isDaemon = true } }
-    private val server: HttpServer = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+    // Explicitly 127.0.0.1: on Android InetAddress.getLoopbackAddress() is ::1, and the URLs below use 127.0.0.1.
+    private val server = ServerSocket(0, 50, InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)))
+    private val open = ConcurrentHashMap.newKeySet<Socket>()
     private val log = CopyOnWriteArrayList<Recorded>()
     private val seq = AtomicInteger()
     private val failures = ConcurrentLinkedQueue<Failure>()
     private val scripts = ConcurrentHashMap<String, FakeTurnScript>()
 
-    val baseUrl: String
+    val baseUrl: String = "http://127.0.0.1:${server.localPort}"
     val anthropicBaseUrl: String get() = "$baseUrl/anthropic"
     val openaiBaseUrl: String get() = "$baseUrl/openai"
     val requests: List<Recorded> get() = log.toList()
 
     init {
-        server.executor = executor
-        server.createContext("/") { ex ->
-            var drop = false
+        Thread({
+            while (!server.isClosed) {
+                val socket = try {
+                    server.accept()
+                } catch (_: IOException) {
+                    break
+                }
+                open += socket
+                executor.execute { serve(socket) }
+            }
+        }, "fake-llm-accept").apply { isDaemon = true }.start()
+    }
+
+    private fun serve(socket: Socket) {
+        var drop = false
+        try {
+            val ex = Exchange.read(socket) ?: return
             try {
                 handle(ex)
             } catch (_: DropConnection) {
                 drop = true
             } catch (_: IOException) {
                 // client went away
-            } finally {
-                if (!drop) runCatching { ex.close() }
             }
-            // Rethrowing makes the JDK server close the socket without a terminating chunk.
-            if (drop) throw DropConnection()
+            if (!drop) runCatching { ex.finish() }
+        } catch (_: IOException) {
+            // malformed request or client went away
+        } catch (_: InterruptedException) {
+            // server closed
+        } finally {
+            // Closing without the terminating chunk is what makes a drop visible to the client.
+            runCatching { socket.close() }
+            open -= socket
         }
-        server.start()
-        baseUrl = "http://127.0.0.1:${server.address.port}"
     }
 
     /** Requests whose latest user message is exactly [prompt] play [script]. */
@@ -132,29 +159,30 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
     }
 
     override fun close() {
-        server.stop(0)
+        runCatching { server.close() }
+        open.forEach { runCatching { it.close() } }
         executor.shutdownNow()
     }
 
     // ------------------------------------------------------------------ handling
 
-    private fun handle(ex: HttpExchange) {
-        val path = ex.requestURI.path
+    private fun handle(ex: Exchange) {
+        val path = ex.path
         val api = when {
             path.startsWith("/anthropic/") -> "anthropic"
             path.startsWith("/openai/") -> "openai"
             else -> null
         }
-        if (api == null || ex.requestMethod != "POST") {
+        if (api == null || ex.method != "POST") {
             ex.sendResponseHeaders(404, -1)
             return
         }
-        val raw = ex.requestBody.readBytes().toString(Charsets.UTF_8)
+        val raw = ex.body.toString(Charsets.UTF_8)
         val body = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrDefault(JsonObject(emptyMap()))
         val presented = if (api == "anthropic") {
-            ex.requestHeaders.getFirst("x-api-key")
+            ex.header("x-api-key")
         } else {
-            ex.requestHeaders.getFirst("authorization")?.removePrefix("Bearer ")?.removePrefix("bearer ")
+            ex.header("authorization")?.removePrefix("Bearer ")?.removePrefix("bearer ")
         }
         val kind = when {
             presented == key -> "real"
@@ -162,7 +190,7 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
             presented.contains("agentos-host-injected") -> "placeholder"
             else -> "other"
         }
-        val rec = Recorded(seq.incrementAndGet(), api, path, kind, ex.requestHeaders.toMap(), body, System.currentTimeMillis())
+        val rec = Recorded(seq.incrementAndGet(), api, path, kind, ex.requestHeaders, body, System.currentTimeMillis())
         log.add(rec)
 
         if (kind != "real") {
@@ -172,7 +200,7 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
         }
         failures.poll()?.let { f ->
             rec.plan = "fail${f.status}"
-            f.retryAfter?.let { ex.responseHeaders.add("retry-after", it) }
+            f.retryAfter?.let { ex.addResponseHeader("retry-after", it) }
             sendJson(ex, rec, f.status, errorBody(api, f.status, "fake ${f.status}"))
             return
         }
@@ -188,7 +216,7 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
     }
 
     /** Streams one assistant message for [steps], or fails like a real provider would. */
-    private fun play(ex: HttpExchange, rec: Recorded, api: String, body: JsonObject, steps: List<FakeStep>) {
+    private fun play(ex: Exchange, rec: Recorded, api: String, body: JsonObject, steps: List<FakeStep>) {
         val firstOutput = steps.indexOfFirst { it is FakeStep.Text || it is FakeStep.Thinking || it is FakeStep.ToolUse }
         val failAt = steps.indexOfFirst { it is FakeStep.Fail }
         if (failAt >= 0 && (firstOutput < 0 || failAt < firstOutput)) {
@@ -199,13 +227,13 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
             }
             if (code != ErrorCode.MODEL_STREAM_INTERRUPTED && code != ErrorCode.MODEL_PROTOCOL) {
                 val status = statusFor(code)
-                if (status == 429) ex.responseHeaders.add("retry-after", "1")
+                if (status == 429) ex.addResponseHeader("retry-after", "1")
                 sendJson(ex, rec, status, errorBody(api, status, "fake ${code.wire}"))
                 return
             }
         }
-        ex.responseHeaders.add("content-type", "text/event-stream")
-        ex.responseHeaders.add("cache-control", "no-cache")
+        ex.addResponseHeader("content-type", "text/event-stream")
+        ex.addResponseHeader("cache-control", "no-cache")
         rec.status = 200
         ex.sendResponseHeaders(200, 0)
         val out = ex.responseBody
@@ -274,11 +302,11 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
         else -> 400
     }
 
-    private fun sendJson(ex: HttpExchange, rec: Recorded, status: Int, text: String) {
+    private fun sendJson(ex: Exchange, rec: Recorded, status: Int, text: String) {
         rec.status = status
         rec.finished = true
         val bytes = text.toByteArray(Charsets.UTF_8)
-        ex.responseHeaders.add("content-type", "application/json")
+        ex.addResponseHeader("content-type", "application/json")
         ex.sendResponseHeaders(status, bytes.size.toLong())
         ex.responseBody.use { it.write(bytes) }
     }
@@ -531,6 +559,155 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
             val cps = text.codePoints().toArray()
             val n = maxOf(1, size)
             return (cps.indices step n).map { i -> String(cps, i, minOf(n, cps.size - i)) }
+        }
+    }
+}
+
+/**
+ * One HTTP/1.1 request on its own connection (`Connection: close`), with the response API of the
+ * JDK's HttpExchange that [FakeModelServer] was written against: [sendResponseHeaders] takes -1
+ * for no body, 0 for a chunked body and n > 0 for a fixed length.
+ */
+private class Exchange private constructor(
+    socket: Socket,
+    val method: String,
+    val path: String,
+    val requestHeaders: Map<String, List<String>>,
+    val body: ByteArray,
+) {
+    private val out = BufferedOutputStream(socket.getOutputStream(), 8192)
+    private val headers = ArrayList<Pair<String, String>>()
+    private var bodyStream: OutputStream? = null
+
+    fun header(name: String): String? = requestHeaders.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.firstOrNull()
+
+    fun addResponseHeader(name: String, value: String) {
+        headers += name to value
+    }
+
+    fun sendResponseHeaders(status: Int, length: Long) {
+        check(bodyStream == null) { "response headers already sent" }
+        val head = StringBuilder("HTTP/1.1 $status ${reason(status)}\r\n")
+        for ((n, v) in headers) head.append(n).append(": ").append(v).append("\r\n")
+        when {
+            length > 0 -> head.append("Content-Length: ").append(length).append("\r\n")
+            length == 0L -> head.append("Transfer-Encoding: chunked\r\n")
+            else -> head.append("Content-Length: 0\r\n")
+        }
+        head.append("Connection: close\r\n\r\n")
+        out.write(head.toString().toByteArray(Charsets.ISO_8859_1))
+        out.flush()
+        bodyStream = if (length == 0L) ChunkedOutputStream(out) else PlainOutputStream(out)
+    }
+
+    val responseBody: OutputStream get() = checkNotNull(bodyStream) { "send the response headers first" }
+
+    /** Completes the response: the terminating chunk for a chunked body, then flush. */
+    fun finish() {
+        if (bodyStream == null) sendResponseHeaders(500, -1)
+        bodyStream?.close()
+        out.flush()
+    }
+
+    private class ChunkedOutputStream(private val out: OutputStream) : OutputStream() {
+        private var closed = false
+        override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            if (closed) throw IOException("stream closed")
+            if (len == 0) return
+            out.write("${Integer.toHexString(len)}\r\n".toByteArray(Charsets.ISO_8859_1))
+            out.write(b, off, len)
+            out.write(CRLF)
+        }
+        override fun flush() = out.flush()
+        override fun close() {
+            if (closed) return
+            closed = true
+            out.write("0\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            out.flush()
+        }
+    }
+
+    /** Fixed-length or empty body: closing only flushes; the socket is closed by the server. */
+    private class PlainOutputStream(private val out: OutputStream) : OutputStream() {
+        override fun write(b: Int) = out.write(b)
+        override fun write(b: ByteArray, off: Int, len: Int) = out.write(b, off, len)
+        override fun flush() = out.flush()
+        override fun close() = out.flush()
+    }
+
+    companion object {
+        private val CRLF = "\r\n".toByteArray(Charsets.ISO_8859_1)
+
+        private fun reason(status: Int): String = when (status) {
+            200 -> "OK"
+            400 -> "Bad Request"
+            401 -> "Unauthorized"
+            402 -> "Payment Required"
+            404 -> "Not Found"
+            408 -> "Request Timeout"
+            413 -> "Payload Too Large"
+            429 -> "Too Many Requests"
+            500 -> "Internal Server Error"
+            503 -> "Service Unavailable"
+            else -> "Status"
+        }
+
+        /** Reads the request line, headers and body; null when the client closed without sending one. */
+        fun read(socket: Socket): Exchange? {
+            val input = BufferedInputStream(socket.getInputStream())
+            val requestLine = readLine(input) ?: return null
+            val parts = requestLine.split(' ')
+            if (parts.size < 3) throw IOException("bad request line")
+            val headers = LinkedHashMap<String, MutableList<String>>()
+            while (true) {
+                val line = readLine(input) ?: throw IOException("connection closed in the request headers")
+                if (line.isEmpty()) break
+                val colon = line.indexOf(':')
+                if (colon <= 0) continue
+                headers.getOrPut(line.substring(0, colon).trim()) { ArrayList() } += line.substring(colon + 1).trim()
+            }
+            fun h(name: String) = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.firstOrNull()
+            val body = if (h("transfer-encoding")?.contains("chunked", ignoreCase = true) == true) {
+                readChunked(input)
+            } else {
+                readExactly(input, h("content-length")?.toIntOrNull() ?: 0)
+            }
+            return Exchange(socket, parts[0], parts[1].substringBefore('?'), headers, body)
+        }
+
+        private fun readLine(input: InputStream): String? {
+            val buf = java.io.ByteArrayOutputStream()
+            while (true) {
+                val c = input.read()
+                if (c == -1) return if (buf.size() == 0) null else buf.toString("ISO-8859-1")
+                if (c == '\n'.code) return buf.toString("ISO-8859-1")
+                if (c != '\r'.code) buf.write(c)
+            }
+        }
+
+        private fun readExactly(input: InputStream, n: Int): ByteArray {
+            val bytes = ByteArray(n)
+            var read = 0
+            while (read < n) {
+                val r = input.read(bytes, read, n - read)
+                if (r < 0) throw IOException("connection closed in the request body")
+                read += r
+            }
+            return bytes
+        }
+
+        private fun readChunked(input: InputStream): ByteArray {
+            val all = java.io.ByteArrayOutputStream()
+            while (true) {
+                val size = readLine(input)?.substringBefore(';')?.trim()?.toIntOrNull(16) ?: throw IOException("bad chunk size")
+                if (size == 0) {
+                    while (!readLine(input).isNullOrEmpty()) Unit // trailers
+                    return all.toByteArray()
+                }
+                all.write(readExactly(input, size))
+                readLine(input)
+            }
         }
     }
 }
