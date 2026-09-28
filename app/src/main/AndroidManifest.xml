@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AgentOS App 的 Manifest。W1 只放最小骨架，后续由各工作包追加：
+  - W6：:agent 进程、AgentService（前台服务 specialUse）、导出的 ACP 服务、IAgentControl
+  - W7：SupervisorStatusReceiver（signature 权限保护）
+  - W14：:ext 进程、IExtensionHost；<queries> 声明插件发现 action
+  - W14 / W21：定义 BIND_MCP_SERVICE、RUN_COMMANDS（signature）
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="AgentOS" />
+
+</manifest>
