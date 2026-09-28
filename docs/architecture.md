@@ -197,7 +197,7 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 | `session/prompt` | M1 | 本轮结束才返回 `stopReason`，不提前返回入队回执 |
 | `session/update` | M1 | 见 5.6 的事件映射 |
 | `session/cancel` | M1 | — |
-| Profile 扩展：自动选择会话 | M1 | 用户不指定会话时，由 Jev 在**调用方自己的**会话里选择，或新建一个；方法名在 W4 冻结 |
+| Profile 扩展：自动选择会话 | M1 | 用户不指定会话时，由 Jev 在**调用方自己的**会话里选择，或新建一个。W4 已冻结：客户端在 `session/new` 的 `_meta."org.agentos".autoSelect` 里带上问题，选中结果经随后的 `session_info_update` 告知（`core/protocol/acp-extensions.schema.json`）。没有做成单独的方法，因为 SDK 只在 `session/new` 里把会话登记到连接上 |
 | `session/load` | M2 | 只能加载调用方自己的会话 |
 | Profile 扩展：持久化提交、增量恢复 | M2 | 按 Profile 的要求，由客户端和服务端协商后启用；方法名和字段在 W10 冻结 |
 | `session/request_permission` | M3a | 见下方“权限规则” |
@@ -252,14 +252,15 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 
 | 内部事件 | 对客户端表现为 |
 |---|---|
-| `message_start` / `message_update` / `message_end` | `session/update` 的 `agent_message_chunk` |
+| `message_start` / `message_update` / `message_end` | `session/update` 的 `agent_message_chunk`；其中的 thinking 内容映射为 `agent_thought_chunk` |
 | `tool_execution_start` | `session/update` 的 `tool_call`（pending） |
+| `tool.dispatched`（宿主层已把调用交给工具提供方） | `session/update` 的 `tool_call_update`（in_progress） |
 | `tool_execution_update` / `tool_execution_end` | `session/update` 的 `tool_call_update`（in_progress / completed / failed） |
 | `agent_end` | `session/prompt` 返回 `stopReason: end_turn` |
 | `task.cancelled` | `session/prompt` 返回 `stopReason: cancelled` |
 | 工具轮次超过上限（`tool_round_limit`） | `session/prompt` 返回 `stopReason: max_turn_requests` |
-| `task.failed` | `session/prompt` 返回 JSON-RPC 错误 |
-| `session.selected` | 仅对协商了“自动选择会话”扩展的客户端，在 `_meta` 中告知选中的会话 |
+| `task.failed`，以及结果未知而暂停的任务 | `session/prompt` 返回 JSON-RPC 错误，统一为 `-32051`，具体原因在 `data.agentosCode`（见 `core/contracts/errors.md`） |
+| `session.selected` | 仅对协商了“自动选择会话”扩展的客户端，经 `session_info_update` 告知选中的会话 |
 | `consent.*`、`hook.*`、`supervisor.*`、扩展的连接状态 | 不对外暴露，只写入事件日志，并在 AgentOS App 的诊断页展示 |
 
 ---
@@ -285,7 +286,8 @@ zip 里没有原生二进制，所以不按 ABI 区分；支持矩阵只列出�
    - AgentOS App 或 Runner 没装，或版本低于 zip 里的版本，就执行 `pm install` 安装或升级；签名不符则停止，并在 root 管理器里显示原因（安装不必等用户解锁，规则见 [spikes/S1.md](spikes/S1.md)）；
    - 再检查一次 API 和 fingerprint，OTA 后版本超出支持范围就进入 safe mode；
    - 等用户 0 解锁（`sys.user.0.ce_available=true`，并兜底查询 `am get-started-user-state 0`）：App 不是 directBootAware，解锁前系统不会启动它的组件；
-   - 用 `am start-foreground-service` 拉起 `:agent` 的 `AgentService` 一次，让运行时执行恢复流程（F8），然后进入判活循环；
+   - App 从没打开过，或被用户强行停止（包处于 stopped 状态）时，开机不拉起运行时，状态报 `stopped / not_launched` 或 `user_stopped`，等用户打开 App 后再由监督进程守护；
+   - 用 `am start-foreground-service` 拉起 `:agent` 的 `AgentService` 一次（原因为 `boot`；模块刚升级了 App 时为 `upgrade`），让运行时执行恢复流程（F8），然后进入判活循环；
    - 向 App 发一条显式广播，报告监督状态（正常、safe mode 及原因）。
 2. **`:agent` 运行时**：
    - 打开 Store，执行恢复流程（F8）；有未完成的任务时进入前台，没有就退出前台，进程交给系统管理；
@@ -343,7 +345,7 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 - 等模型返回：调用该会话 Pi `Agent` 的 `abort`，宿主层关闭对应的 HTTPS 连接；
 - 工具调用中：`abort` 之外，再经 `IExtensionHost` 取消，由 Extension Host 转成 MCP 的取消通知，尽力取消。如果对方已经完成了副作用，照实上报。
 
-这一轮的 `session/prompt` 返回 `stopReason: cancelled`。
+这一轮的 `session/prompt` 返回 `stopReason: cancelled`。`session/cancel` 会等运行中的任务真正停下再返回这一结果，最多等 12 秒。
 
 ### F7 断开与恢复
 
