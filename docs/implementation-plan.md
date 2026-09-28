@@ -71,6 +71,8 @@ agentos-android/
 │   ├── src/main/AndroidManifest.xml                 # 定义 BIND_MCP_SERVICE、RUN_COMMANDS（signature）；导出 ACP 服务（:agent）；<queries> 声明插件发现 action；声明 :agent、:ext 进程
 │   ├── src/main/aidl/org/agentos/internal/          [W6] IAgentControl；[W14] IExtensionHost、IExtensionCallback（都不导出）
 │   ├── src/main/assets/pi-agent.js                  [W3] 由 core/pi-runtime/build.mjs 生成，不手改，不进仓库；同目录的 model-catalog.json 同样是生成物
+│   ├── src/androidTest/                         [W6] 设备测试，跑在 :agent 进程（QuickJsEngine、PiAdapter 契约、冷启动、可选的真实端点）
+│   ├── src/debug/                               [W6] 只在 debug 包生效��测试入口、网络配置
 │   ├── src/main/assets/agent-plugin/                [W17] AgentOS 自带插件（标准 Agent Plugin：plugin.json、skills/）
 │   └── src/main/java/org/agentos/app/
 │       ├── agent/                                   # 运行时进程 :agent
@@ -80,6 +82,7 @@ agentos-android/
 │       │   ├── AcpService.kt                        [W6] 导出的 IAcpService：每条通道绑定调用方 UID，交给 SDK 的 Agent 端；M1 只接受本 App；[W25] 放开第三方
 │       │   ├── AndroidStore.kt                      [W6] SQLite 实现
 │       │   ├── QuickJsEngine.kt                     [W6，B lane] ← agenriod PiRuntime.kt、NativeAgentBridge.kt 的 QuickJS 接线：JsEngine 的 Android 实现，加载 pi-agent.js
+│       │   ├── PiAgentCores.kt                      [W6，B lane] :agent 的 AgentCoreFactory：PiAdapter.factory + QuickJsEngine + hostPort.secrets
 │       │   ├── KeystoreSecrets.kt                   [W6] BYOK，Keystore 加密
 │       │   ├── HostPortImpl.kt                      [W6]；[W16] 工具与确认；[W20] Skill；[W22] Hook
 │       │   ├── AgentControl.kt                      [W6] IAgentControl 的实现
@@ -203,10 +206,10 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 | ACP SDK 的 master 分支 | 不使用 | master 的 Transport API 已经改成 `TransportFrame` / `onFrame`，与 0.30.x 的 `JsonRpcMessage` / `onMessage` 不兼容。升级 SDK 要单独评估，改 `BinderAcpTransport` 并在真机上重跑 S3 |
 | MCP Kotlin SDK | 官方 `io.modelcontextprotocol:kotlin-sdk-client` / `kotlin-sdk-server`，版本在 S5 固定；同时固定它所支持的 MCP 协议修订版 | 撰写时查到的最新版 0.15.0 用 Kotlin 2.4、Ktor 3.5 构建。Kotlin 编译器只能读取比自己高一个小版本的库元数据，所以 S5 要一并决定整个工程的 Kotlin 版本 |
 | Pi Agent core | `@earendil-works/pi-agent-core` 和 `@earendil-works/pi-ai` 固定 0.86.1；`pi-ai` 只打包 `anthropic-messages`、`openai-completions` 两个协议族，连同它们的官方 SDK（S8 时为 `@anthropic-ai/sdk` 0.124.0、`openai` 6.40.0、`typebox` 1.3.27）按 `package-lock.json` 锁定。S8 实测 `pi-agent.js` 压缩后 573 KB（gzip 147 KB），`model-catalog.json` 419 KB（APK 内约 26 KB） | 与 Profile 核对过的 Pi 主线版本一致；原型 agenriod 用 0.85.1 在 QuickJS 里跑通了上游 `Agent` 循环。2026-09 在电脑上用 0.85.1 试打包：只含 Agent 核心约 587 KB，加上 MiniMax、Anthropic、OpenAI、DeepSeek 四个预设约 1.9 MB，其中两个官方 SDK 占约 1.2 MB。Pi 还在 0.x，升级要单独评估，并重跑 S8 和契约测试 |
-| JS 引擎 | QuickJS，Kotlin 绑定 `io.github.dokar3:quickjs-kt` 固定 **1.0.15**（S8）；电脑上用同一个绑定的 JVM 变体 `quickjs-kt-jvm`，另可用 Node 的裸 `vm` 上下文跑快速契约测试 | 体积小，不需要 Node。1.0.15 用 Kotlin 2.4.10 构建，要求 Kotlin 编译器 ≥ 2.3；最后一个能配 Kotlin 2.2 的 1.0.5 遇到中文 + emoji 会挂住，不可用。`quickjs-kt-jvm` 只在 macOS arm64 上验证过，Linux x64 待 CI 跑一次 |
+| JS 引擎 | QuickJS，Kotlin 绑定 `io.github.dokar3:quickjs-kt` 固定 **1.0.15**（S8）；App 只打 `arm64-v8a` 的原生库（真机与本机 arm64 模拟器够用，需要 x86_64 模拟器时再加）；电脑上用同一个绑定的 JVM 变体 `quickjs-kt-jvm`，另可用 Node 的裸 `vm` 上下文跑快速契约测试 | 体积小，不需要 Node。1.0.15 用 Kotlin 2.4.10 构建，要求 Kotlin 编译器 ≥ 2.3；最后一个能配 Kotlin 2.2 的 1.0.5 遇到中文 + emoji 会挂住，不可用。`quickjs-kt-jvm` 只在 macOS arm64 上验证过，Linux x64 待 CI 跑一次 |
 | JS 打包 | esbuild；Node 只在构建机上使用 | 原型的 `build.mjs` 已经能把 Pi 打成 QuickJS 可以执行的单文件 |
 | Android 工具链 | AGP 8.10.1、**Kotlin 2.3.20**、JDK 21、Gradle wrapper 8.14.5；字节码目标 17；`compileSdk` / `targetSdk` 36，`minSdk` 35 | Kotlin 于 2026-09-29 整合时由 2.2.20 升到 2.3.20，因为 quickjs-kt 1.0.15 需要 ≥ 2.3（S8 结论 d）；升级后主工程全量构建通过，并在 Pixel_8a 模拟器上重跑了 S3 的 debug 和 R8 release 场景（S3.md）。最终版本随 S5 定：MCP SDK 用 Kotlin 2.4 构建，升到 2.4 时一并评估 AGP（AGP 8.10.1 的 R8 读 2.4 元数据有警告）。Android Studio 自带的 JBR 是 25，Gradle 8.14 跑不了，Gradle JDK 必须设成 21；AGP 8.10.1 会触发 Gradle 的 “null attribute key” 弃用警告，Gradle 10 会变成错误 |
-| 其他 Kotlin / Java 库 | kotlinx-coroutines 1.9.0、kotlinx-serialization-json 1.7.3（与 `acp-jvm-0.30.1.pom` 对齐）；OkHttp 4.12.0；JUnit 4.13.2 | 避免解析出两套版本。S8 的实验工程用的是 coroutines 1.10.2，W3 引入 quickjs-kt 时核对它带入的 coroutines 版本，需要升级就整体升级并重跑 S3 用例 |
+| 其他 Kotlin / Java 库 | kotlinx-coroutines **1.11.0**、kotlinx-serialization-json 1.7.3；OkHttp 4.12.0；JUnit 4.13.2；androidx.test runner 1.5.2 / ext-junit 1.1.5（设备测试） | coroutines 于 2026-09-29 由 1.9.0（acp-jvm-0.30.1.pom 的版本）升到 1.11.0：quickjs-kt 1.0.15 需要 ≥ 1.11.0，不显式升级时测试类路径会被悄悄解析成 1.11.0、主代码仍是 1.9.0；acp 0.30.1 在 1.11.0 上已用 tests/device/acp-channel 回归验证。有 quickjs-kt 的类路径上 kotlin-stdlib 解析为 2.4.10（编译器仍是 2.3.20） |
 | 支持的系统 | Android 15–17（API 35–37） | Android 17 已正式发布；真机验证覆盖这三个版本 |
 | 传输 | Android 上的 ACP 和 MCP 都走 `binder-channel-v1`；SDK 的 `StdioTransport` 只用于电脑上的测试 | 两种协议都是 JSON-RPC 消息流，共用一套通道 |
 | HTTP | 宿主层的网络出口（给 Pi 用的 `fetch`）用 OkHttp；MCP 远端客户端用 Ktor 加 OkHttp 引擎，不用 Ktor 的 Android 引擎 | 共用一套连接池和证书配置；HTTP 引擎版本在 S5 与 MCP SDK 一起固定 |
@@ -350,14 +353,14 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
   - broker 拒绝不在目录里的工具
 
 #### W3 Pi Agent core 接入
-- [ ] `core/pi-runtime/`：固定 `pi-agent-core`、`pi-ai` 0.86.1；迁移 agenriod 的入口和 polyfill，删掉原型自带的文件工具；用 esbuild 打成 `pi-agent.js`
-- [ ] `JsEngine` 抽象，以及电脑上的实现（按 S8 的结论）
-- [ ] `PiAdapter`：会话与 `Agent` 实例的对应、保存和恢复 messages、`abort`、工具轮次上限（12 轮）；`beforeToolCall` / `afterToolCall` 接到 Broker
-- [ ] `PiEventMapper`：Pi 的生命周期事件 → 内部事件（与 `core/contracts/events.md` 一致）
-- [ ] `HostFetch`：给 Pi 用的流式 `fetch`，按 endpoint 注入 key；错误分为可重试和不可重试（与 `core/contracts/errors.md` 一致）
-- [ ] 模型接入按混合方案：只打包 `anthropic-messages`、`openai-completions`；`src/node-stubs/` 替换 Node 内置模块；调用 `pi-ai` 时传入 `HostFetch`、占位 key 和 `maxRetries: 0`（S8 不通过时改为宿主层实现这两个协议族 + 自定义 `streamFn`）
-- [ ] 厂商预设：`build.mjs` 从 `pi-ai` 的模型目录导出 `model-catalog.json`，MiniMax 国际 / 国内排第一；自定义兼容端点按协议族生成 Pi 的模型配置
-- [ ] 测试：假模型端点编排 `tool_use`；工具轮次上限；`abort`；恢复后上下文一致；JS 里拿不到 key；`pi-ai` 和 SDK 不自己重试
+- [x] `core/pi-runtime/`：固定 `pi-agent-core`、`pi-ai` 0.86.1；迁移 agenriod 的入口和 polyfill，删掉原型自带的文件工具；用 esbuild 打成 `pi-agent.js`
+- [x] `JsEngine` 抽象，以及电脑上的实现（按 S8 的结论）
+- [x] `PiAdapter`：会话与 `Agent` 实例的对应、保存和恢复 messages、`abort`、工具轮次上限（12 轮）；`beforeToolCall` / `afterToolCall` 接到 Broker
+- [x] `PiEventMapper`：Pi 的生命周期事件 → 内部事件（与 `core/contracts/events.md` 一致）
+- [x] `HostFetch`：给 Pi 用的流式 `fetch`，按 endpoint 注入 key；错误分为可重试和不可重试（与 `core/contracts/errors.md` 一致）
+- [x] 模型接入按混合方案：只打包 `anthropic-messages`、`openai-completions`；`src/node-stubs/` 替换 Node 内置模块；调用 `pi-ai` 时传入 `HostFetch`、占位 key 和 `maxRetries: 0`（S8 不通过时改为宿主层实现这两个协议族 + 自定义 `streamFn`）
+- [x] 厂商预设：`build.mjs` 从 `pi-ai` 的模型目录导出 `model-catalog.json`，MiniMax 国际 / 国内排第一；自定义兼容端点按协议族生成 Pi 的模型配置
+- [x] 测试：假模型端点编排 `tool_use`；工具轮次上限；`abort`；恢复后上下文一致；JS 里拿不到 key；`pi-ai` 和 SDK 不自己重试
 
 #### W4 ACP Agent 端
 - [x] 把 `../agentos-acp-profile-v1.md` 迁入 `core/protocol/acp-profile-v1.md`，注明 Profile 中的 `sideagentd` 在本项目里对应 `:agent` 运行时，Pi 的接入用 `pi-agent-core` 而不是 `pi-coding-agent`
@@ -378,10 +381,11 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 #### W6 `:agent` 进程接线
 - [x] `AgentService`：有任务时前台（`specialUse`），没有任务时退出前台；写心跳文件（骨架，C2）
 - [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
-- [ ] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接
-- [ ] `AndroidStore`、`KeystoreSecrets`、`HostPortImpl`、`IAgentControl`（`IAgentControl` v1 已有：版本、运行状态、诊断、监督状态；BYOK 与确认在末尾追加）
-- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app`，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件；API 35 / 36 / 37 与 Pixel_8a 均 15/15）
-- [ ] 换成真的 `AgentRuntime`（A3）和 Pi（B2 的 PiAdapter + QuickJsEngine）
+- [x] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接（B3；字节码缓存在 `codeCacheDir/pi`，key 为 bundle SHA-256 + quickjs-kt 版本 + ABI + 协议版本，读取时校验；`:agent` 进程里首启中位 72 ms、字节码 12 ms；Pixel_8a 上 `:agent` 进程内经国内 key 的真实端点对话、工具调用、abort 通过）
+- [x] `AndroidStore`（BundledSQLiteDriver，CE 目录 `databases/agentos-runtime.db`）、`KeystoreSecrets`（只实现 `SecretPort`）、`HostPortImpl`（工具、Skill、Hook、确认暂为“未开放”实现）、`IAgentControl` v2（BYOK）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 20 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除；API 35 / 36 / 37 与 Pixel_8a 均 20/20，logcat 与私有文件里搜不到 key）
+- [x] 换成真的 `AgentRuntime`（A3 的 `RuntimeEngine`，C3）；空闲后前台服务保留 2 s 宽限期
+- [ ] Agent 核心换成 Pi（PiAdapter + QuickJsEngine，等 B3；此前用 `ScriptedAgentCore` 占位）
 
 #### W7 模块与打包
 - [x] `customize.sh`、`uninstall.sh`、`module.prop.template`、`support-matrix.yaml`（KernelSU 最低版本暂不检查，W27 定）

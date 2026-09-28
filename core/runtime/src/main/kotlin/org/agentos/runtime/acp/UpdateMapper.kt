@@ -19,7 +19,7 @@ import org.agentos.runtime.events.EventEnvelope
 import org.agentos.runtime.events.EventTypes
 
 /**
- * 内部事件 → ACP `session/update`（core/protocol/acp-mapping.md 第 3 节）。一个实例对应一轮 prompt。
+ * 内部事件 → ACP `session/update`（core/protocol/acp-mapping.md 第 6 节）。一个实例对应一轮 prompt。
  *
  * - 文字 / thinking 增量已由宿主层按 32 ms 合并（events.md 6.3）；这里再按 [maxChunkChars] 切分，保证一条 JSON-RPC 消息
  *   即使在最坏的 JSON 转义（每个字符 6 倍）下也不超过 binder-channel-v1 的单条上限 65,536 字符。

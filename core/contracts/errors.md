@@ -43,7 +43,7 @@
 |---|---|---|---|
 | `invalid_params` | 否 | -32602 | 参数不合法（缺字段、类型不对、内容为空） |
 | `unsupported` | 否 | -32602 | 请求了不支持的能力，例如 `session/new` 的 `mcpServers` 非空（Profile：明确拒绝，不静默忽略） |
-| `auth_required` | 否 | -32000 | 需要认证：电脑端还没有提交有效的配对码（W9） |
+| `auth_required` | 否 | -32000 | 需要认证：电脑端还没有提交有效的配对码或令牌（W9；在 ACP 之前的配对握手里返回，`details.reason` 见 core/protocol/acp-mapping.md 第 10 节，随后关闭连接） |
 | `not_open` | 否 | -32040 | 这类调用方还没有开放：M1–M3 期间第三方 App 的 ACP 通道（architecture 5.3） |
 | `forbidden` | 否 | -32041 | 调用方无权操作（授权被撤销、访问别人的会话时一律按“不存在”处理，见下） |
 | `session_not_found` | 否 | -32002 | 会话不存在，或不属于调用方（不泄露其存在） |

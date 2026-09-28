@@ -2,10 +2,11 @@
   "name": "@agentos/acp-conformance",
   "version": "0.1.0",
   "private": true,
-  "description": "ACP conformance tests: the official TypeScript ACP client against the AgentOS runtime (stdio on the desktop; adb forward in W9).",
+  "description": "ACP conformance tests: the official TypeScript ACP client against the AgentOS runtime (stdio and the desktop gateway on the computer; the phone over adb forward).",
   "type": "module",
   "scripts": {
-    "test": "node --test --test-concurrency=1 \"test/*.test.mjs\""
+    "test": "node --test --test-concurrency=1 \"test/*.test.mjs\"",
+    "test:device": "node --test --test-concurrency=1 test/device.test.mjs test/gateway.test.mjs"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.4.0"

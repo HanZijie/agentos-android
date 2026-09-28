@@ -16,14 +16,48 @@ import org.agentos.runtime.net.RetryPolicy
 import org.agentos.runtime.ports.Credential
 import org.agentos.runtime.pi.desktop.QuickJsJvmEngine
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
 
-/** The generated bundle and catalog, or null when `node build.mjs` has not been run. */
+/**
+ * The generated bundle and catalog, or null when `node build.mjs` has not been run.
+ *
+ * A bundle built from other sources than the current core/pi-runtime fails loudly instead of
+ * producing confusing test failures (for example `Unknown op` after a protocol change): the
+ * banner's `source=` hash must match [currentSourceHash]. The Gradle test task normally rebuilds
+ * it first (`:app:bundlePiAgent`); the check covers `-Pagentos.skipPiBundle=true` and IDE runs.
+ */
 object PiAssets {
     val dir: File = File(System.getProperty("agentos.piAssetsDir").orEmpty())
-    val bundle: PiBundle? get() = File(dir, "pi-agent.js").takeIf { it.isFile }?.let { PiBundle(it.readText()) }
+    private val runtimeDir: File? = System.getProperty("agentos.piRuntimeDir")?.let(::File)?.takeIf { File(it, "build.mjs").isFile }
+
+    val bundle: PiBundle?
+        get() {
+            val source = File(dir, "pi-agent.js").takeIf { it.isFile }?.readText() ?: return null
+            val expected = runtimeDir?.let(::currentSourceHash) ?: return PiBundle(source)
+            val embedded = SOURCE_HASH.find(source.take(2_000))?.groupValues?.get(1)
+            check(embedded == expected) {
+                "stale ${File(dir, "pi-agent.js")}: built from source ${embedded ?: "(unknown)"}, core/pi-runtime is now $expected; " +
+                    "run `node build.mjs` in core/pi-runtime (or ./gradlew :app:bundlePiAgent)"
+            }
+            return PiBundle(source)
+        }
     val catalog: ModelCatalog? get() = File(dir, "model-catalog.json").takeIf { it.isFile }?.let { ModelCatalog.parse(it.readText()) }
     const val MISSING = "no pi-agent.js: run `npm ci && node build.mjs` in core/pi-runtime"
+
+    private val SOURCE_HASH = Regex("""\bsource=([0-9a-f]{64})\b""")
+
+    /** Same rule as sourceHash() in core/pi-runtime/build.mjs. */
+    fun currentSourceHash(runtimeDir: File): String {
+        val files = listOf("build.mjs", "package.json", "package-lock.json") +
+            File(runtimeDir, "src").walkTopDown().filter { it.isFile }.map { it.relativeTo(runtimeDir).invariantSeparatorsPath }
+        val digest = MessageDigest.getInstance("SHA-256")
+        for (rel in files.sorted()) {
+            val fileHash = MessageDigest.getInstance("SHA-256").digest(File(runtimeDir, rel).readBytes()).joinToString("") { "%02x".format(it) }
+            digest.update("$rel\u0000$fileHash\n".toByteArray(Charsets.UTF_8))
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 }
 
 /**
@@ -43,6 +77,8 @@ class PiHarness(
     val events = CopyOnWriteArrayList<Ev>()
     val hostCalls = CopyOnWriteArrayList<Pair<String, JsonObject>>()
     val cancelledTools = CopyOnWriteArrayList<String>()
+    /** Tool call ids whose host execution has begun (JS has registered its abort listener by then). */
+    val startedTools = CopyOnWriteArrayList<String>()
     val outcomes = CopyOnWriteArrayList<ModelRequestOutcome>()
     val keyLeaks = CopyOnWriteArrayList<String>()
     val fetch = HostFetch(BaseUrlCredentials(keys.map { (base, key) -> BaseUrlCredentials.Entry(base, Credential(key)) }), retry = retry)
@@ -77,6 +113,7 @@ class PiHarness(
     // PiHost
     override suspend fun executeTool(sid: String, toolCallId: String, name: String, args: JsonElement): JsonObject {
         hostCalls += "tool" to buildJsonObject { put("name", name) }
+        startedTools += toolCallId
         val a = args.jsonObject
         return when (name) {
             "add" -> textResult((a["a"]!!.jsonPrimitive.long + a["b"]!!.jsonPrimitive.long).toString())

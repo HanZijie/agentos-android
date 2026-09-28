@@ -142,6 +142,42 @@
         "taskId": { "type": "string" },
         "details": { "type": "object" }
       }
+    },
+
+    "desktopPairParams": {
+      "description": "电脑端接入（W9，acp-mapping.md 第 10 节）：连接 :agent 的抽象 socket agentos-acp 之后，客户端发的第一行必须是方法 `_org.agentos/pair` 的 JSON-RPC 请求，params 为本对象。握手成功之前服务端不处理任何 ACP 消息。code 与 token 二选一。",
+      "type": "object",
+      "properties": {
+        "version": { "const": 1, "description": "握手版本；缺省按 1。" },
+        "code": { "type": "string", "pattern": "^[0-9 -]+$", "description": "手机上显示的一次性配对码（6 位数字，5 分钟有效，输错 5 次作废；空格和 - 忽略）。" },
+        "token": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "用配对码配对时拿到的令牌（32 字节 base64url，无填充）。" },
+        "label": { "type": "string", "maxLength": 64, "description": "电脑端自报的名字，只在设置页用来区分配对，不作身份。" }
+      },
+      "oneOf": [
+        { "required": ["code"], "not": { "required": ["token"] } },
+        { "required": ["token"], "not": { "required": ["code"] } }
+      ]
+    },
+
+    "desktopPairResult": {
+      "description": "`_org.agentos/pair` 成功的 result。之后同一条连接上是普通的 ACP（从 initialize 开始）。",
+      "type": "object",
+      "required": ["version", "pairingId", "maxLineChars"],
+      "properties": {
+        "version": { "const": 1 },
+        "pairingId": { "type": "string", "pattern": "^dp_[0-9a-f]{12}$" },
+        "token": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "只在用配对码配对时出现，且只出现这一次；电脑端保存，之后的连接用它代替配对码。" },
+        "maxLineChars": { "const": 65536, "description": "单行（一条 JSON-RPC 消息）上限，按 UTF-16 码元计，不含换行符。" }
+      }
+    },
+
+    "desktopPairErrorDetails": {
+      "description": "`_org.agentos/pair` 失败时 error.data.details（error.code = -32000，data.agentosCode = auth_required）；回复之后服务端关闭连接。",
+      "type": "object",
+      "required": ["reason"],
+      "properties": {
+        "reason": { "enum": ["pairing_required", "invalid_code", "code_expired", "too_many_attempts", "invalid_token", "disabled"] }
+      }
     }
   },
 
