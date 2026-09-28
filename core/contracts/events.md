@@ -121,7 +121,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 | `task.queued` | `{ input, caller: { uid, kind }, position }`；`input` 是 ACP 的 ContentBlock 数组（按第 5 节截断） | — | W2 |
 | `task.started` | `{ attempt }`：第几次执行，从 1 开始 | — | W2 |
 | `task.completed` | `{ stopReason, usage? }`；`stopReason`：`end_turn` / `max_tokens` / `max_turn_requests` / `refusal` | — | W2 |
-| `task.cancel_requested` | `{ by, phase }`；`by`：`client` / `timeout` / `system`；`phase`：`queued` / `model` / `tool` | — | W2、W4 |
+| `task.cancel_requested` | `{ by, phase }`；`by`：`client` / `timeout` / `system` / `user_stop`；`phase`：`queued` / `model` / `tool` | — | W2、W4 |
 | `task.cancelled` | `{ phase, unknownToolCalls }`：取消时已发出、没拿到结果的工具调用 | — | W2 |
 | `task.failed` | `{ attempt, attemptState }`；`attemptState`：`not_started` / `failed` / `unknown` | 有 | W2 |
 | `task.recovery_required` | `{ attempt, reason, unknownToolCalls: [{ toolCallId, name }] }`；`reason`：`runtime_restarted` / `agent_core_failed` / `cancel_grace_exceeded` | — | W2 recovery |
@@ -147,7 +147,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 | eventType | payload | error | 产生者 |
 |---|---|---|---|
 | `runtime.started` | `{ version, schemaVersion }` | — | W2 |
-| `runtime.recovered` | `{ requeued, recoveryRequired, interrupted }`：启动恢复流程（F8）的结果——重新排队的任务数、等恢复决定的任务数、这次启动围栏掉的执行数 | — | W2 recovery |
+| `runtime.recovered` | `{ requeued, recoveryRequired, interrupted, userStopped, cancelled }`：启动恢复流程（F8）的结果——重新排队的任务数、等恢复决定的任务数、这次启动围栏掉的执行数、上一个进程是否被用户主动停止、因此取消的排队任务数 | — | W2 recovery |
 | `agent_core.failed` | `{ runningTasks }`：泵故障（S8），按运行时崩溃处理 | 有 | W2 |
 | `agent_core.restarted` | `{}`：新的 Agent core 实例已启动；各会话在下次用到时按 Store 里的 messages 重建 | — | W2 |
 | `supervisor.status` | `{ state, reason? }`：root 监督进程的状态广播（S2 契约） | — | W7、W11 |
