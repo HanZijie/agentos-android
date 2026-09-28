@@ -147,9 +147,9 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 | eventType | payload | error | 产生者 |
 |---|---|---|---|
 | `runtime.started` | `{ version, schemaVersion }` | — | W2 |
-| `runtime.recovered` | `{ requeued, recoveryRequired, sessionsRestored }`：启动恢复流程（F8）的结果 | — | W2 recovery |
+| `runtime.recovered` | `{ requeued, recoveryRequired, interrupted }`：启动恢复流程（F8）的结果——重新排队的任务数、等恢复决定的任务数、这次启动围栏掉的执行数 | — | W2 recovery |
 | `agent_core.failed` | `{ runningTasks }`：泵故障（S8），按运行时崩溃处理 | 有 | W2 |
-| `agent_core.restarted` | `{ sessionsRestored }` | — | W2 |
+| `agent_core.restarted` | `{}`：新的 Agent core 实例已启动；各会话在下次用到时按 Store 里的 messages 重建 | — | W2 |
 | `supervisor.status` | `{ state, reason? }`：root 监督进程的状态广播（S2 契约） | — | W7、W11 |
 | `extension.status` | `{ component, state, detail? }`：Extension Host、插件连接等 | — | W14 |
 

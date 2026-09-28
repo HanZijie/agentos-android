@@ -12,7 +12,7 @@ PKG=org.agentos.spike.s1
 setup() { # name
     NAME=$1
     T=$(mktemp -d "${TMPDIR:-/tmp}/agentos-s1-test.XXXXXX")
-    mkdir -p "$T/bin" "$T/proc" "$T/mod/app" "$T/state"
+    mkdir -p "$T/bin" "$T/proc" "$T/mod/app" "$T/state" "$T/tmp"
     echo "100.00 0" >"$T/proc/uptime"
     : >"$T/pm.calls"
     cat >"$T/bin/pm" <<'EOF'
@@ -32,6 +32,7 @@ install)
     src=; stdin=0
     while [ $# -gt 0 ]; do case $1 in -r) ;; -S) stdin=1; shift ;; *) src=$1 ;; esac; shift; done
     case $src in *"/mod/"*) if [ "${PATH_DENIED:-0}" = 1 ]; then echo "Error: Unable to open file: $src"; echo "Consider using a file under /data/local/tmp/"; exit 1; fi ;; esac
+    case $src in *"/tmp/agentos-install-"*) if [ "${TMP_DENIED:-0}" = 1 ]; then echo "Error: Unable to open file: $src"; exit 1; fi ;; esac
     [ $stdin = 1 ] && cat >/dev/null
     if [ "${SIG_MISMATCH:-0}" = 1 ]; then
         echo "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package $NEWPKG signatures do not match newer version; ignoring!]"
@@ -63,7 +64,7 @@ apk() { # versionCode [corrupt]
 
 run() { # -> RC, OUTPUT (RESULT line)
     set +e
-    OUTPUT=$(PATH="$T/bin:$PATH" MODDIR="$T/mod" S1_STATE="$T/state" AGENTOS_PROCFS="$T/proc" "$SH" -c \
+    OUTPUT=$(PATH="$T/bin:$PATH" MODDIR="$T/mod" S1_STATE="$T/state" S1_TMPDIR="$T/tmp" AGENTOS_PROCFS="$T/proc" "$SH" -c \
         '. "$0"; S1_METHOD=${METHOD:-auto}; process_all; rc=$?; echo "RESULT=$RESULT"; exit $rc' "$LIB" 2>&1)
     RC=$?
     set -e
@@ -82,8 +83,9 @@ has() { case $OUTPUT in *"$1"*) return 0 ;; esac; return 1; }
 installs() { grep -c "^pm install" "$T/pm.calls" || true; }
 
 setup fresh; apk 1; run
-check "fresh install succeeds via path" has "install 成功：v1（方式 path"
+check "fresh install succeeds via a copy in the tmp dir (first in the default order)" has "install 成功：v1（方式 tmp"
 check "rc 0" [ $RC = 0 ]
+check "tmp copy cleaned up" [ -z "$(ls "$T/tmp")" ]
 
 setup same; apk 1; echo "$PKG 1" >"$T/installed"; run
 check "same version is skipped" has "已是 v1"
@@ -102,8 +104,11 @@ check "rc 1" [ $RC = 1 ]
 check "no retry with other methods" [ "$(installs)" = 1 ]
 check "installed App left alone" grep -q "^$PKG 1$" "$T/installed"
 
-setup path_denied; apk 1; echo PATH_DENIED=1 >>"$T/knobs"; run
-check "falls back to /data/local/tmp copy" has "install 成功：v1（方式 tmp"
+setup tmp_denied; apk 1; echo TMP_DENIED=1 >>"$T/knobs"; run
+check "falls back to a pipe when the tmp copy is refused" has "install 成功：v1（方式 pipe"
+
+setup path_method; apk 1; METHOD=path run
+check "path method works when readable" has "方式 path"
 
 setup stdin_method; apk 1; METHOD=stdin run
 check "stdin method works" has "方式 stdin"
