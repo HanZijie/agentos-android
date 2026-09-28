@@ -82,6 +82,9 @@ class AgentProcess private constructor(val app: Context) {
 
     val acp = AcpConnections(this)
 
+    /** 电脑端接入（W9，A lane 的 DesktopGateway.kt）：开关默认关闭，打开后监听抽象 socket agentos-acp。 */
+    val desktop = DesktopGateway(this)
+
     init {
         AcpAndroid.ensureInitialized()
         installCrashHandler()
@@ -230,6 +233,7 @@ class AgentProcess private constructor(val app: Context) {
                 .put("writes", heartbeat.writes)
                 .put("lastError", heartbeat.lastError ?: JSONObject.NULL))
             .put("acp", acp.stats())
+            .put("desktop", desktop.stats())
     }
 
     companion object {
