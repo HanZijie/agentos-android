@@ -7,13 +7,13 @@
 // 不支持的输入、自动选会话扩展，以及线上格式（每行一条 JSON-RPC、没有多余字段、单行不超过 65,536 字符）。
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { directive, PROTOCOL_VERSION, startAgent, targets, textOf, until } from "./agent.mjs";
+import { agentCore, directive, PROTOCOL_VERSION, startAgent, targets, textOf, until } from "./agent.mjs";
 
 const META = "org.agentos";
 const TASK_FAILED = -32051;
 
 for (const target of targets()) {
-  describe(`AgentOS runtime over ${target} (fake agent core)`, () => {
+  describe(`AgentOS runtime over ${target} (${agentCore} agent core)`, () => {
     let agent;
     let init;
 
@@ -81,7 +81,9 @@ for (const target of targets()) {
       assert.equal(r.stopReason, "end_turn", "a rejected tool does not fail the turn");
       const updates = agent.updatesFor(sessionId).filter((u) => u.sessionUpdate === "tool_call_update");
       assert.deepEqual(updates.map((u) => u.status), ["failed"], "never dispatched, so never in_progress");
-      assert.match(updates[0].content[0].content.text, /^\[agentos:tool_not_in_catalog\]/);
+      // FakeAgentCore 把目录外的调用交给宿主层（Broker 拒绝：[agentos:tool_not_in_catalog]）；真实 Pi 对没有声明过的工具
+      // 不调 beforeToolCall，自己返回 "Tool <name> not found"。两者都没有执行它
+      assert.match(updates[0].content[0].content.text, /^\[agentos:tool_not_in_catalog\]|^Tool rm_rf not found$/);
     });
 
     test("a write tool is confirmed by AgentOS (not by the client) and runs", async () => {
@@ -105,7 +107,8 @@ for (const target of targets()) {
       assert.ok(Date.now() - t0 < 5_000, "cancel took too long");
       const next = await agent.connection.prompt({ sessionId, prompt: [{ type: "text", text: "again" }] });
       assert.equal(next.stopReason, "end_turn");
-      assert.ok(textOf(agent.updatesFor(sessionId)).endsWith("echo: again"));
+      // 回显的格式因 core 而异（FakeAgentCore："echo: again"；假模型端点："echo:again n=…"）
+      assert.match(textOf(agent.updatesFor(sessionId)), /echo: ?again/);
     });
 
     test("a failed turn is a JSON-RPC error carrying the AgentOS error code", async () => {
@@ -182,7 +185,7 @@ for (const target of targets()) {
     });
   });
 
-  describe(`session auto-select extension (${target})`, () => {
+  describe(`session auto-select extension (${target}, ${agentCore} agent core)`, () => {
     test("is refused unless negotiated in initialize", async () => {
       const agent = await startAgent({ target });
       try {

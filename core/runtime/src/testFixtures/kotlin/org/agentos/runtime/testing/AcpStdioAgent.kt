@@ -15,6 +15,15 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import org.agentos.runtime.RuntimeConfig
+import org.agentos.runtime.net.BaseUrlCredentials
+import org.agentos.runtime.pi.ModelCatalog
+import org.agentos.runtime.pi.PiAdapter
+import org.agentos.runtime.pi.PiBundle
+import org.agentos.runtime.pi.desktop.QuickJsJvmEngine
+import org.agentos.runtime.pi.testing.FakeModelServer
+import org.agentos.runtime.ports.AgentCoreFactory
+import org.agentos.runtime.ports.Credential
+import org.agentos.runtime.ports.ModelSpec
 import org.agentos.runtime.acp.BoundedLineReader
 import org.agentos.runtime.acp.LineTransport
 import org.agentos.runtime.desktop.DesktopGatewayConfig
@@ -39,9 +48,13 @@ import kotlin.system.exitProcess
 /**
  * 电脑上的 ACP Agent 进程，给 tests/acp-conformance（官方 TypeScript 客户端）和 tools/acp-bridge 的测试用。
  *
- * 宿主层是完整的 [org.agentos.runtime.RuntimeEngine]（真实 SQLite、调度、Broker、ACP Agent 端）；
- * Agent 循环 `--core=fake`（默认）是 FakeAgentCore，prompt 里的 JSON 指令决定剧本（[FakeScripts.directives]）。
- * B lane 的 PiAdapter 进 main 后加 `--core=pi`（真实 Pi + 假模型端点）。
+ * 宿主层是完整的 [org.agentos.runtime.RuntimeEngine]（真实 SQLite、调度、Broker、ACP Agent 端）。Agent 循环：
+ * - `--core=fake`（默认）：FakeAgentCore，prompt 里的 JSON 指令决定剧本（[FakeScripts.directives]）；
+ * - `--core=pi`：真实的 Pi Agent core（B lane 的 PiAdapter + 打包好的 pi-agent.js，跑在电脑上的 QuickJS 里），
+ *   模型是同一进程里的假模型端点（FakeModelServer）：它按同样的 `{"fake":…}` 指令回应，所以同一组用例两种 core 都能跑。
+ *   `--pi-assets=<目录>`：pi-agent.js 和 model-catalog.json 所在目录（默认 `agentos.piAssetsDir` 系统属性，
+ *   再找当前目录往上的 app/src/main/assets；先在 core/pi-runtime 里 `npm ci && node build.mjs`）；
+ *   `--pi-api=anthropic`（默认，MiniMax 预设的 Anthropic Messages 协议族）或 `openai`（OpenAI Chat Completions 自定义端点）。
  *
  * 两种模式：
  * - **stdio**（默认）：stdin / stdout 按行收发 JSON-RPC，传输是 [LineTransport]（与手机上的电脑端网关相同的传输，
@@ -65,7 +78,7 @@ fun main(args: Array<String>) {
     if (System.getProperty("kotlin-logging-to-jul") == null) System.setProperty("kotlin-logging-to-jul", "true")
     fun arg(name: String) = args.firstOrNull { it.startsWith("--$name=") }?.substringAfter("=")
     val core = arg("core") ?: "fake"
-    require(core == "fake") { "--core=$core is not available yet (the Pi adapter lands with B2)" }
+    require(core == "fake" || core == "pi") { "--core must be fake or pi" }
     val dbDir = arg("db")?.let(::File) ?: Files.createTempDirectory("agentos-acp").toFile()
     val jev = if (arg("jev") == "first") JevProvider { req -> req.choices.first().id } else null
     val consent = arg("consent") ?: "allow"
@@ -75,11 +88,16 @@ fun main(args: Array<String>) {
     val out = System.out
     System.setOut(PrintStream(System.err, true))
 
+    val pi = if (core == "pi") DesktopPiCore(piAssetsDir(arg("pi-assets")), arg("pi-api") ?: "anthropic") else null
+
     runBlocking {
+        val databaseFile = File(dbDir, "agent.db")
         val rt = TestRuntime(
             FakeScripts.directives(),
-            databaseFile = File(dbDir, "agent.db"),
+            databaseFile = databaseFile,
+            host = if (pi != null) FakeHostPort(databaseFile = databaseFile, model = pi.model) else FakeHostPort(databaseFile = databaseFile),
             config = RuntimeConfig(scheduler = SchedulerConfig(), jev = jev),
+            coreFactory = pi?.factory,
         )
         if (consent == "deny") rt.host.consent.answer = { ConsentDecision.Deny(ConsentDecision.DenyReason.USER) }
         rt.host.tools.registerSimple("add") { a ->
@@ -110,7 +128,46 @@ fun main(args: Array<String>) {
         }
         rt.stop()
     }
+    pi?.close()
     exitProcess(0)
+}
+
+/**
+ * `--core=pi`：PiAdapter + 电脑上的 QuickJS（quickjs-kt-jvm，与 Android 同一个绑定）+ 进程内的假模型端点。
+ * 模型请求只发往回环地址上的 FakeModelServer，key 是它自己的测试值。
+ */
+private class DesktopPiCore(assets: File, api: String) : AutoCloseable {
+    val server = FakeModelServer()
+    private val bundleSource = File(assets, "pi-agent.js").readText()
+    private val catalog = ModelCatalog.parse(File(assets, "model-catalog.json").readText())
+
+    val model: ModelSpec = when (api) {
+        "anthropic" -> ModelSpec(JsonObject(catalog.model("minimax", "MiniMax-M2.7")!!.json + ("baseUrl" to JsonPrimitive(server.anthropicBaseUrl))))
+        "openai" -> catalog.customModel("openai-completions", "fake-chat", server.openaiBaseUrl).toModelSpec()
+        else -> throw IllegalArgumentException("--pi-api must be anthropic or openai")
+    }
+
+    val factory: AgentCoreFactory = PiAdapter.factory(
+        bundle = { PiBundle(bundleSource) },
+        engineFactory = QuickJsJvmEngine.factory,
+        secrets = BaseUrlCredentials(
+            listOf(
+                BaseUrlCredentials.Entry(server.anthropicBaseUrl, Credential(server.key)),
+                BaseUrlCredentials.Entry(server.openaiBaseUrl, Credential(server.key)),
+            ),
+        ),
+    )
+
+    override fun close() = server.close()
+}
+
+private fun piAssetsDir(explicit: String?): File {
+    val candidates = listOfNotNull(explicit, System.getProperty("agentos.piAssetsDir")).map(::File) +
+        generateSequence(File("").absoluteFile) { it.parentFile }.map { File(it, "app/src/main/assets") }
+    return candidates.firstOrNull { File(it, "pi-agent.js").isFile && File(it, "model-catalog.json").isFile }
+        ?: throw IllegalStateException(
+            "--core=pi needs pi-agent.js and model-catalog.json: run `npm ci && node build.mjs` in core/pi-runtime, or pass --pi-assets=<dir>",
+        )
 }
 
 private suspend fun CoroutineScope.runGateway(rt: TestRuntime, port: Int, stateFile: String?, handshakeTimeout: Long?, out: PrintStream) {
