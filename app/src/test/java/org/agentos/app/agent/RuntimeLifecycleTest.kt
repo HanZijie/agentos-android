@@ -274,4 +274,95 @@ class RuntimeLifecycleTest {
         val reason = AcpAccessPolicy.check(callerUid = 10200, myUid = 10123)!!
         assertTrue(reason.startsWith("agentos.acp.not_open:"))
     }
+
+    // ------------------------------------------------------------------ 空闲宽限期（规则 5）
+
+    private class ClockPort : RuntimeLifecycle.Port {
+        var tasks = 0
+        var now = 1_000L
+        val starts = mutableListOf<Int>()
+        val stops = mutableListOf<Int>()
+        val scheduled = mutableListOf<Long>()
+        val published = mutableListOf<RuntimeLifecycle.Status>()
+
+        override fun taskCount() = tasks
+        override fun requestServiceStart(): Boolean {
+            starts += tasks
+            return true
+        }
+        override fun stopService(startId: Int): Boolean {
+            stops += startId
+            return true
+        }
+        override fun publish(status: RuntimeLifecycle.Status) {
+            published += status
+        }
+        override fun onBusyChanged(busy: Boolean) = Unit
+        override fun uptimeMillis() = now
+        override fun scheduleIdleCheck(delayMillis: Long) {
+            scheduled += delayMillis
+        }
+    }
+
+    /** 已恢复、服务在前台、有一个任务（session/new 计入）。 */
+    private fun busyLifecycle(p: ClockPort, grace: Long): RuntimeLifecycle {
+        val lc = RuntimeLifecycle(p, idleGraceMillis = grace)
+        lc.onRecoveryStarted()
+        p.tasks = 1
+        lc.onTasksChanged()
+        lc.onServiceCommand(startId = 1, foregroundOk = true)
+        lc.onRecoveryFinished()
+        return lc
+    }
+
+    /** session/new 返回到 prompt 到达之间任务数短暂为 0：宽限期内不退出前台，也不重新要求前台。 */
+    @Test
+    fun idleGrace_bridgesTheGapBetweenSessionNewAndPrompt() {
+        val p = ClockPort()
+        val lc = busyLifecycle(p, grace = 2_000)
+        p.tasks = 0                           // session/new 返回
+        lc.onTasksChanged()
+        assertTrue(p.stops.isEmpty())
+        assertEquals(listOf(2_000L), p.scheduled)
+        assertEquals(RuntimeLifecycle.Status(0, true, "idle"), p.published.last())
+
+        p.now += 5
+        p.tasks = 1                           // prompt 到达
+        lc.onTasksChanged()
+        assertEquals("only the first start request", listOf(1), p.starts)
+        assertEquals(RuntimeLifecycle.Status(1, true, "busy"), p.published.last())
+
+        p.now += 2_000
+        lc.onIdleCheck()                      // 旧的到点回调：有任务，不停
+        assertTrue(p.stops.isEmpty())
+
+        p.tasks = 0                           // 任务结束
+        lc.onTasksChanged()
+        assertEquals(2_000L, p.scheduled.last())   // 宽限期从这次归零重新算
+        p.now += 1_999
+        lc.onIdleCheck()
+        assertTrue(p.stops.isEmpty())
+        assertEquals(1L, p.scheduled.last())
+        p.now += 1
+        lc.onIdleCheck()
+        assertEquals(listOf(1), p.stops)
+        assertEquals(RuntimeLifecycle.Status(0, false, "idle"), p.published.last())
+        assertEquals(1, lc.idleStops)
+    }
+
+    /** 监督进程拉起、没有任务：恢复结束后等过宽限期再停。 */
+    @Test
+    fun idleGrace_appliesAfterRecoveryWithoutTasks() {
+        val p = ClockPort()
+        val lc = RuntimeLifecycle(p, idleGraceMillis = 2_000)
+        lc.onRecoveryStarted()
+        lc.onServiceCommand(startId = 3, foregroundOk = true)
+        assertTrue(p.stops.isEmpty())
+        lc.onRecoveryFinished()
+        assertTrue(p.stops.isEmpty())
+        assertEquals(listOf(2_000L), p.scheduled)
+        p.now += 2_000
+        lc.onIdleCheck()
+        assertEquals(listOf(3), p.stops)
+    }
 }
