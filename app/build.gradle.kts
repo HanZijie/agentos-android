@@ -34,7 +34,12 @@ dependencies {
     // W6 设备用例的 in-app 执行器（tests/device/acp-channel/inapp）：只进 debug 包，release 包里没有
     debugImplementation(project(":tests:device:acp-channel:inapp"))
 
+    // W8 自带界面：Dispatchers.Main（平台 View，不引入 androidx 界面库）
+    implementation(libs.kotlinx.coroutines.android)
+
     testImplementation(libs.junit4)
+    // W8：ChatController 的状态测试（虚拟时间）
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // ---- Pi Agent core 打包（W3）----
