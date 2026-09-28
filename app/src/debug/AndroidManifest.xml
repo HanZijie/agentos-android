@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  只进 debug 包的组件（与 app/src/main/AndroidManifest.xml 合并）。release 包里没有它们。
+  只进 debug 包的内容（与 app/src/main/AndroidManifest.xml 合并）。release 包里没有它们。
+
+  lane B（W6/B3）：app 的设备测试（app/src/androidTest）在 :agent 进程里起假模型端点
+  http://127.0.0.1:<port>，targetSdk 36 默认禁止明文，OkHttp 会拒绝连接。这里只放行回环地址。
+  release 包是否也放行回环明文（手机上的本地模型服务）待定，见 lane B 的 W3/W6 报告。
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application>
+    <application android:networkSecurityConfig="@xml/agentos_debug_network_security">
 
         <!--
-          W9：电脑端接入的测试入口（tests/acp-conformance 的设备模式用它打开开关、生成配对码）。
+          lane A（W9）：电脑端接入的测试入口（tests/acp-conformance 的设备模式用它打开开关、生成配对码）。
           要求 DUMP 权限，只有 adb shell 和系统能发；运行在 :agent。
         -->
         <receiver
