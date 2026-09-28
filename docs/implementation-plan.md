@@ -73,9 +73,11 @@ agentos-android/
 │   └── src/main/java/org/agentos/app/
 │       ├── agent/                                   # 运行时进程 :agent
 │       │   ├── AgentService.kt                      [W6] 有任务时前台服务（specialUse）；写心跳文件
+│       │   ├── AgentProcess.kt · RuntimeLifecycle.kt · Heartbeat.kt   [W6] :agent 进程入口；前台 / 空闲判断（纯 Kotlin，恢复期间不判空闲）；心跳（DE 存储，监督契约 b）
+│       │   ├── PlaceholderAgentRuntime.kt           [W6] 临时：A3 的 AgentRuntime 实现进 main 后删除
 │       │   ├── AcpService.kt                        [W6] 导出的 IAcpService：每条通道绑定调用方 UID，交给 SDK 的 Agent 端；M1 只接受本 App；[W25] 放开第三方
 │       │   ├── AndroidStore.kt                      [W6] SQLite 实现
-│       │   ├── QuickJsEngine.kt                     [W6] ← agenriod PiRuntime.kt、NativeAgentBridge.kt 的 QuickJS 接线：JsEngine 的 Android 实现，加载 pi-agent.js
+│       │   ├── QuickJsEngine.kt                     [W6，B lane] ← agenriod PiRuntime.kt、NativeAgentBridge.kt 的 QuickJS 接线：JsEngine 的 Android 实现，加载 pi-agent.js
 │       │   ├── KeystoreSecrets.kt                   [W6] BYOK，Keystore 加密
 │       │   ├── HostPortImpl.kt                      [W6]；[W16] 工具与确认；[W20] Skill；[W22] Hook
 │       │   ├── AgentControl.kt                      [W6] IAgentControl 的实现
@@ -115,7 +117,7 @@ agentos-android/
 │       └── PluginMirror.kt                          [W21] 插件副本（PLUGIN_ROOT）和各插件的 PLUGIN_DATA
 │
 ├── sdk/
-│   ├── binder-channel/                              [W5] IChannel AIDL；BinderChannel：顺序、背压、linkToDeath、UID 校验
+│   ├── binder-channel/                              [W5] IChannel AIDL（src/main/aidl/org/agentos/channel/）；BinderChannel：顺序、背压、linkToDeath、UID 校验；FlowWindow（流控账本，纯 Kotlin，可在电脑上单测）
 │   ├── acp-android/                                 # 给后装 App 用
 │   │   ├── aidl/IAcpService.aidl                    [W5]
 │   │   ├── BinderAcpTransport.kt                    [W5] 实现 ACP SDK 0.30.x 的 Transport；客户端、Agent 端、自带界面共用
@@ -152,6 +154,7 @@ agentos-android/
 ├── tests/
 │   ├── acp-conformance/                             [W4] 官方 TypeScript 客户端经 stdio 测电脑上的运行时；[W9] 经 adb forward 测真机
 │   └── device/                                      [W6] 起：adb 驱动的真机测试，ACP 通道、MCP Binder、Runner、监督的用例分开；也可以在 root 过的模拟器上跑
+│       └── acp-channel/{common,agent,client,inapp}/ · run.py   [W5] SDK 回归（--suite sdk）；[W6] :agent 用例（--suite app，inapp 执行器以 debugImplementation 注入 app，release 包里没有）
 ├── docs/
 │   ├── architecture.md · extensions.md · implementation-plan.md · assets/
 │   ├── spikes/                                      # 验证项的结论：S1、S2、S3、S8（真机部分待测）
@@ -333,10 +336,10 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 `plugins:samples:*` 目前只有自动加入机制：`plugins/samples/<name>/` 下有 `build.gradle.kts` 就进构建，W17 加示例时不用改 settings。
 
 #### W2 运行时宿主层
-- [ ] `core/contracts/`：按第 6 节迁移并改写 session-scheduling、session-selection、events，新写 errors
-- [ ] `core/runtime/`：store（含各会话的 Pi messages）、scheduler、recovery、router、`CapabilityBroker` 接口、`HostPort`；调度与恢复的行为以 `reference/` 里的 sideagentd 为参考，用 Kotlin 重写
-- [ ] 选定 SQLite 驱动，电脑上的测试和 Android 共用同一套 schema
-- [ ] JUnit 覆盖以下行为：
+- [x] `core/contracts/`：按第 6 节迁移并改写 session-scheduling、session-selection、events，新写 errors
+- [x] `core/runtime/`：store（含各会话的 Pi messages）、scheduler、recovery、router、`CapabilityBroker` 接口、`HostPort`；调度与恢复的行为以 `reference/` 里的 sideagentd 为参考，用 Kotlin 重写
+- [x] 选定 SQLite 驱动，电脑上的测试和 Android 共用同一套 schema（androidx.sqlite 2.7.1：core/runtime 只依赖 `SQLiteDriver` 接口，电脑测试与 Android 都可用 `BundledSQLiteDriver`）
+- [x] JUnit 覆盖以下行为（StoreTest、RecoveryTest、SessionRouterTest、CapabilityBrokerTest）：
   - store 追加写与 sequence
   - 恢复时不重放结果未知的调用
   - router 失败时回退到新建会话
@@ -361,18 +364,19 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 #### W5 Binder 通道
 - [ ] 按 S3 的结论冻结 `core/protocol/binder-channel-v1.md`（AIDL、单条消息上限、顺序、背压、`linkToDeath`、UID 校验）；草案已在，参数见其第 8 节
-- [ ] `sdk/binder-channel/`：`IChannel`、`BinderChannel`
-- [ ] `sdk/acp-android/`：`IAcpService`、`BinderAcpTransport`
-- [ ] 把 S3 第二部分的测试 App 改成回归测试
+- [x] `sdk/binder-channel/`：`IChannel`、`BinderChannel`
+- [x] `sdk/acp-android/`：`IAcpService`、`BinderAcpTransport`（另有 `JsonRpcCodec`、`AcpAndroid`、`AcpServiceContract`：intent action `org.agentos.intent.action.ACP`、拒绝原因码 `agentos.acp.not_open`）
+- [x] 把 S3 第二部分的测试 App 改成回归测试（`tests/device/acp-channel --suite sdk`；API 35 / 36 / 37 模拟器与 Pixel_8a 均 15/15；冻结一项等真机）
 
 ### M1 最小可演示：一个 zip 跑通对话
 
 #### W6 `:agent` 进程接线
-- [ ] `AgentService`：有任务时前台（`specialUse`），没有任务时退出前台；写心跳文件
-- [ ] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
+- [x] `AgentService`：有任务时前台（`specialUse`），没有任务时退出前台；写心跳文件（骨架，C2）
+- [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
 - [ ] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接
-- [ ] `AndroidStore`、`KeystoreSecrets`、`HostPortImpl`、`IAgentControl`
-- [ ] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind
+- [ ] `AndroidStore`、`KeystoreSecrets`、`HostPortImpl`、`IAgentControl`（`IAgentControl` v1 已有：版本、运行状态、诊断、监督状态；BYOK 与确认在末尾追加）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app`，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件；API 35 / 36 / 37 与 Pixel_8a 均 15/15）
+- [ ] 换成真的 `AgentRuntime`（A3）和 Pi（B2 的 PiAdapter + QuickJsEngine）
 
 #### W7 模块与打包
 - [ ] `customize.sh`、`uninstall.sh`、`module.prop.template`、`support-matrix.yaml`

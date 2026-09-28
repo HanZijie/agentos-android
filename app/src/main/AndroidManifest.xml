@@ -6,7 +6,16 @@
   - W14：:ext 进程、IExtensionHost；<queries> 声明插件发现 action
   - W14 / W21：定义 BIND_MCP_SERVICE、RUN_COMMANDS（signature）
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- W6：:agent 有任务时以前台服务运行（监督契约 S2 a） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 只影响前台服务通知是否可见，不影响前台服务本身；首次引导里请求（F2） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 有任务期间持有 partial wake lock，灭屏后任务不因 CPU 休眠停住 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- W7：root 监督进程的状态广播只能由 root（绕过权限检查）或同证书的 App 发来（docs/spikes/S2.md 契约 e） -->
     <permission
@@ -17,7 +26,42 @@
         android:allowBackup="false"
         android:label="AgentOS">
 
-        <!-- W7：在主进程（状态广播不会拉起 :agent），不导出，并要求上面的 signature 权限 -->
+        <!-- ================= W6：:agent 进程（运行时） ================= -->
+
+        <!-- 运行时的前台服务。不导出：只有 root 监督进程和本 App 能启动（监督契约 S2 a） -->
+        <service
+            android:name=".agent.AgentService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:process=":agent">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="On-device AI agent runtime: keeps an agent task (model call and tool calls) running after the requesting app goes to the background" />
+        </service>
+
+        <!--
+          对外 ACP 服务（binder-channel-v1 的 IAcpService）。故意导出、不要求权限：F10 要求任何 App 不声明权限就能调用，
+          准入在 open() 里按 Binder 调用方 UID 做（M1 只接受本 App，其他 UID 返回 agentos.acp.not_open；W25 起走授权）。
+        -->
+        <service
+            android:name=".agent.AcpService"
+            android:exported="true"
+            android:process=":agent"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.ACP" />
+            </intent-filter>
+        </service>
+
+        <!-- App 内部接口 IAgentControl（architecture 5.4）。不导出，服务端再校验调用方 UID -->
+        <service
+            android:name=".agent.AgentControlService"
+            android:exported="false"
+            android:process=":agent" />
+
+        <!-- ================= W7：root 监督进程的状态广播 ================= -->
+
+        <!-- 在主进程（状态广播不会拉起 :agent），不导出，并要求上面的 signature 权限（监督契约 S2 e） -->
         <receiver
             android:name=".agent.supervisor.SupervisorStatusReceiver"
             android:exported="false"

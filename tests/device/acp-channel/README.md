@@ -26,7 +26,24 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | window-violation | 绕过流控连发，服务端以 `window exceeded` 关闭 |
 | stream-noflow（负向） | 关掉流控打满：允许写爆，但必须在超时内结束，不能挂住（S3 问题 1） |
 
-**`--suite app`（W6）**：见 `inapp/` 和 `run.py` 的 `app_cases()`。
+**`--suite app`（W6）**：AgentOS 的 `:agent`（`AcpService`、`AgentService`、`AgentControlService`）。执行器是注入 debug 包的 `inapp/`（AgentOS 自己的 UID，`:acptest` 进程），第三方身份的用例由 `client/` 跑。宿主层目前是占位实现（`PlaceholderAgentRuntime`，按同样的 JSON 指令流式输出），A3 之后换成真实现，通道用例要换成可控的假模型端点。
+
+| 用例 | 执行器 | 通过标准 |
+|---|---|---|
+| handshake | inapp | 本 App 的 UID：initialize → session/new → prompt → close |
+| foreign-uid-rejected | client | 第三方 UID 调 `open`：`SecurityException`，原因码 `agentos.acp.not_open`，本端不留通道 |
+| foreign-no-leak | inapp | 被拒之后 `:agent` 没有连接和通道，`rejectedOpens` ≥ 1 |
+| oversize | inapp | 同 SDK 回归的四种情况 |
+| client-kill | inapp | 执行器进程在流式中途自杀：`:agent` 以 `peer_died` 关闭，连接、通道、任务归零 |
+| agent-kill-rebind | inapp | 流式中途 SIGKILL `:agent`：执行器感知、prompt 不挂住；系统重建服务后重新 bind 能对话 |
+| stream-realtime / cancel-realtime / reconnect / window-violation | inapp | 同 SDK 回归 |
+| cold-task-foreground | inapp | 先杀 `:agent`，让恢复多等 1.5 s；bind 拉起冷进程后 prompt 的任务在恢复结束前就已登记（S2 整合时发现的缺陷的先后顺序）。恢复期间服务已在前台，恢复结束后直到任务结束一直在前台，心跳 `tasks=1 fg=1 state=busy`；结束后退出前台、服务停止，心跳 `tasks=0 fg=0 state=idle`，空闲停止恰好 1 次 |
+| warm-task-foreground | inapp | 同上，`:agent` 已在运行 |
+| supervisor-start-idle | inapp | 监督进程的命令（`SUPERVISOR_START`、`REASON=boot`），恢复多等 1 s：服务先进前台，恢复期间不停，恢复结束后没有任务就停止，心跳 `state=idle` |
+| restart-exit-info | inapp | SIGKILL `:agent` 后用 `REASON=restart` 拉起：诊断里的上次退出原因是 `SIGNALED`、pid 对得上，`userStopped=false` |
+| control-foreign-rejected | client | 第三方绑定 `AgentControlService`、启动 `AgentService` 都被系统拒绝 |
+
+`inapp/` 的 Activity 导出但要求 `android.permission.DUMP`，只有 shell 和系统能启动；它只在 debug 包里。
 
 ## 怎么跑
 
