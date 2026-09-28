@@ -55,6 +55,7 @@ import org.agentos.runtime.ports.ToolResult
 import org.agentos.runtime.ports.TurnHost
 import org.agentos.runtime.ports.TurnInput
 import org.agentos.runtime.ports.TurnOutcome
+import org.agentos.runtime.ports.info
 import org.agentos.runtime.ports.warn
 import java.util.concurrent.ConcurrentHashMap
 
@@ -125,6 +126,7 @@ class PiAdapter(
                 throw AgentCoreUnavailableException("Pi runtime failed to start", e)
             }
             if (stateFlow.value == AgentCoreState.Starting) stateFlow.value = AgentCoreState.Ready
+            startup?.let { log.info(TAG, "Pi runtime started: $it") }
         }
     }
 

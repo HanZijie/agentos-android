@@ -52,10 +52,12 @@ class QuickJsJvmEngine(threadName: String = "pi-js-${counter.incrementAndGet()}"
     private fun toJs(value: Any?): Any? = if (value is ByteArray) value.asUByteArray() else value
 
     @OptIn(ExperimentalUnsignedTypes::class)
-    private fun fromJs(args: Array<Any?>): List<Any?> = args.map { if (it is UByteArray) it.asByteArray() else it }
+    private fun fromJs(value: Any?): Any? = if (value is UByteArray) value.asByteArray() else value
+
+    private fun fromJs(args: Array<Any?>): List<Any?> = args.map(::fromJs)
 
     override suspend fun evaluate(script: JsScript): Any? = withContext(dispatcher) {
-        try {
+        val result = try {
             when (script) {
                 is JsScript.Source -> quickJs.evaluate<Any?>(script.code, script.fileName, false)
                 is JsScript.Bytecode -> quickJs.evaluate<Any?>(script.bytes)
@@ -63,6 +65,7 @@ class QuickJsJvmEngine(threadName: String = "pi-js-${counter.incrementAndGet()}"
         } catch (e: QuickJsException) {
             throw JsException(e.message ?: "JavaScript error", e.message, e)
         }
+        fromJs(result)
     }
 
     override suspend fun compile(source: String, fileName: String): ByteArray = withContext(dispatcher) {

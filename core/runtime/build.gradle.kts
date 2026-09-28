@@ -36,18 +36,30 @@ dependencies {
     testFixturesImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.okhttp)
     testImplementation(libs.okhttp.mockwebserver)
+    // lane B（W6/B3）：AgentCore 契约的场景（pi/testing/PiAdapterContract）放在 testFixtures，
+    // 电脑上的 JUnit 测试和 :app 的设备测试（androidTest）共用
+    testFixturesImplementation(libs.junit4)
+    testFixturesImplementation(libs.kotlin.test.junit)
 }
 
 // lane B（W3）：Pi 打包产物的契约测试（org.agentos.runtime.pi.PiBundleContractTest）读取
 // core/pi-runtime/build.mjs 生成的 app/src/main/assets/pi-agent.js；没有生成时这些用例跳过。
-// 同一次构建里也要打包 APK 时，先让 :app:bundlePiAgent 生成产物（只约束顺序，不会因此拉起 app 的打包）。
+// 有 build.mjs 时先跑 :app:bundlePiAgent（Gradle 按 core/pi-runtime 的源码判断是否需要重建，不会拉起 app 的打包），
+// 避免本地残留的旧 bundle 让测试以 “Unknown op” 之类失败；-Pagentos.skipPiBundle=true 时不重建，
+// 测试比对 bundle 头里的源码哈希（PiAssets），过期就明确报错。
 tasks.named<Test>("test") {
     val piAssets = rootProject.layout.projectDirectory.dir("app/src/main/assets")
+    val piRuntime = rootProject.layout.projectDirectory.dir("core/pi-runtime")
     systemProperty("agentos.piAssetsDir", piAssets.asFile.absolutePath)
+    systemProperty("agentos.piRuntimeDir", piRuntime.asFile.absolutePath)
     inputs.files(piAssets.file("pi-agent.js"), piAssets.file("model-catalog.json"))
         .optional()
         .withPropertyName("piBundle")
-    mustRunAfter(":app:bundlePiAgent")
+    if (piRuntime.file("build.mjs").asFile.isFile) {
+        dependsOn(":app:bundlePiAgent")
+    } else {
+        mustRunAfter(":app:bundlePiAgent")
+    }
 }
 
 // lane A（W4）：ACP SDK 0.30.1 依赖 kotlin-logging，它在 JVM 上默认走 slf4j，而 slf4j 不在类路径上，
