@@ -46,4 +46,5 @@ include(
     ":tests:device:acp-channel:common",
     ":tests:device:acp-channel:agent",
     ":tests:device:acp-channel:client",
+    ":tests:device:acp-channel:inapp",
 )
