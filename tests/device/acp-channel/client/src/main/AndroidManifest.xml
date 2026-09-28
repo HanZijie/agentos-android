@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 11+ 的包可见性：不声明就 bind 不到。AgentOS 用 intent action 声明，与 F10 的第三方 App 一致 -->
+    <queries>
+        <package android:name="org.agentos.test.acp.agent" />
+        <intent>
+            <action android:name="org.agentos.intent.action.ACP" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="ACP test client">
+        <!-- 场景执行器：由 tests/device/acp-channel/run.py 用 am start 驱动，结果写到 logcat（tag ACPTEST） -->
+        <activity
+            android:name=".ScenarioActivity"
+            android:exported="true"
+            android:launchMode="singleTask" />
+    </application>
+</manifest>

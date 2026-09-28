@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  只作用于 tests/device/acp-channel 下的测试 App（Lint 从模块目录向上找 lint.xml，并继承仓库根目录的配置）。
+  这些 App 只用于 adb 驱动的设备测试：界面只显示调试文本、没有图标，测试 Agent 的服务故意导出且不要求权限
+  （它模拟的是任意第三方都能 bind 的 ACP 服务）。
+-->
+<lint>
+    <issue id="SetTextI18n" severity="ignore" />
+    <issue id="MissingApplicationIcon" severity="ignore" />
+    <issue id="ExportedService" severity="ignore" />
+    <issue id="DataExtractionRules" severity="ignore" />
+</lint>

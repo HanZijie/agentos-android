@@ -1,9 +1,9 @@
 # binder-channel-v1：Binder 消息通道
 
-- **状态**：草案。参数由 S3 第二部分测定（2026-09-29，API 35 / 36 / 37 模拟器）；W5 在真机结果补齐后冻结。
+- **状态**：草案。参数由 S3 第二部分测定（2026-09-29，API 35 / 36 / 37 模拟器）；W5 已按本文实现并在模拟器上回归，**真机结果补齐后冻结**（M1 验收前的关口）。
 - **用途**：ACP（第三方 App、AgentOS 自带界面 → `:agent`）和 MCP（`:ext` → 插件 App）共用的 Binder 消息通道。
-- **实现**：`sdk/binder-channel/`（`IChannel`、`BinderChannel`）；ACP 的 Transport 在 `sdk/acp-android/`（`BinderAcpTransport`），MCP 的在 `sdk/plugin-sdk/`（W15）。
-- **依据**：[docs/spikes/S3.md](../../docs/spikes/S3.md)；实验工程 `spikes/S3/`。
+- **实现**：`sdk/binder-channel/`（`IChannel`、`BinderChannel`、`ChannelConfig`，流控账本在 `FlowWindow.kt`）；ACP 的 Transport 在 `sdk/acp-android/`（`BinderAcpTransport`、`JsonRpcCodec`、`AcpAndroid`、`AcpServiceContract`），MCP 的在 `sdk/plugin-sdk/`（W15）。
+- **依据**：[docs/spikes/S3.md](../../docs/spikes/S3.md)；实验工程 `spikes/S3/`；回归测试 `tests/device/acp-channel/`。
 
 通道只承载消息，不解析内容，ACP 和 MCP 的语义由各自的 SDK 处理。
 
@@ -19,7 +19,7 @@ oneway interface IChannel {
     void ack(long consumed);     // 事务号 3：流控回执，已处理完对方发来的前 consumed 条（累计值）
 }
 
-/** AgentOS App 导出，运行在 :agent 进程。 */
+/** AgentOS App 导出，运行在 :agent 进程；intent action org.agentos.intent.action.ACP。 */
 interface IAcpService {
     IChannel open(IChannel client);   // 传入客户端的接收端，返回 Agent 的接收端
 }
@@ -38,7 +38,9 @@ interface IMcpService {
 1. 客户端先创建自己的接收端（此时已经能接收消息），再 `bindService()` 并调用 `open(client)`。
 2. 服务端在 `open` 里用 `Binder.getCallingUid()` 取调用方 UID 并绑定到这条通道，对客户端的 `IChannel` 调用 `linkToDeath`，返回自己的接收端。`open` 返回前服务端就可以开始发消息。
 3. 客户端拿到返回值后对它 `linkToDeath`，开始发送。客户端校验的对端 UID 是服务所在 App 的 UID（`PackageManager.getPackageUid`）。
-4. 服务端拒绝时，`open` 抛 `SecurityException`（例如 M1 对非本 App 的调用方返回“未开放”，具体原因串在 W6 确定）。
+4. 服务端拒绝时，`open` 抛 `SecurityException`，message 形如 `agentos.acp.<原因码>: <说明>`（`AcpServiceContract.reasonOf` 取原因码）。目前的原因码：
+   - `agentos.acp.not_open`：这个版本还不接受第三方 App（M1–M3 对非本 App 的 UID 一律如此；M4 起由授权流程决定）。
+5. SDK 的封装：客户端用 `BinderAcpTransport.connect(service, serviceUid, scope)`（Binder 调用在 IO 线程），服务端在 `open` 里用 `BinderAcpTransport.accept(client, Binder.getCallingUid(), scope)`，返回它的 `channel.binder`。两端都要用 `BinderAcpTransport.bindTo(protocol, transport)` 把 SDK 的 `Protocol` 和 Transport 一起关闭。
 
 ## 3. 消息
 

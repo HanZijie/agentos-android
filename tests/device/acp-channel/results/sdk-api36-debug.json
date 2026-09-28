@@ -1,0 +1,1767 @@
+{
+ "suite": "sdk",
+ "build": "debug",
+ "device": {
+  "serial": "emulator-5572",
+  "model": "sdk_gphone64_arm64",
+  "sdk": "36",
+  "release": "16",
+  "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys",
+  "buildType": "user",
+  "isEmulator": true
+ },
+ "time": "2026-09-29T04:46:41+0800",
+ "results": {
+  "handshake": {
+   "ok": true,
+   "agent": "agentos-test-agent",
+   "protocolVersion": "1",
+   "sessionId": "t-1-1",
+   "timingsMs": {
+    "bound": 34.283625,
+    "opened": 238.793125,
+    "initialized": 307.423292,
+    "session": 338.443333
+   },
+   "prompt": {
+    "chunks": 20,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 70.771875,
+    "totalMs": 109.707625,
+    "chunksPerSec": 182.30273419919536,
+    "latency": {
+     "n": 20,
+     "p50ms": 9.654375,
+     "p90ms": 28.019166,
+     "p99ms": 28.427209,
+     "maxms": 28.427209,
+     "meanms": 14.4616375,
+     "first10pctMeanMs": 12.364667,
+     "last10pctMeanMs": 7.8225415
+    }
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "handshake",
+   "run": "handshake-1ea634",
+   "args": {},
+   "wallMs": 1464.473959,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4472,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 4.2
+  },
+  "stream-realtime": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 500,
+    "chunkChars": 16,
+    "intervalMs": 10,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 500,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 55.231833,
+    "totalMs": 6467.241295,
+    "chunksPerSec": 77.31271761679336,
+    "latency": {
+     "n": 500,
+     "p50ms": 2.36925,
+     "p90ms": 5.494833,
+     "p99ms": 22.179375,
+     "maxms": 38.190417,
+     "meanms": 3.326172588,
+     "first10pctMeanMs": 8.31001996,
+     "last10pctMeanMs": 2.17101998
+    }
+   },
+   "mainThread": {
+    "ticks": 556,
+    "maxLateMs": 21.585958,
+    "lateOver16ms": 3,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 503,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "peerUid": 10215,
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 503,
+      "consumed": 503,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 502,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 227,
+     "maxQueuedChars": 227,
+     "maxUnackedMessages": 2,
+     "maxUnackedChars": 422,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 801.166,
+     "binderSendUsMax": 1952.166
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 2,
+     "peerUid": 10214,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-2(uid=10214)",
+       "peerUid": 10214,
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 503,
+        "acked": 503,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 503,
+       "acksSent": 3,
+       "acksReceived": 502,
+       "windowWaits": 0,
+       "windowWaitMsTotal": 0,
+       "windowWaitMsMax": 0,
+       "maxInFlightMessages": 2,
+       "maxInFlightChars": 424,
+       "maxQueuedChars": 327,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 227,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 121.137,
+       "binderSendUsMax": 5766.167
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 4559,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 27
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-realtime-0a3ef6",
+   "args": {
+    "chunks": 500,
+    "chunkChars": 16,
+    "intervalMs": 10
+   },
+   "wallMs": 6894.230378,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4559,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 8.4
+  },
+  "stream-peak-bp": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 20000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 75.910084,
+    "totalMs": 5934.484545,
+    "chunksPerSec": 3370.1326287639695,
+    "latency": {
+     "n": 20000,
+     "p50ms": 601.206083,
+     "p90ms": 760.643501,
+     "p99ms": 1231.884626,
+     "maxms": 1261.711292,
+     "meanms": 625.8290491020499,
+     "first10pctMeanMs": 929.6915682435,
+     "last10pctMeanMs": 488.69616685750003
+    }
+   },
+   "mainThread": {
+    "ticks": 491,
+    "maxLateMs": 56.305541,
+    "lateOver16ms": 8,
+    "lateOver50ms": 2,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 20003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "peerUid": 10215,
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 20003,
+      "consumed": 20003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 3123,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 227,
+     "maxQueuedChars": 227,
+     "maxUnackedMessages": 32,
+     "maxUnackedChars": 8384,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 3167.653,
+     "binderSendUsMax": 6515.959
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 3,
+     "peerUid": 10214,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-3(uid=10214)",
+       "peerUid": 10214,
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 20003,
+        "acked": 20003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 20003,
+       "acksSent": 3,
+       "acksReceived": 3123,
+       "windowWaits": 978,
+       "windowWaitMsTotal": 3797.730827,
+       "windowWaitMsMax": 98.192375,
+       "maxInFlightMessages": 32,
+       "maxInFlightChars": 8384,
+       "maxQueuedChars": 16645,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 227,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 34.205,
+       "binderSendUsMax": 50298.5
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 4635,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 39
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-peak-bp-2617fd",
+   "args": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true
+   },
+   "wallMs": 6450.183753,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4635,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 8.1
+  },
+  "stream-bigchunks-bp": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 500,
+    "chunkChars": 16000,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 65536,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 500,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 50.302333,
+    "totalMs": 1994.456209,
+    "chunksPerSec": 250.69490006536412,
+    "latency": {
+     "n": 500,
+     "p50ms": 13.054625,
+     "p90ms": 93.705584,
+     "p99ms": 194.863667,
+     "maxms": 215.606084,
+     "meanms": 31.14982385,
+     "first10pctMeanMs": 133.23672752,
+     "last10pctMeanMs": 6.98892166
+    }
+   },
+   "mainThread": {
+    "ticks": 165,
+    "maxLateMs": 33.37125,
+    "lateOver16ms": 3,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 503,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "peerUid": 10215,
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 503,
+      "consumed": 503,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 503,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 228,
+     "maxQueuedChars": 228,
+     "maxUnackedMessages": 2,
+     "maxUnackedChars": 32392,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 1404.305,
+     "binderSendUsMax": 4063.333
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 4,
+     "peerUid": 10214,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-4(uid=10214)",
+       "peerUid": 10214,
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 503,
+        "acked": 503,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 503,
+       "acksSent": 3,
+       "acksReceived": 503,
+       "windowWaits": 359,
+       "windowWaitMsTotal": 1765.710461,
+       "windowWaitMsMax": 67.675292,
+       "maxInFlightMessages": 3,
+       "maxInFlightChars": 32451,
+       "maxQueuedChars": 80980,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 228,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 146.631,
+       "binderSendUsMax": 19099.875
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 4728,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 27
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-bigchunks-bp-8f6974",
+   "args": {
+    "chunks": 500,
+    "chunkChars": 16000,
+    "intervalMs": 0,
+    "bp": true,
+    "bpChars": 65536
+   },
+   "wallMs": 2510.583793,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4728,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 4.3
+  },
+  "stream-cjk-bp": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": true
+   },
+   "prompt": {
+    "chunks": 5000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 84.064542,
+    "totalMs": 3857.83146,
+    "chunksPerSec": 1296.06491414739,
+    "latency": {
+     "n": 5000,
+     "p50ms": 591.232042,
+     "p90ms": 1398.455042,
+     "p99ms": 1520.052376,
+     "maxms": 1536.646126,
+     "meanms": 743.543283317,
+     "first10pctMeanMs": 505.96113716,
+     "last10pctMeanMs": 379.02161367
+    }
+   },
+   "mainThread": {
+    "ticks": 309,
+    "maxLateMs": 72.701667,
+    "lateOver16ms": 9,
+    "lateOver50ms": 2,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 5003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "peerUid": 10215,
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 5003,
+      "consumed": 5003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 673,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 225,
+     "maxQueuedChars": 225,
+     "maxUnackedMessages": 32,
+     "maxUnackedChars": 8352,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 23224.583,
+     "binderSendUsMax": 60868.167
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 5,
+     "peerUid": 10214,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-5(uid=10214)",
+       "peerUid": 10214,
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 5003,
+        "acked": 5003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 5003,
+       "acksSent": 3,
+       "acksReceived": 673,
+       "windowWaits": 420,
+       "windowWaitMsTotal": 2811.18705,
+       "windowWaitMsMax": 99.385666,
+       "maxInFlightMessages": 32,
+       "maxInFlightChars": 8352,
+       "maxQueuedChars": 16644,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 225,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 42.748,
+       "binderSendUsMax": 32238.458
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 4786,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 39
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-cjk-bp-7c4f3c",
+   "args": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true,
+    "cjk": true
+   },
+   "wallMs": 4164.72321,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4786,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 5.6
+  },
+  "stream-window-8x16384": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 8,
+    "windowChars": 16384,
+    "ackEveryMessages": 2,
+    "ackEveryChars": 4096,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 20000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 13.387958,
+    "totalMs": 4012.215377,
+    "chunksPerSec": 4984.777266606841,
+    "latency": {
+     "n": 20000,
+     "p50ms": 9.128625,
+     "p90ms": 106.546083,
+     "p99ms": 342.364958,
+     "maxms": 359.895375,
+     "meanms": 42.89109420135,
+     "first10pctMeanMs": 253.45895438550002,
+     "last10pctMeanMs": 7.6302217285000005
+    }
+   },
+   "mainThread": {
+    "ticks": 366,
+    "maxLateMs": 58.648458,
+    "lateOver16ms": 4,
+    "lateOver50ms": 1,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 20003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "peerUid": 10215,
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 20003,
+      "consumed": 20003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 10633,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 227,
+     "maxQueuedChars": 227,
+     "maxUnackedMessages": 8,
+     "maxUnackedChars": 2096,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 1112.069,
+     "binderSendUsMax": 2739.583
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 6,
+     "peerUid": 10214,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-6(uid=10214)",
+       "peerUid": 10214,
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 20003,
+        "acked": 20003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 20003,
+       "acksSent": 3,
+       "acksReceived": 10633,
+       "windowWaits": 3738,
+       "windowWaitMsTotal": 3267.89384,
+       "windowWaitMsMax": 29.603125,
+       "maxInFlightMessages": 8,
+       "maxInFlightChars": 2096,
+       "maxQueuedChars": 16645,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 227,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 16.071,
+       "binderSendUsMax": 20932.333
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 4860,
+    "liveChannels": 1,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 39
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-window-8x16384-4a9541",
+   "args": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true,
+    "cfg": {
+     "windowMessages": 8,
+     "windowChars": 16384
+    }
+   },
+   "wallMs": 4343.066252,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4860,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 5.6
+  },
+  "cancel-realtime": {
+   "ok": true,
+   "cmd": {
+    "chunks": 1000000,
+    "chunkChars": 32,
+    "intervalMs": 5,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "cancelled": {
+    "chunks": 100,
+    "outOfOrder": 0,
+    "stopReason": "CANCELLED",
+    "error": null,
+    "firstChunkMs": 9.750375,
+    "totalMs": 743.469459,
+    "chunksPerSec": 134.5045163449007,
+    "latency": {
+     "n": 100,
+     "p50ms": 3.70875,
+     "p90ms": 10.942375,
+     "p99ms": 16.778541,
+     "maxms": 16.778541,
+     "meanms": 4.9423916299999995,
+     "first10pctMeanMs": 6.8693625,
+     "last10pctMeanMs": 1.2574165
+    }
+   },
+   "cancelToStopMs": 2.870167,
+   "chunksAfterCancel": 0,
+   "followUp": {
+    "chunks": 5,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 2.303583,
+    "totalMs": 3.756083,
+    "chunksPerSec": 1331.1739916290455,
+    "latency": {
+     "n": 5,
+     "p50ms": 1.726958,
+     "p90ms": 2.320625,
+     "p99ms": 2.320625,
+     "maxms": 2.320625,
+     "meanms": 1.7422252,
+     "first10pctMeanMs": 1.296,
+     "last10pctMeanMs": 2.320625
+    }
+   },
+   "serverPromptOutcomes": {
+    "cancelled": 1,
+    "end_turn": 7
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "cancel",
+   "run": "cancel-realtime-0816c4",
+   "args": {
+    "intervalMs": 5,
+    "cancelAfterChunks": 100
+   },
+   "wallMs": 1000.922792,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4935,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 2.1
+  },
+  "cancel-peak-bp": {
+   "ok": true,
+   "cmd": {
+    "chunks": 1000000,
+    "chunkChars": 32,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "cancelled": {
+    "chunks": 617,
+    "outOfOrder": 0,
+    "stopReason": "CANCELLED",
+    "error": null,
+    "firstChunkMs": 13.6475,
+    "totalMs": 916.851626,
+    "chunksPerSec": 672.9551243660007,
+    "latency": {
+     "n": 617,
+     "p50ms": 354.608791,
+     "p90ms": 442.919417,
+     "p99ms": 458.508167,
+     "maxms": 465.960917,
+     "meanms": 340.370440445705,
+     "first10pctMeanMs": 90.09994004918033,
+     "last10pctMeanMs": 449.8322141639344
+    }
+   },
+   "cancelToStopMs": 457.400209,
+   "chunksAfterCancel": 417,
+   "followUp": {
+    "chunks": 5,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 9.958792,
+    "totalMs": 16.687917,
+    "chunksPerSec": 299.6179810817611,
+    "latency": {
+     "n": 5,
+     "p50ms": 8.174583,
+     "p90ms": 10.671417,
+     "p99ms": 10.671417,
+     "maxms": 10.671417,
+     "meanms": 8.0558,
+     "first10pctMeanMs": 5.346,
+     "last10pctMeanMs": 10.671417
+    }
+   },
+   "serverPromptOutcomes": {
+    "cancelled": 2,
+    "end_turn": 8
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "cancel",
+   "run": "cancel-peak-bp-f5f9ae",
+   "args": {
+    "intervalMs": 0,
+    "chunkChars": 32,
+    "bp": true,
+    "cancelAfterChunks": 200
+   },
+   "wallMs": 1087.745292,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 4991,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 1.8
+  },
+  "reconnect": {
+   "ok": true,
+   "noLeak": true,
+   "iterations": 20,
+   "okCount": 20,
+   "closeFirst": true,
+   "iters": [
+    {
+     "i": 0,
+     "ok": true,
+     "ms": 247.225167
+    },
+    {
+     "i": 1,
+     "ok": true,
+     "ms": 43.352417
+    },
+    {
+     "i": 2,
+     "ok": true,
+     "ms": 185.220583
+    },
+    {
+     "i": 3,
+     "ok": true,
+     "ms": 55.280417
+    },
+    {
+     "i": 4,
+     "ok": true,
+     "ms": 64.416625
+    },
+    {
+     "i": 5,
+     "ok": true,
+     "ms": 31.82975
+    },
+    {
+     "i": 6,
+     "ok": true,
+     "ms": 34.727958
+    },
+    {
+     "i": 7,
+     "ok": true,
+     "ms": 55.856708
+    },
+    {
+     "i": 8,
+     "ok": true,
+     "ms": 74.892417
+    },
+    {
+     "i": 9,
+     "ok": true,
+     "ms": 77.181459
+    },
+    {
+     "i": 10,
+     "ok": true,
+     "ms": 55.013292
+    },
+    {
+     "i": 11,
+     "ok": true,
+     "ms": 50.294333
+    },
+    {
+     "i": 12,
+     "ok": true,
+     "ms": 35.851083
+    },
+    {
+     "i": 13,
+     "ok": true,
+     "ms": 32.628292
+    },
+    {
+     "i": 14,
+     "ok": true,
+     "ms": 33.132333
+    },
+    {
+     "i": 15,
+     "ok": true,
+     "ms": 53.248292
+    },
+    {
+     "i": 16,
+     "ok": true,
+     "ms": 46.557
+    },
+    {
+     "i": 17,
+     "ok": true,
+     "ms": 28.7495
+    },
+    {
+     "i": 18,
+     "ok": true,
+     "ms": 32.82
+    },
+    {
+     "i": 19,
+     "ok": true,
+     "ms": 37.526625
+    }
+   ],
+   "serverBefore": {
+    "pid": 4500,
+    "connectionsOpen": 0,
+    "connectionsOpened": 8,
+    "connectionsClosed": 8,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 2,
+     "end_turn": 8
+    },
+    "threads": 29,
+    "pssKb": 32347,
+    "mainThreadBinderCalls": 0
+   },
+   "serverAfter": {
+    "pid": 4500,
+    "connectionsOpen": 0,
+    "connectionsOpened": 28,
+    "connectionsClosed": 28,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 2,
+     "end_turn": 28
+    },
+    "threads": 29,
+    "pssKb": 31895,
+    "mainThreadBinderCalls": 0
+   },
+   "client": {
+    "pid": 5055,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 31
+   },
+   "scenario": "reconnect",
+   "run": "reconnect-69f16c",
+   "args": {
+    "iterations": 20
+   },
+   "wallMs": 1417.349167,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 5055,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 3.0
+  },
+  "reconnect-noclose": {
+   "ok": true,
+   "noLeak": true,
+   "iterations": 5,
+   "okCount": 5,
+   "closeFirst": false,
+   "iters": [
+    {
+     "i": 0,
+     "ok": true,
+     "ms": 190.953834
+    },
+    {
+     "i": 1,
+     "ok": true,
+     "ms": 86.967792
+    },
+    {
+     "i": 2,
+     "ok": true,
+     "ms": 99.781959
+    },
+    {
+     "i": 3,
+     "ok": true,
+     "ms": 64.076875
+    },
+    {
+     "i": 4,
+     "ok": true,
+     "ms": 50.574083
+    }
+   ],
+   "serverBefore": {
+    "pid": 4500,
+    "connectionsOpen": 0,
+    "connectionsOpened": 28,
+    "connectionsClosed": 28,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 2,
+     "end_turn": 28
+    },
+    "threads": 29,
+    "pssKb": 31917,
+    "mainThreadBinderCalls": 0
+   },
+   "serverAfter": {
+    "pid": 4500,
+    "connectionsOpen": 0,
+    "connectionsOpened": 33,
+    "connectionsClosed": 33,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 2,
+     "end_turn": 33
+    },
+    "threads": 29,
+    "pssKb": 31919,
+    "mainThreadBinderCalls": 0
+   },
+   "client": {
+    "pid": 5115,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 32
+   },
+   "scenario": "reconnect",
+   "run": "reconnect-noclose-fdc7dd",
+   "args": {
+    "iterations": 5,
+    "closeFirst": false
+   },
+   "wallMs": 587.802833,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 5115,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 2.0
+  },
+  "server-kill": {
+   "ok": true,
+   "killedAfterChunks": 51,
+   "closeCause": "peer_died(peer died)",
+   "detectMs": 19.818083,
+   "promptError": {
+    "class": "java.util.concurrent.CancellationException",
+    "message": "Protocol closed"
+   },
+   "promptEndMs": 22.7445,
+   "promptHung": false,
+   "serviceRestartMs": 1134.684917,
+   "recoveredMs": 1203.591209,
+   "afterRestartPrompt": {
+    "chunks": 5,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 6.98425,
+    "totalMs": 16.457792,
+    "chunksPerSec": 303.8074609279301,
+    "latency": {
+     "n": 5,
+     "p50ms": 5.715708,
+     "p90ms": 7.692291,
+     "p99ms": 7.692291,
+     "maxms": 7.692291,
+     "meanms": 5.2706914000000005,
+     "first10pctMeanMs": 3.346916,
+     "last10pctMeanMs": 5.715708
+    }
+   },
+   "clientLiveChannelsAfterDeath": 0,
+   "serverBefore": {
+    "pid": 4500,
+    "connectionsOpen": 0,
+    "connectionsOpened": 33,
+    "connectionsClosed": 33,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 2,
+     "end_turn": 33
+    },
+    "threads": 29,
+    "pssKb": 32010,
+    "mainThreadBinderCalls": 0
+   },
+   "serverAfter": {
+    "pid": 5212,
+    "connectionsOpen": 0,
+    "connectionsOpened": 1,
+    "connectionsClosed": 1,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "end_turn": 1
+    },
+    "threads": 18,
+    "pssKb": 30685,
+    "mainThreadBinderCalls": 0
+   },
+   "client": {
+    "pid": 5173,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 31
+   },
+   "scenario": "server-kill",
+   "run": "server-kill-f6d588",
+   "args": {
+    "killAfterChunks": 50
+   },
+   "wallMs": 2414.592376,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 5173,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 3.9
+  },
+  "client-kill": {
+   "ok": true,
+   "detectMs": 12.72025,
+   "closes": [
+    {
+     "id": 2,
+     "peerUid": 10214,
+     "cause": "peer_died(peer died)",
+     "aliveMs": 552,
+     "closedAtNs": 912335432143
+    }
+   ],
+   "dying": {
+    "scenario": "client-kill",
+    "phase": "dying",
+    "pid": 5255,
+    "dyingAtNs": 912322711893,
+    "chunks": 50
+   },
+   "server": {
+    "pid": 5212,
+    "connectionsOpen": 0,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 1,
+     "end_turn": 1
+    },
+    "threads": 20,
+    "pssKb": 31297
+   },
+   "clientPidBefore": 5255,
+   "clientPidAfter": 5308,
+   "driverSec": 5.7
+  },
+  "oversize": {
+   "maxMessageChars": 65536,
+   "A_clientOversizePrompt": {
+    "ok": true,
+    "error": {
+     "class": "com.agentclientprotocol.protocol.JsonRpcException",
+     "message": "binder-channel-v1: message of 66654 chars exceeds 65536"
+    },
+    "ms": 51.020916
+   },
+   "B_nearLimitPrompt": {
+    "ok": true,
+    "prompt": {
+     "chunks": 20,
+     "outOfOrder": 0,
+     "stopReason": "END_TURN",
+     "error": null,
+     "firstChunkMs": 29.738667,
+     "totalMs": 483.414709,
+     "chunksPerSec": 41.372344754201514,
+     "latency": {
+      "n": 20,
+      "p50ms": 5.092917,
+      "p90ms": 14.349416,
+      "p99ms": 16.264375,
+      "maxms": 16.264375,
+      "meanms": 6.30825425,
+      "first10pctMeanMs": 9.6246875,
+      "last10pctMeanMs": 4.171646
+     }
+    }
+   },
+   "C_agentOversizeNotification": {
+    "ok": true,
+    "prompt": {
+     "chunks": 3,
+     "outOfOrder": 0,
+     "stopReason": "END_TURN",
+     "error": null,
+     "firstChunkMs": 3.412125,
+     "totalMs": 16.190084,
+     "chunksPerSec": 185.29860623329688,
+     "latency": {
+      "n": 3,
+      "p50ms": 7.135458,
+      "p90ms": 8.133542,
+      "p99ms": 8.133542,
+      "maxms": 8.133542,
+      "meanms": 5.610888666666667,
+      "first10pctMeanMs": 1.563666,
+      "last10pctMeanMs": 7.135458
+     }
+    },
+    "serverDroppedTooLarge": 1
+   },
+   "D_rawOversizeInjection": {
+    "ok": true,
+    "closeCause": "remote(message of 65537 chars exceeds 65536)",
+    "ms": 4.995417
+   },
+   "ok": true,
+   "scenario": "oversize",
+   "run": "oversize-970aff",
+   "args": {},
+   "wallMs": 861.621834,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 5358,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 1.9
+  },
+  "window-violation": {
+   "ok": true,
+   "injected": 8,
+   "units": 30000,
+   "sendError": {
+    "class": "android.os.DeadObjectException",
+    "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+   },
+   "closeCause": "remote(window exceeded: 2 messages / 60000 chars unacked)",
+   "scenario": "window-violation",
+   "run": "window-violation-5d377c",
+   "args": {
+    "units": 30000,
+    "n": 200
+   },
+   "wallMs": 183.833875,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 5416,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [
+    "09-29 04:46:37.052  5416  5439 E IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 04:46:37.053  5416  5439 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 04:46:37.053  5416  5439 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 60084)"
+   ],
+   "driverSec": 1.9
+  },
+  "stream-noflow": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": false,
+    "enforceInboundLimits": false
+   },
+   "cmd": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 5000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 9.399083,
+    "totalMs": 1637.346709,
+    "chunksPerSec": 3053.720981949951,
+    "latency": {
+     "n": 5000,
+     "p50ms": 641.670876,
+     "p90ms": 660.769417,
+     "p99ms": 696.737209,
+     "maxms": 701.235292,
+     "meanms": 610.840867835,
+     "first10pctMeanMs": 352.53484091,
+     "last10pctMeanMs": 636.81520759
+    }
+   },
+   "mainThread": {
+    "ticks": 150,
+    "maxLateMs": 27.398208,
+    "lateOver16ms": 1,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 5003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "peerUid": 10215,
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 5003,
+      "consumed": 5003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 635,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 227,
+     "maxQueuedChars": 227,
+     "maxUnackedMessages": 3780,
+     "maxUnackedChars": 986378,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 71.611,
+     "binderSendUsMax": 104.916
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 5,
+     "peerUid": 10214,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-5(uid=10214)",
+       "peerUid": 10214,
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 5003,
+        "acked": 5003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 5003,
+       "acksSent": 3,
+       "acksReceived": 635,
+       "windowWaits": 0,
+       "windowWaitMsTotal": 0,
+       "windowWaitMsMax": 0,
+       "maxInFlightMessages": 3780,
+       "maxInFlightChars": 986378,
+       "maxQueuedChars": 37845,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 227,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 19.261,
+       "binderSendUsMax": 17663
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5471,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 39
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-noflow-03f5f8",
+   "args": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "cfg": {
+     "flowControl": false,
+     "enforceInboundLimits": false
+    }
+   },
+   "wallMs": 1861.295417,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 5471,
+    "uid": 10214,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 36,
+    "release": "16",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 3.0,
+   "deliveredAll": true
+  }
+ }
+}
