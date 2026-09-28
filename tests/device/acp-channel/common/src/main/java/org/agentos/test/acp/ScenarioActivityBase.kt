@@ -15,7 +15,6 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
 
@@ -26,9 +25,9 @@ import java.util.UUID
  */
 abstract class ScenarioActivityBase : Activity() {
     private val ui = MainScope()
-    protected val work = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** 场景跑在进程级的作用域里：Activity 被重建（配置变化等）时不取消正在跑的场景。 */
+    protected val work: CoroutineScope get() = processScope
     private lateinit var text: TextView
-    private var running: Job? = null
 
     /** 执行一个场景；不认识的场景返回 null。 */
     protected abstract suspend fun runScenario(name: String, args: JSONObject, runId: String, status: (String) -> Unit): JSONObject?
@@ -37,7 +36,8 @@ abstract class ScenarioActivityBase : Activity() {
         super.onCreate(savedInstanceState)
         text = TextView(this).apply { textSize = 14f; setPadding(32, 160, 32, 32) }
         setContentView(text)
-        handle(intent)
+        // 重建（配置变化）时不重复执行同一个 intent
+        if (savedInstanceState == null) handle(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -57,12 +57,11 @@ abstract class ScenarioActivityBase : Activity() {
             return
         }
         text.text = "$scenario …"
-        running = ui.launch {
+        running = processScope.launch {
             val t0 = SystemClock.elapsedRealtimeNanos()
             val result = try {
-                withContext(Dispatchers.Default) {
-                    runScenario(scenario, args, runId) { s -> ui.launch { text.text = "$scenario: $s" } }
-                } ?: JSONObject().put("ok", false).put("error", "unknown scenario: $scenario")
+                runScenario(scenario, args, runId) { s -> ui.launch { text.text = "$scenario: $s" } }
+                    ?: JSONObject().put("ok", false).put("error", "unknown scenario: $scenario")
             } catch (e: Throwable) {
                 JSONObject().put("ok", false).put("error", errJson(e)).put("stack", e.stackTraceToString().take(2000))
             }
@@ -73,13 +72,17 @@ abstract class ScenarioActivityBase : Activity() {
                 .put("device", JSONObject().put("model", Build.MODEL).put("sdk", Build.VERSION.SDK_INT)
                     .put("release", Build.VERSION.RELEASE).put("fingerprint", Build.FINGERPRINT))
             Results.emit(runId, result)
-            text.text = "$scenario done: ok=${result.opt("ok")}"
+            ui.launch { text.text = "$scenario done: ok=${result.opt("ok")}" }
         }
     }
 
     override fun onDestroy() {
         ui.cancel()
-        work.cancel()
         super.onDestroy()
+    }
+
+    private companion object {
+        val processScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        @Volatile var running: Job? = null
     }
 }
