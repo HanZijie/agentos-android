@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.flow
+import org.agentos.acp.AcpAndroid
 import org.agentos.acp.BinderAcpTransport
 import org.agentos.channel.BinderChannel
 import org.agentos.channel.ChannelConfig
@@ -36,6 +37,11 @@ import kotlin.concurrent.thread
 /** :agent 进程里的共享状态：所有 ACP 连接（Binder 与电脑端 socket）、统计、网关。 */
 object AgentHost {
     private const val TAG = "S3Agent"
+
+    init {
+        // 电脑端网关不经过 BinderAcpTransport，也要先打开 SDK 的 Android 日志开关
+        AcpAndroid.ensureInitialized()
+    }
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("agent-host"))
 

@@ -143,6 +143,10 @@ class BinderAcpTransport(
     companion object {
         private const val TAG = "BinderAcpTransport"
 
+        init {
+            AcpAndroid.ensureInitialized()
+        }
+
         /**
          * 把 Protocol 和 Transport 的生命周期绑在一起：Transport 关闭时关闭 Protocol，
          * 挂起中的请求随之以 CancellationException("Protocol closed") 结束。

@@ -166,6 +166,7 @@ class Scenarios(
         .put("chunks", args.optInt("chunks", defaults.optInt("chunks", 5000)))
         .put("chunkChars", args.optInt("chunkChars", defaults.optInt("chunkChars", 32)))
         .put("intervalMs", args.optLong("intervalMs", defaults.optLong("intervalMs", 0)))
+        .put("burst", args.optInt("burst", 1))
         .put("bp", args.optBoolean("bp", defaults.optBoolean("bp", false)))
         .put("bpChars", args.optLong("bpChars", 16_384))
         .put("cjk", args.optBoolean("cjk", false))

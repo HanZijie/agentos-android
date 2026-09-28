@@ -56,6 +56,8 @@ private class PromptCommand(json: JSONObject?, echoText: String) {
     val chunks = json?.optInt("chunks", 20) ?: 20
     val chunkChars = json?.optInt("chunkChars", 0) ?: 0
     val intervalMs = json?.optLong("intervalMs", 20) ?: 20L
+    /** 每个间隔发几条：速率 = burst * 1000 / intervalMs。 */
+    val burst = maxOf(1, json?.optInt("burst", 1) ?: 1)
     val cjk = json?.optBoolean("cjk", false) ?: false
     val backpressure = json?.optBoolean("bp", false) ?: false
     val bpChars = json?.optLong("bpChars", 16_384) ?: 16_384L
@@ -87,7 +89,9 @@ private class SpikeSession(
                 if (cmd.backpressure) transport?.awaitWritable(cmd.bpChars)
                 val body = filler ?: if (cmd.echo != null) "echo[$i]: ${cmd.echo.take(64)}\n" else "chunk $i "
                 emit(chunk(body, i))
-                if (cmd.intervalMs > 0) delay(cmd.intervalMs) else if (i % 64 == 63) yield()
+                if (cmd.intervalMs > 0) {
+                    if (i % cmd.burst == cmd.burst - 1) delay(cmd.intervalMs)
+                } else if (i % 64 == 63) yield()
             }
             if (cmd.bigChunkChars > 0) emit(chunk("y".repeat(cmd.bigChunkChars), cmd.chunks))
             emit(Event.PromptResponseEvent(PromptResponse(StopReason.END_TURN)))
