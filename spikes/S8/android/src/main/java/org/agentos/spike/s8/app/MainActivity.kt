@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *   adb reverse tcp:8787 tcp:8787
  *   adb shell am start -n org.agentos.spike.s8/org.agentos.spike.s8.app.MainActivity --es modes contract,measure
  * Real endpoints (keys come from the caller's environment, passed as extras, never stored):
- *   --es modes real --es minimaxKey "$MINIMAX_API_KEY" [--es compatUrl ... --es compatKey ... --es compatModel ...]
+ *   --es modes real --es minimaxKey "$MINIMAX_API_KEY" [--es minimaxBaseUrl "$MINIMAX_ANTHROPIC_BASE_URL"] [--es compatUrl ... --es compatKey ... --es compatModel ...]
  * Results: logcat tag S8, and files/s8-results.json (adb shell run-as org.agentos.spike.s8 cat files/s8-results.json).
  */
 class MainActivity : Activity() {
@@ -41,11 +41,12 @@ class MainActivity : Activity() {
         val modes = (extras.getString("modes") ?: "contract,measure").split(",").map { it.trim() }.toSet()
         val fakeBase = extras.getString("fakeBase") ?: "http://127.0.0.1:8787"
         val minimaxKey = extras.getString("minimaxKey")
+        val minimaxBaseUrl = extras.getString("minimaxBaseUrl")
         val compat = Triple(extras.getString("compatUrl"), extras.getString("compatKey"), extras.getString("compatModel"))
         intent.replaceExtras(Bundle()) // do not keep keys around in the intent
 
         scope.launch {
-            val out = withContext(Dispatchers.Default) { run(modes, fakeBase, minimaxKey, compat) }
+            val out = withContext(Dispatchers.Default) { run(modes, fakeBase, minimaxKey, minimaxBaseUrl, compat) }
             val file = File(filesDir, "s8-results.json")
             file.writeText(out.toString(2))
             // Release builds are not debuggable (no run-as), so also dump the JSON to logcat in chunks.
@@ -55,7 +56,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private suspend fun run(modes: Set<String>, fakeBase: String, minimaxKey: String?, compat: Triple<String?, String?, String?>): JSONObject {
+    private suspend fun run(modes: Set<String>, fakeBase: String, minimaxKey: String?, minimaxBaseUrl: String?, compat: Triple<String?, String?, String?>): JSONObject {
         val t0 = System.nanoTime()
         val source = assets.open("pi-agent.js").bufferedReader().use { it.readText() }
         val assetReadMs = (System.nanoTime() - t0) / 1e6
@@ -86,6 +87,8 @@ class MainActivity : Activity() {
             if (!minimaxKey.isNullOrBlank()) {
                 targets += RealTarget("minimax", runner.presetModel("minimax", "anthropic-messages"), minimaxKey)
                 targets += RealTarget("minimax-cn", runner.presetModel("minimax-cn", "anthropic-messages"), minimaxKey)
+                // Same minimax-cn preset (model flags unchanged), only the Anthropic base URL replaced, e.g. https://api.minimax.cn/anthropic
+                if (!minimaxBaseUrl.isNullOrBlank()) targets += RealTarget("minimax-cn@custom-base", runner.presetModel("minimax-cn", "anthropic-messages").put("baseUrl", minimaxBaseUrl), minimaxKey)
             } else skipped += "minimax, minimax-cn: no key"
             val (url, key, model) = compat
             if (!url.isNullOrBlank() && !key.isNullOrBlank() && !model.isNullOrBlank()) targets += RealTarget("openai-compat", runner.customModel("openai-completions", model, url), key)

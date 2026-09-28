@@ -235,10 +235,10 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 | # | 状态 | 结论 | 还差什么 |
 |---|---|---|---|
-| S1 | 不需要设备的部分完成 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降级、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁 | Magisk / KernelSU 真机（M1–M8 用例） |
-| S2 | 不需要设备的部分完成 | 监督契约 v0 写进 [spikes/S2.md](spikes/S2.md)：判活看进程，心跳只记录任务状态；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起 | root 真机，API 35 / 36 / 37 × Magisk / KernelSU；最关键的是 root 拉起前台服务能否绕开后台启动限制（B0、T1） |
+| S1 | 不需要设备的部分完成；root 模拟器（adb root，API 35 / 37）上 M1–M6 通过 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降��、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁；`pm install` 的输入方式按 tmp → pipe → path → stdin → session 依次回退（模拟器上 path 被 SELinux 拒） | Magisk / KernelSU 真机（M1–M8，含 Play Protect） |
+| S2 | 监督契约 v0.1；root 模拟器（adb root，API 35 / 37）上 B0、K1、K2、K4、K5、T1、P1、B1（缩短为 10 分钟）通过 | [spikes/S2.md](spikes/S2.md)：判活看进程，心跳记录任务状态并用来发现短命进程（`boot` 字段必须等于 `Settings.Global.BOOT_COUNT`）；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起，包处于 stopped 时不拉起。**root 拉起前台服务按 `SYSTEM_UID` 豁免后台启动限制**，App 自己在后台被拒时由监督进程 1.9 s 内代为提升 | Magisk / KernelSU 真机（SELinux 上下文与 adb root 不同）；灭屏 30 分钟、24 小时驻留与内存；K3、K5b |
 | S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑） | 可用；通道参数已定 | API 35 / 36 / 37 真机 |
-| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20） | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；用真实 key 跑 MiniMax 国际 / 国内和 OpenAI 兼容端点 |
+| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；MiniMax 国际预设（需要国际 key）；OpenAI 兼容端点 |
 | S4–S7 | 未开始 | — | — |
 
 **S2、S3、S4、S6 验证的是四段不同的连接，不能互相替代：**

@@ -4,7 +4,7 @@
 #   ANDROID_SERIAL=<serial> tools/run-android.sh [debug|release] [modes]
 #
 # modes: comma list of contract,measure,real (default contract,measure).
-# For "real", keys are taken from this shell's environment (MINIMAX_API_KEY,
+# For "real", keys are taken from this shell's environment (MINIMAX_API_KEY, optional MINIMAX_ANTHROPIC_BASE_URL,
 # OPENAI_COMPAT_BASE_URL / _API_KEY / _MODEL) and passed as intent extras; they are
 # not written to any file. The fake endpoint must be running on this machine:
 #   node bundle/test/fake-llm.mjs --port 8787
@@ -26,6 +26,7 @@ curl --noproxy '*' -fsS -X POST http://127.0.0.1:8787/__reset >/dev/null
 extras=(--es modes "$MODES")
 if [[ "$MODES" == *real* ]]; then
   [[ -n "${MINIMAX_API_KEY:-}" ]] && extras+=(--es minimaxKey "$MINIMAX_API_KEY")
+  [[ -n "${MINIMAX_ANTHROPIC_BASE_URL:-}" ]] && extras+=(--es minimaxBaseUrl "$MINIMAX_ANTHROPIC_BASE_URL")
   if [[ -n "${OPENAI_COMPAT_BASE_URL:-}" && -n "${OPENAI_COMPAT_API_KEY:-}" && -n "${OPENAI_COMPAT_MODEL:-}" ]]; then
     extras+=(--es compatUrl "$OPENAI_COMPAT_BASE_URL" --es compatKey "$OPENAI_COMPAT_API_KEY" --es compatModel "$OPENAI_COMPAT_MODEL")
   fi

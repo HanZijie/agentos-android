@@ -62,6 +62,9 @@ rescue-check)
     [ -w /data/adb/modules ] && echo "/data/adb/modules writable by root: yes"
     command -v magisk >/dev/null && echo "Magisk: boot into its safe mode (volume-down during boot) disables all modules"
     [ -d /data/adb/ksu ] && echo "KernelSU: press volume-down several times during boot for safe mode"
+    [ -x /system/xbin/su ] && [ "$(getprop ro.build.type)" = userdebug ] &&
+        echo "userdebug build without a root manager: adb root, then touch the disable file above"
+    :
     ;;
 pid) pid ;;
 hb) cat "$HB" ;;
@@ -100,6 +103,10 @@ root-broadcast)
             --el org.agentos.extra.SEQ 424242
     done
     ;;
+boot-log)
+    # supervisor.log since the last "supervisor start" (this boot only)
+    awk '/supervisor start/ { n = 0 } { l[n++] = $0 } END { for (i = 0; i < n; i++) print l[i] }' "$STATE/supervisor.log"
+    ;;
 logs)
     echo "== supervisor.log"; tail -n "${2:-150}" "$STATE/supervisor.log" 2>/dev/null
     echo "== status"; cat "$STATE/status" 2>/dev/null
@@ -115,8 +122,22 @@ start-supervisor)
         nohup sh "$DIR/supervisor.sh" >/dev/null 2>&1 &
     echo "started supervisor pid=$!"
     ;;
+unpack-module)
+    # adb-root mode (no Magisk / KernelSU): place the module where a root manager would, by hand.
+    # Nothing is mounted and nothing runs at boot; s2.sh starts service.sh after each boot.
+    M=/data/adb/modules/agentos_s2
+    [ -f "$2" ] || { echo "no zip: $2"; exit 1; }
+    [ -d "$M" ] && mv "$M" "$M.old.$$" && rm -rf "$M.old.$$"
+    mkdir -p "$M" && unzip -o -q "$2" -d "$M" && rm -rf "$M/META-INF" && chmod 755 "$M"/*.sh
+    echo "module unpacked into $M: $(ls "$M" | tr '\n' ' ')"
+    ;;
 stop-supervisor)
-    read -r sp <"$STATE/supervisor.pid" && kill "$sp" && echo "stopped $sp"
+    # TERM is handled after the supervisor's current `sleep` returns (up to 5 s): wait for the exit,
+    # otherwise a new instance sees the old pid and refuses to start.
+    read -r sp <"$STATE/supervisor.pid" && kill "$sp" && echo "stopping $sp"
+    i=0
+    while [ -n "$sp" ] && [ -d "/proc/$sp" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+    [ -d "/proc/$sp" ] && echo "still running after 10 s" || echo "stopped"
     ;;
 monitor)
     # Soak monitor: every $2 seconds for $3 hours, one CSV line. Run with nohup (s2.sh soak).
