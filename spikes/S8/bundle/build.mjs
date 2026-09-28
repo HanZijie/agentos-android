@@ -1,7 +1,8 @@
 // S8 bundle build: pi-agent-core + pi-ai (anthropic-messages, openai-completions only)
 // as a single IIFE for QuickJS, plus model-catalog.json exported from pi-ai's own catalog.
 //
-//   node build.mjs [--target es2020] [--minify] [--out-dir dist]
+//   node build.mjs [--target es2022] [--no-minify] [--out-dir dist]
+// Defaults (es2022, minified) are what S8 measured on device; --no-minify for readable stacks.
 import * as esbuild from "esbuild";
 import { gzipSync } from "node:zlib";
 import fs from "node:fs";
@@ -15,8 +16,8 @@ const opt = (name, fallback) => {
   return i >= 0 ? args[i + 1] : fallback;
 };
 const outDir = path.resolve(here, opt("--out-dir", "dist"));
-const target = opt("--target", "es2020");
-const minify = args.includes("--minify");
+const target = opt("--target", "es2022");
+const minify = !args.includes("--no-minify");
 
 const PI_AI_DIR = path.resolve(here, "node_modules/@earendil-works/pi-ai/dist");
 const PI_CORE_DIR = path.resolve(here, "node_modules/@earendil-works/pi-agent-core");

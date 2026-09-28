@@ -157,6 +157,18 @@ class S8Runner(
                 JSONObject().put("deltas", d.size).put("deltaSpreadMs", spread).put("firstDeltaBeforeEndMs", tEnd - d.first().at).put("turnMs", tEnd - t0)
             }
 
+            check("$tag: CJK and emoji survive host <-> JS <-> HTTP") {
+                val sid = h.newSession(model)
+                val n0 = fakeLog().length()
+                val r = h.prompt(sid, "[echo] $UNICODE_PROBE")
+                val streamed = h.deltas(sid).joinToString("") { it.e.getJSONObject("update").getString("delta") }
+                val sent = fakeLog().objects(n0).first().getJSONObject("body").getJSONArray("messages").toString()
+                assertThat(sent.contains(UNICODE_PROBE)) { "request body lost characters: ${sent.take(200)}" }
+                assertThat(r.getString("text").contains(UNICODE_PROBE)) { "reply ${r.getString("text")}" }
+                assertThat(streamed == r.getString("text")) { "streamed deltas differ: $streamed" }
+                null
+            }
+
             check("$tag: tool call round trip") {
                 val sid = h.newSession(model)
                 val n0 = fakeLog().length()
@@ -429,7 +441,7 @@ class S8Runner(
                 val r = coroutineScope {
                     val p = async { h.prompt(sid, "Count from 1 to 300, one number per line, no other text.") }
                     var i = 0
-                    while (h.deltas(sid).isEmpty() && i++ < 1500) delay(20)
+                    while (h.deltas(sid).isEmpty() && !p.isCompleted && i++ < 1500) delay(20)
                     h.engine.request("abort", JSONObject().put("sid", sid))
                     p.await()
                 }
@@ -445,6 +457,8 @@ class S8Runner(
     }
 
     companion object {
+        const val UNICODE_PROBE = "你好，世界 🙂👍🏽 naïve café 𝄞 한국어"
+
         fun indexOf(haystack: ByteArray, needle: ByteArray): Int {
             if (needle.isEmpty() || haystack.size < needle.size) return -1
             outer@ for (i in 0..haystack.size - needle.size) {

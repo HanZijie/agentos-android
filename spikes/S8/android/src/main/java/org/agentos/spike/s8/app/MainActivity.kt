@@ -77,6 +77,7 @@ class MainActivity : Activity() {
             .put("isEmulator", Build.FINGERPRINT.contains("generic") || Build.HARDWARE.contains("ranchu") || Build.MODEL.contains("sdk_gphone"))
             .put("assetReadMs", assetReadMs)
         log("device: ${out.getString("device")}")
+        if ("coldsource" in modes || "coldbytecode" in modes) out.put("cold", coldStart(runner, source, "coldbytecode" in modes))
         if ("contract" in modes) out.put("contract", runner.runContract())
         if ("measure" in modes) out.put("measure", runner.runMeasurements())
         if ("real" in modes) {
@@ -91,6 +92,33 @@ class MainActivity : Activity() {
             else skipped += "openai-compat: not configured"
             out.put("real", runner.runReal(targets).put("skipped", skipped))
         }
+        return out
+    }
+
+    /**
+     * First runtime in a fresh process (the app is force-stopped between launches).
+     * Bytecode is compiled on the first "coldsource" launch and cached in filesDir,
+     * the way the real :agent process would cache it (keyed by bundle + QuickJS version).
+     */
+    private suspend fun coldStart(runner: S8Runner, source: String, fromBytecode: Boolean): JSONObject {
+        val cache = File(filesDir, "pi-agent.qjsbc")
+        val creds = org.agentos.spike.s8.PrefixCredentials(emptyList())
+        val out = JSONObject().put("fromBytecode", fromBytecode)
+        val bundle = if (fromBytecode) {
+            val t0 = System.nanoTime()
+            val bytes = cache.readBytes()
+            out.put("bytecodeReadMs", (System.nanoTime() - t0) / 1e6)
+            org.agentos.spike.s8.JsBundle.Bytecode(bytes)
+        } else org.agentos.spike.s8.JsBundle.Source(source)
+        val h = runner.newHarness(bundle, creds, emptyList())
+        val t = h.engine.start()
+        out.put("createMs", t.createMs).put("evalMs", t.evalMs).put("readyMs", t.readyMs).put("totalMs", t.totalMs)
+        h.engine.stop()
+        if (!fromBytecode && !cache.exists()) {
+            val bytes = org.agentos.spike.s8.PiJsEngine.compile(source, Dispatchers.Default)
+            cache.writeBytes(bytes)
+        }
+        log("cold ${out}")
         return out
     }
 

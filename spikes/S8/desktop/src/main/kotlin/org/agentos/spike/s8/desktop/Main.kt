@@ -65,6 +65,15 @@ private suspend fun runAll(args: Array<String>): Int {
         } else skipped += "openai-compat: OPENAI_COMPAT_BASE_URL / OPENAI_COMPAT_API_KEY / OPENAI_COMPAT_MODEL not set"
         out.put("real", runner.runReal(targets).put("skipped", skipped))
     }
+    if ("probe" in modes) {
+        // No key needed: an invalid key against the real MiniMax endpoints exercises OkHttp/TLS,
+        // the SDK's handling of a real error response, and "no retry" — but is not a model call.
+        val invalid = "invalid-key-s8-probe"
+        out.put("probe", runner.runReal(listOf(
+            RealTarget("minimax (invalid key)", runner.presetModel("minimax", "anthropic-messages"), invalid),
+            RealTarget("minimax-cn (invalid key)", runner.presetModel("minimax-cn", "anthropic-messages"), invalid),
+        )))
+    }
     val file = File(root, "desktop/build/s8-desktop-results.json")
     file.parentFile.mkdirs()
     file.writeText(out.toString(2))

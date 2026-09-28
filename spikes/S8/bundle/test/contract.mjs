@@ -15,6 +15,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.resolve(here, "../dist");
 const catalog = JSON.parse(fs.readFileSync(path.join(dist, "model-catalog.json"), "utf8"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const UNICODE_PROBE = "你好，世界 🙂👍🏽 naïve café 𝄞 한국어";
 
 function presetModel(providerId, api) {
   const p = catalog.providers.find((x) => x.id === providerId);
@@ -84,6 +85,18 @@ for (const fam of families) {
     const types = eventsFor(sid).map((e) => e.type);
     for (const t of ["agent_start", "turn_start", "message_start", "message_update", "message_end", "turn_end", "agent_end"]) assert(types.includes(t), `missing ${t}`);
     return { deltas: deltas.length, firstDeltaBeforeLastChunkMs: req.chunkTimes.at(-1) - deltas[0].at };
+  });
+
+  await check(`${tag}: CJK and emoji survive host <-> JS <-> HTTP`, async () => {
+    const sid = await newSession(fam.model);
+    const n0 = fake.log.length;
+    const text = `[echo] ${UNICODE_PROBE}`;
+    const r = await engine.request("prompt", { sid, text });
+    const streamed = eventsFor(sid).filter((e) => e.update?.type === "text_delta").map((e) => e.update.delta).join("");
+    const sent = JSON.stringify(logSince(n0)[0].body.messages);
+    assert(sent.includes(UNICODE_PROBE), "request body lost characters");
+    assert(r.text.includes(UNICODE_PROBE), `reply ${JSON.stringify(r.text)}`);
+    assert(streamed === r.text, "streamed deltas differ from final text");
   });
 
   await check(`${tag}: tool call round trip`, async () => {

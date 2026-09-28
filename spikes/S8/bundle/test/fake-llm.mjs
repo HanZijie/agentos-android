@@ -65,9 +65,11 @@ function plan(conv) {
 }
 
 function chunk(text, parts) {
-  const size = Math.max(1, Math.ceil(text.length / parts));
+  // Split by code points: real servers never cut a surrogate pair across SSE events.
+  const cps = Array.from(text);
+  const size = Math.max(1, Math.ceil(cps.length / parts));
   const out = [];
-  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+  for (let i = 0; i < cps.length; i += size) out.push(cps.slice(i, i + size).join(""));
   return out;
 }
 
