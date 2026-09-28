@@ -1,0 +1,94 @@
+# Module packaging (docs/implementation-plan.md section 2, CI table; W7):
+# - module-scripts: syntax of every module script, host-side tests of the install logic, the support
+#   matrix parser and the supervisor state machine, under dash, bash --posix and busybox ash
+#   (Magisk / KernelSU run module scripts with busybox ash).
+# - package: core/pi-runtime/build.mjs -> APK -> agentos-<ver>.zip, then the offline checks
+#   (file allowlist, no system/ / post-fs-data / sepolicy / binaries, sh -n, module.prop, support
+#   matrix, apks.list hashes). Uses the debug variant: CI has no release certificate, and pm cannot
+#   install an unsigned APK. The zip is a test artifact, not a release (release.yml, W28).
+name: module-package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: module-package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "21"
+  NODE_VERSION: "22"
+
+jobs:
+  module-scripts:
+    name: 模块脚本（语法与主机侧测试）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 busybox
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq busybox
+
+      - name: 语法检查（dash / bash / busybox ash）
+        run: |
+          for f in module/*.sh module/META-INF/com/google/android/update-binary module/test/*.sh tools/*.sh; do
+            dash -n "$f" && bash -n "$f" && busybox sh -n "$f" || { echo "syntax error: $f"; exit 1; }
+          done
+
+      - name: 安装逻辑与支持矩阵（unit.sh）
+        run: |
+          for s in dash "bash --posix" "busybox sh"; do SIM_SHELL="$s" sh module/test/unit.sh; done
+
+      - name: 监督状态机（service-sim.sh）
+        run: |
+          for s in dash "bash --posix" "busybox sh"; do SIM_SHELL="$s" sh module/test/service-sim.sh; done
+
+      - name: shellcheck（仅提示）
+        continue-on-error: true
+        run: shellcheck -s sh -S error module/*.sh tools/check-device.sh tools/smoke-test.sh
+
+  package:
+    name: 打包 agentos.zip 并做离线检查
+    needs: module-scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: core/pi-runtime/package-lock.json
+
+      - name: 打包（pi-agent.js → APK → zip）
+        run: python3 tools/package-module.py --variant debug
+
+      - name: 离线检查
+        run: |
+          for z in build/module/agentos-*.zip; do python3 tools/package-module.py --check "$z"; done
+
+      - name: 上传 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-module-debug
+          path: |
+            build/module/agentos-*.zip
+            build/module/agentos-*.zip.sha256
+            build/module/build-info.json
+          if-no-files-found: error
