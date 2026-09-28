@@ -102,8 +102,20 @@ sealed interface ModelRequestOutcome {
     val sessionId: String?
     val url: String
 
-    class Responded(override val sessionId: String?, override val url: String, val status: Int, val attempts: Int) : ModelRequestOutcome
+    /** The response head arrived. [retryAfterSeconds] comes from `retry-after` / `retry-after-ms`, when present. */
+    class Responded(
+        override val sessionId: String?,
+        override val url: String,
+        val status: Int,
+        val attempts: Int,
+        val retryAfterSeconds: Long? = null,
+    ) : ModelRequestOutcome
+
+    /** Failed before a response head arrived (nothing reached JS). */
     class Failed(override val sessionId: String?, override val url: String, val error: HostFetchException) : ModelRequestOutcome
+
+    /** The body failed after the head had been handed to JS (not reported for aborts). */
+    class BodyFailed(override val sessionId: String?, override val url: String, val error: HostFetchException) : ModelRequestOutcome
 }
 
 interface PiRuntimeListener {
@@ -189,6 +201,13 @@ class PiRuntime(
     private val fetches = ConcurrentHashMap<Long, FetchSlot>()
     private val nextId = AtomicLong(1)
     private val ready = CompletableDeferred<JsonObject>()
+    @Volatile private var closing = false
+
+    /**
+     * Async host functions currently running. quickjs-kt can livelock when the runtime is closed
+     * while async bindings are still active, so [close] waits for them to finish first.
+     */
+    private val activeBindings = java.util.concurrent.atomic.AtomicInteger()
 
     /** Test hook: sees everything that flows into JS (commands, response heads and bodies, host call results). */
     @Volatile
@@ -197,7 +216,7 @@ class PiRuntime(
     val activeHostTimers: Int get() = timers.size
     val inflightHostFetches: Int get() = fetches.size
 
-    private class FetchSlot {
+    private class FetchSlot(val sessionId: String?, val url: String) {
         @Volatile var opening: Deferred<FetchResponse>? = null
         @Volatile var response: FetchResponse? = null
         @Volatile var aborted = false
@@ -236,15 +255,15 @@ class PiRuntime(
         if (!fromBytecode) js.evaluate(JsScript.Source(bundle.source, bundle.fileName))
         val t2 = System.nanoTime()
         pumpJob = scope.launch {
-            val cause = try {
+            val failure = try {
                 js.evaluate(JsScript.Source("__pi_main()", "pi-main.js"))
-                null
-            } catch (e: CancellationException) {
                 null
             } catch (e: Throwable) {
                 e
             }
-            stop(cause)
+            // Only close() may end the pump. Anything else (an unhandled rejection, the engine
+            // being closed or crashing underneath us) is a runtime failure (F8).
+            stop(if (closing) null else failure ?: IllegalStateException("Pi pump exited unexpectedly"))
         }
         val hello = withTimeout(readyTimeoutMs) { ready.await() }
         val t3 = System.nanoTime()
@@ -285,12 +304,18 @@ class PiRuntime(
 
     /** Stops the pump (sessions are aborted), releases the engine. Idempotent. */
     suspend fun close() {
+        closing = true
         if (stateFlow.value is PiRuntimeState.Running || stateFlow.value is PiRuntimeState.Starting) {
             commands.trySend(null)
             withTimeoutOrNull(5_000) { pumpJob?.join() }
         }
         stop(null)
-        withContext(NonCancellable) { runCatching { engine?.close() } }
+        withContext(NonCancellable) {
+            // stop() released every host-side wait (commands, timers, fetches); give the bindings
+            // that were blocked on them a moment to return into JS before the runtime goes away.
+            withTimeoutOrNull(3_000) { while (activeBindings.get() > 0) kotlinx.coroutines.delay(5) }
+            runCatching { engine?.close() }
+        }
         scope.cancel()
     }
 
@@ -305,6 +330,8 @@ class PiRuntime(
             if (cause == null) "Pi runtime is closed" else "Pi runtime stopped: ${cause.message}",
             cause,
         )
+        // Tell the listener first, so whoever sees a failed request below already sees the new state.
+        if (previous !is PiRuntimeState.NotStarted) runCatching { listener.onStopped(cause) }
         ready.completeExceptionally(error)
         pending.values.forEach { it.completeExceptionally(error) }
         pending.clear()
@@ -312,7 +339,6 @@ class PiRuntime(
         timers.clear()
         fetches.keys.toList().forEach { abortFetch(it) }
         commands.close()
-        if (previous !is PiRuntimeState.NotStarted) listener.onStopped(cause)
     }
 
     // ------------------------------------------------------------------ commands
@@ -390,6 +416,11 @@ class PiRuntime(
         })
     }
 
+    /** Replaces the host's system prompt (section "agentos") from the next model request on. Not while a prompt runs. */
+    suspend fun setSystemPrompt(sid: String, systemPrompt: String) {
+        request("setSystemPrompt", buildJsonObject { put("sid", sid); put("systemPrompt", systemPrompt) })
+    }
+
     /** Full transcript of [sid], system message first. */
     suspend fun history(sid: String): JsonArray = request("history", buildJsonObject { put("sid", sid) }).jsonArray
 
@@ -410,14 +441,22 @@ class PiRuntime(
     // ------------------------------------------------------------------ host primitives
 
     private fun defineBindings(js: JsEngine) {
+        fun asyncBinding(name: String, body: suspend (List<Any?>) -> Any?) = js.defineAsyncFunction(name) { args ->
+            activeBindings.incrementAndGet()
+            try {
+                body(args)
+            } finally {
+                activeBindings.decrementAndGet()
+            }
+        }
         js.defineFunction("__host_emit") { args ->
             onEmit(args[0] as String)
             null
         }
-        js.defineAsyncFunction("__host_next") {
+        asyncBinding("__host_next") {
             commands.receiveCatching().getOrNull()
         }
-        js.defineAsyncFunction("__host_timer") { args ->
+        asyncBinding("__host_timer") { args ->
             val id = (args[0] as Number).toLong()
             val ms = (args[1] as Number).toLong()
             val signal = CompletableDeferred<String>()
@@ -432,17 +471,17 @@ class PiRuntime(
             timers.remove((args[0] as Number).toLong())?.complete("cancelled")
             null
         }
-        js.defineAsyncFunction("__host_fetch") { args ->
+        asyncBinding("__host_fetch") { args ->
             openFetch((args[0] as Number).toLong(), args[1] as String)
         }
-        js.defineAsyncFunction("__host_fetch_read") { args ->
+        asyncBinding("__host_fetch_read") { args ->
             readFetch((args[0] as Number).toLong())
         }
         js.defineFunction("__host_fetch_abort") { args ->
             abortFetch((args[0] as Number).toLong())
             null
         }
-        js.defineAsyncFunction("__host_call") { args ->
+        asyncBinding("__host_call") { args ->
             val result = hostCall(args[0] as String, json.parseToJsonElement(args[1] as String).jsonObject)
             val text = result?.toString() ?: "{}"
             observe(text)
@@ -504,7 +543,7 @@ class PiRuntime(
             body = r["body"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content,
             sessionId = r["sid"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull,
         )
-        val slot = FetchSlot()
+        val slot = FetchSlot(request.sessionId, request.url)
         fetches[reqId] = slot
         val opening = scope.async(Dispatchers.IO) { fetch.open(request) }
         slot.opening = opening
@@ -525,7 +564,9 @@ class PiRuntime(
             throw HostFetchException(NetErrorKind.CANCELED, "aborted")
         }
         slot.response = response
-        listener.onModelRequest(ModelRequestOutcome.Responded(request.sessionId, request.url, response.status, response.attempts))
+        listener.onModelRequest(
+            ModelRequestOutcome.Responded(request.sessionId, request.url, response.status, response.attempts, retryAfterSeconds(response)),
+        )
         val head = buildJsonObject {
             put("status", response.status)
             put("statusText", response.statusText)
@@ -543,6 +584,12 @@ class PiRuntime(
         val response = slot.response ?: return null
         val chunk = try {
             response.read()
+        } catch (e: HostFetchException) {
+            fetches.remove(reqId, slot)
+            if (e.kind != NetErrorKind.CANCELED && !slot.aborted) {
+                listener.onModelRequest(ModelRequestOutcome.BodyFailed(slot.sessionId, slot.url, e))
+            }
+            throw e
         } catch (e: Exception) {
             fetches.remove(reqId, slot)
             throw e
@@ -560,6 +607,12 @@ class PiRuntime(
         slot.aborted = true
         slot.opening?.cancel()
         slot.response?.cancel()
+    }
+
+    private fun retryAfterSeconds(response: FetchResponse): Long? {
+        fun header(name: String) = response.headers.firstOrNull { it.first == name }?.second?.trim()
+        header("retry-after-ms")?.toDoubleOrNull()?.let { return (it / 1000).toLong().coerceAtLeast(0) }
+        return header("retry-after")?.toDoubleOrNull()?.toLong()?.coerceAtLeast(0)
     }
 
     private fun observe(text: String) {

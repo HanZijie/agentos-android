@@ -65,7 +65,7 @@ abstract class ScenarioActivityBase : Activity() {
             } catch (e: Throwable) {
                 JSONObject().put("ok", false).put("error", errJson(e)).put("stack", e.stackTraceToString().take(2000))
             }
-            result.put("scenario", scenario).put("run", runId).put("args", args)
+            result.put("scenario", scenario).put("run", runId).put("args", redacted(args))
                 .put("wallMs", (SystemClock.elapsedRealtimeNanos() - t0) / 1e6)
                 .put("runner", JSONObject().put("package", packageName).put("pid", Process.myPid()).put("uid", Process.myUid())
                     .put("debuggable", (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0))
@@ -84,5 +84,11 @@ abstract class ScenarioActivityBase : Activity() {
     private companion object {
         val processScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         @Volatile var running: Job? = null
+
+        /** 场景参数里的密钥（BYOK 用例的测试 key）不回显：结果会写进 logcat，而用例要检查 logcat 里没有 key。 */
+        val SECRET_ARGS = setOf("apiKey")
+
+        fun redacted(args: JSONObject): JSONObject =
+            JSONObject(args.toString()).apply { SECRET_ARGS.forEach { if (has(it)) put(it, "<redacted>") } }
     }
 }

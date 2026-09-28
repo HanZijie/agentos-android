@@ -28,7 +28,7 @@ import kotlin.test.assertTrue
  */
 class MiniMaxLiveSmokeTest {
 
-    private class Target(val name: String, val model: ModelSpec)
+    private class Target(val name: String, val model: CatalogModel)
 
     @Test
     fun `MiniMax endpoints chat, call a tool, keep context and abort`() = runBlocking<Unit> {

@@ -43,8 +43,8 @@ class ControlClient(private val ctx: Context) {
         private val iface: Any = Class.forName("org.agentos.internal.IAgentControl\$Stub")
             .getMethod("asInterface", IBinder::class.java).invoke(null, binder)!!
 
-        private fun call(name: String): Any? = try {
-            iface.javaClass.getMethod(name).invoke(iface)
+        private fun call(name: String, vararg args: String?): Any? = try {
+            iface.javaClass.getMethod(name, *Array(args.size) { String::class.java }).invoke(iface, *args)
         } catch (e: java.lang.reflect.InvocationTargetException) {
             throw e.targetException
         }
@@ -53,14 +53,23 @@ class ControlClient(private val ctx: Context) {
         fun runtimeStatus(): JSONObject = JSONObject(call("getRuntimeStatus") as String)
         fun diagnostics(): JSONObject = JSONObject(call("getDiagnostics") as String)
         fun supervisorStatus(): JSONObject = JSONObject(call("getSupervisorStatus") as String)
+
+        // v2：BYOK
+        fun presets(providerId: String?): JSONObject = JSONObject(call("getModelPresets", providerId) as String)
+        fun modelSource(): JSONObject = JSONObject(call("getModelSource") as String)
+        fun setModelSource(sourceJson: String, apiKey: String?): JSONObject = JSONObject(call("setModelSource", sourceJson, apiKey) as String)
+        fun clearModelSource() {
+            call("clearModelSource")
+        }
     }
 }
 
-/** AgentOS 的 :agent。只能用默认通道参数；杀进程用同 UID 的 Process.killProcess。 */
+/** AgentOS 的 :agent（真正的宿主层，A3 起）。只能用默认通道参数；杀进程用同 UID 的 Process.killProcess。 */
 class AppTarget(private val ctx: Context) : AcpTarget {
     override val name = "agentos-app"
     override val acpComponent = TestIds.APP_ACP
     override val supportsChannelConfig = false
+    override val hostRuntime = true
     private val control = ControlClient(ctx)
 
     override suspend fun stats(): JSONObject = control.use { it.diagnostics() }.getJSONObject("acp")
@@ -159,37 +168,38 @@ class AgentServiceScenarios(
             // 先把 :agent 拉起、恢复结束
             control.use { it.runtimeStatus() }
         }
-        val before = control.use { it.diagnostics() }.let { if (cold) null else it }
+        val before = if (cold) null else control.use { it.diagnostics() }
         val c = AcpConn(ctx, TestIds.APP_ACP, ChannelConfig.DEFAULT, scope, "task-fg")
         val samples = JSONArray()
-        val sampleList = mutableListOf<Sample>()
+        val sampleList = java.util.Collections.synchronizedList(mutableListOf<Sample>())
         val run = PromptRun()
         val t0 = now()
+        val promptDone = java.util.concurrent.atomic.AtomicBoolean(false)
+        // 从连接之前就开始采样：宿主层从 session/new 起计入任务，而 session/new 要等恢复结束才返回（A3），
+        // 恢复期间登记的任务只有这样才看得到
+        val sampler = scope.launch {
+            control.use { proxy ->
+                while (!promptDone.get()) {
+                    sampleList += sample(t0, proxy)
+                    Thread.sleep(100)
+                }
+            }
+        }
         try {
             c.connect()
             val session = c.newSession()
             val chunks = (streamMs / 20).toInt()
-            val promptDone = java.util.concurrent.atomic.AtomicBoolean(false)
-            val job = scope.launch {
-                try {
-                    runPrompt(session, JSONObject().put("chunks", chunks).put("intervalMs", 20).toString(), run, status)
-                } finally {
-                    promptDone.set(true)
-                }
+            try {
+                runPrompt(session, JSONObject().put("chunks", chunks).put("intervalMs", 20).toString(), run, status)
+            } finally {
+                promptDone.set(true)
             }
-            control.use { proxy ->
-                while (!promptDone.get()) {
-                    val s = sample(t0, proxy)
-                    sampleList += s
-                    Thread.sleep(100)
-                }
-            }
-            job.join()
+            sampler.join()
             val tEnd = now()
-            // 结束后：3 秒内退出前台、服务停止
+            // 结束后：空闲宽限期（2 s）过后退出前台、服务停止
             var after: Sample? = null
             control.use { proxy ->
-                val deadline = now() + 5_000
+                val deadline = now() + 8_000
                 while (now() < deadline) {
                     val s = sample(t0, proxy)
                     after = s
@@ -204,11 +214,12 @@ class AgentServiceScenarios(
             // 判定
             val sawRecovering = sampleList.any { it.status.optString("phase") == "RECOVERING" && it.status.optInt("tasks") >= 1 }
             val ready = sampleList.filter { it.status.optString("phase") == "READY" && it.status.optInt("tasks") >= 1 }
-            // 进前台需要一次 startForegroundService → onStartCommand 往返，恢复结束后的样本都应在前台
+            // 进前台需要一次 startForegroundService → onStartCommand 往返，恢复结束后的样本都应在前台。
+            // 宿主层从收到请求起计数、调度器接手时有一瞬可能多计 1（session-scheduling.md 7.1），所以心跳 tasks 只要求 ≥ 1
             val firstFg = ready.indexOfFirst { it.status.optBoolean("foreground") }
             val lostFg = if (firstFg < 0) ready else ready.drop(firstFg).filterNot {
                 it.status.optBoolean("foreground") && it.service.optBoolean("foreground") &&
-                    it.hb.optString("fg") == "1" && it.hb.optString("tasks") == "1" && it.hb.optString("state") == "busy"
+                    it.hb.optString("fg") == "1" && (it.hb.optString("tasks").toIntOrNull() ?: 0) >= 1 && it.hb.optString("state") == "busy"
             }
             val readyNotFgAtAll = ready.isNotEmpty() && firstFg < 0
             val a = after

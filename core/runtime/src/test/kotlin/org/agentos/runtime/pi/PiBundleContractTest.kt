@@ -32,7 +32,7 @@ class PiBundleContractTest {
     companion object {
         private lateinit var fake: FakeModelServer
         private lateinit var h: PiHarness
-        private lateinit var families: List<Pair<String, ModelSpec>>
+        private lateinit var families: List<Pair<String, CatalogModel>>
 
         @BeforeClass
         @JvmStatic
@@ -42,7 +42,7 @@ class PiBundleContractTest {
             assumeTrue(PiAssets.MISSING, bundle != null && catalog != null)
             fake = FakeModelServer()
             families = listOf(
-                "anthropic-messages" to ModelSpec(JsonObject(catalog!!.model("minimax", "MiniMax-M2.7")!!.json + ("baseUrl" to kotlinx.serialization.json.JsonPrimitive(fake.anthropicBaseUrl)))),
+                "anthropic-messages" to CatalogModel(JsonObject(catalog!!.model("minimax", "MiniMax-M2.7")!!.json + ("baseUrl" to kotlinx.serialization.json.JsonPrimitive(fake.anthropicBaseUrl)))),
                 "openai-completions" to catalog.customModel("openai-completions", "deepseek-chat", fake.openaiBaseUrl),
             )
             h = PiHarness(families.map { it.second.baseUrl to fake.key })
@@ -61,7 +61,7 @@ class PiBundleContractTest {
 
     private fun since(n: Int) = fake.requests.drop(n)
 
-    private fun forEachFamily(block: suspend (tag: String, model: ModelSpec) -> Unit) = runBlocking<Unit> {
+    private fun forEachFamily(block: suspend (tag: String, model: CatalogModel) -> Unit) = runBlocking<Unit> {
         for ((tag, model) in families) {
             try {
                 block(tag, model)
@@ -167,8 +167,9 @@ class PiBundleContractTest {
     }
 
     @Test
-    fun `abort during a tool call cancels it`() = forEachFamily { _, model ->
+    fun `abort during a tool call cancels it and starts no further model request`() = forEachFamily { _, model ->
         val sid = h.session(model)
+        val n0 = fake.requests.size
         val r = coroutineScope {
             val p = async { h.runtime.prompt(sid, "[tool:slow 1 1]") }
             withTimeout(10_000) { while (h.eventsFor(sid).none { it.type == "tool_execution_start" }) delay(10) }
@@ -178,7 +179,13 @@ class PiBundleContractTest {
             assertTrue((System.nanoTime() - t0) / 1e6 < 1_000, "abort waited for the tool")
             res
         }
-        assertEquals("aborted", r.stopReason)
+        // shouldStopAfterTurn ends the run after the tool batch: the last assistant message keeps
+        // stopReason "toolUse" and its tool call gets an isError result (the adapter reports Aborted).
+        assertEquals("toolUse", r.stopReason)
+        assertEquals(1, since(n0).size, "no model request after the abort")
+        val roles = r.appended.map { it.jsonObject["role"]!!.jsonPrimitive.content }
+        assertEquals(listOf("user", "assistant", "toolResult"), roles)
+        assertEquals("true", r.appended.last().jsonObject["isError"]!!.jsonPrimitive.content)
         val toolCallId = h.eventsFor(sid).first { it.type == "tool_execution_start" }.e["toolCallId"]!!.jsonPrimitive.content
         assertTrue(toolCallId in h.cancelledTools, "host was told to cancel the tool")
     }

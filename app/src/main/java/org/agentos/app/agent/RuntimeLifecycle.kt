@@ -18,10 +18,13 @@ package org.agentos.app.agent
  * 3. 空闲时停止服务用 `stopSelfResult(最近一次 startId)`：如果已经有新的启动请求在路上，停止会失败，服务继续，
  *    等新的命令到达后再判断。
  * 4. 服务被销毁时还有任务（系统停止了它，或与停止请求擦肩而过），重新要求前台。
+ * 5. **空闲宽限期**（[idleGraceMillis]）：任务数归零后要持续这么久才停止服务。宿主层从收到 session/new 起就计入
+ *    任务数，session/new 返回到客户端发来 prompt 之间有几毫秒是 0；没有宽限期的话每次对话都会退出前台再进入一次
+ *    （后台时再次进入还可能被系统拒绝）。宽限期内心跳照常写 tasks=0 state=idle，监督进程按“没有任务”处理。
  *
  * 所有方法都在同一把锁里执行；[Port] 的方法会在锁内被调用，实现里不能反过来等待本类。
  */
-class RuntimeLifecycle(private val port: Port) {
+class RuntimeLifecycle(private val port: Port, private val idleGraceMillis: Long = 0) {
 
     interface Port {
         /** 当前未结束的任务数（排队中 + 执行中），现读宿主层的状态。 */
@@ -38,6 +41,12 @@ class RuntimeLifecycle(private val port: Port) {
 
         /** 有任务 / 没任务的切换：持有或释放 wake lock，开始或停止心跳的定时刷新。 */
         fun onBusyChanged(busy: Boolean)
+
+        /** 单调时钟（毫秒），宽限期计时用。 */
+        fun uptimeMillis(): Long = 0L
+
+        /** [delayMillis] 之后调用一次 [RuntimeLifecycle.onIdleCheck]（宽限期到点）。新的请求可以取代未到点的旧请求。 */
+        fun scheduleIdleCheck(delayMillis: Long) = Unit
     }
 
     enum class Phase { STARTING, RECOVERING, READY }
@@ -53,6 +62,9 @@ class RuntimeLifecycle(private val port: Port) {
     private var lastStartId = 0
     private var busy = false
     private var lastPublished: Status? = null
+
+    /** 任务数最近一次归零（或恢复结束时就是 0）的时刻；有任务时为 null。 */
+    private var idleSince: Long? = null
 
     /** 最近一次要求前台被系统拒绝（交给 root 提升）。诊断用。 */
     var foregroundDenied = false
@@ -127,6 +139,14 @@ class RuntimeLifecycle(private val port: Port) {
         if (n > 0) port.publish(currentStatus(n))
     }
 
+    /** 空闲宽限期到点（[Port.scheduleIdleCheck] 的回调）。 */
+    @Synchronized
+    fun onIdleCheck() {
+        val n = port.taskCount()
+        publish(n)
+        maybeStop(n)
+    }
+
     private fun ensureForeground(n: Int) {
         if (n <= 0 || foreground || startRequested || deniedThisBusyPeriod) return
         if (port.requestServiceStart()) {
@@ -140,7 +160,18 @@ class RuntimeLifecycle(private val port: Port) {
     }
 
     private fun maybeStop(n: Int) {
-        if (phase != Phase.READY || n > 0 || !serviceRunning || startRequested) return
+        if (n > 0) {
+            idleSince = null
+            return
+        }
+        if (phase != Phase.READY || !serviceRunning || startRequested) return
+        val now = port.uptimeMillis()
+        val since = idleSince ?: now.also { idleSince = it }
+        val remaining = idleGraceMillis - (now - since)
+        if (remaining > 0) {
+            port.scheduleIdleCheck(remaining)
+            return
+        }
         if (port.stopService(lastStartId)) {
             serviceRunning = false
             foreground = false
@@ -176,7 +207,8 @@ class RuntimeLifecycle(private val port: Port) {
  * 上一个 `:agent` 进程是不是用户主动停止的（监督契约 S2 a 第 6 条）。是的话，恢复出来的任务不继续。
  *
  * 契约只要求 `REASON=restart` 时检查；这里不论由谁拉起都检查（bind 拉起的冷进程同样不该继续用户停掉的任务），
- * 比契约更严。宿主层的 `AgentRuntime.start()` 目前没有入口接收这个结论，见 C 的报告“对其他 lane 的请求”。
+ * 比契约更严。结论经 `HostPort.environment.previousExitStoppedByUser`（A3）交给宿主层：恢复流程取消排队的任务，
+ * 结果未知的照常暂停。
  */
 object RecoveryPolicy {
     /** ApplicationExitInfo.REASON_USER_REQUESTED / REASON_USER_STOPPED 的取值（API 30 起固定）。 */

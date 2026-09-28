@@ -128,9 +128,10 @@ class PromptRun {
     var firstChunkNs = 0L
     var endNs = 0L
     var chunkChars = 0L
+    var maxChunkChars = 0
 
     fun json(): JSONObject = JSONObject()
-        .put("chunks", chunks).put("outOfOrder", outOfOrder)
+        .put("chunks", chunks).put("chars", chunkChars).put("maxChunkChars", maxChunkChars).put("outOfOrder", outOfOrder)
         .put("stopReason", stopReason ?: JSONObject.NULL)
         .put("error", errJson(error))
         .put("firstChunkMs", if (firstChunkNs > 0) (firstChunkNs - startNs) / 1e6 else -1.0)
@@ -163,7 +164,9 @@ suspend fun runPrompt(
                         run.lastSeq = seq
                         if (run.chunks == 0) run.firstChunkNs = t
                         run.chunks++
-                        run.chunkChars += ((u.content as? ContentBlock.Text)?.text?.length ?: 0)
+                        val len = (u.content as? ContentBlock.Text)?.text?.length ?: 0
+                        run.chunkChars += len
+                        if (len > run.maxChunkChars) run.maxChunkChars = len
                         if (t - lastUi > 250_000_000) {
                             lastUi = t
                             onStatus("chunks=${run.chunks}")
