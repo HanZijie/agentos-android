@@ -44,6 +44,26 @@ data class SupervisorStatus(
         return seq > other.seq
     }
 
+    /**
+     * JSON for IAgentControl.getSupervisorStatus (W6 → W8 settings page). Keys are the property keys;
+     * all string values are restricted to [A-Za-z0-9._-] by parsing, so no escaping is needed.
+     */
+    fun toJson(): String = buildString {
+        append('{')
+        append("\"protocol\":").append(protocol)
+        append(",\"state\":\"").append(state.wire).append('"')
+        append(",\"reason\":\"").append(reason).append('"')
+        append(",\"seq\":").append(seq)
+        append(",\"since\":").append(sinceEpochMillis)
+        append(",\"deaths\":").append(deaths)
+        append(",\"boot_count\":").append(bootCount)
+        append(",\"module_version\":\"").append(moduleVersion).append('"')
+        append(",\"module_version_code\":").append(moduleVersionCode)
+        append(",\"runtime_pid\":").append(runtimePid)
+        append(",\"received_at\":").append(receivedAtMillis)
+        append('}')
+    }
+
     /** "key=value" lines for the DE-storage status file (read by :agent and the UI). */
     fun toProperties(): String = buildString {
         append("protocol=").append(protocol).append('\n')
@@ -120,7 +140,7 @@ data class SupervisorStatus(
                 sinceEpochMillis = map["since"]?.toLongOrNull() ?: 0L,
                 deaths = map["deaths"]?.toIntOrNull() ?: 0,
                 bootCount = map["boot_count"]?.toIntOrNull() ?: -1,
-                moduleVersion = map["module_version"] ?: "unknown",
+                moduleVersion = map["module_version"]?.takeIf { VERSION_PATTERN.matches(it) } ?: "unknown",
                 moduleVersionCode = map["module_version_code"]?.toIntOrNull() ?: 0,
                 runtimePid = map["runtime_pid"]?.toIntOrNull() ?: 0,
                 receivedAtMillis = map["received_at"]?.toLongOrNull() ?: 0L,

@@ -219,8 +219,9 @@ setup() { # name, then scenario variables as KEY=VALUE
 }
 
 run() {
+    # $SIM_SHELL unquoted on purpose: may be "busybox sh" (CI runs dash, bash --posix and busybox ash)
     PATH="$SIM/bin:$PATH" AGENTOS_PROCFS="$SIM/proc" AGENTOS_DATA="$SIM/data" AGENTOS_TMPDIR="$SIM/tmp" \
-        "$SIM_SHELL" "$SIM/mod/service.sh" >"$SIM/stdout" 2>&1 &
+        $SIM_SHELL "$SIM/mod/service.sh" >"$SIM/stdout" 2>&1 &
     _sp=$!
     (sleep 240 && kill -9 $_sp 2>/dev/null) &
     _wd=$!
@@ -426,6 +427,22 @@ sc_stop_during_backoff() {
     check "detected right before the restart" has "force-stopped during backoff" "$LOGF"
 }
 
+sc_recovering_task() {
+    # v0.2: a task registered during recovery counts (recovering tasks>0); recovering tasks=0 does not.
+    setup recovering_task TASKS=0 END=300
+    printf '%s\n' \
+        '120 kill_agent' \
+        '150 spawn; _p=$(agent_pid); write_hb "$_p" 1 1 recovering' \
+        '160 kill_agent' \
+        '195 kill_agent' \
+        '200 spawn; _p=$(agent_pid); write_hb "$_p" 0 1 recovering' \
+        '210 kill_agent' >"$SIM/schedule"
+    run
+    check "death while recovering with a task is restarted" [ "$(count 'START reason=restart' "$SIM/events.log")" = 1 ]
+    _tr=$(sed -n 's/^\([0-9]*\) START reason=restart/\1/p' "$SIM/events.log" | head -n 1)
+    check "restart comes after the recovering death (t=${_tr:-none})" [ "${_tr:-0}" -ge 160 ] && [ "${_tr:-999}" -le 170 ]
+}
+
 sc_hostile_heartbeat() {
     setup hostile_hb END=400
     printf '%s\n' '130 write_hostile_hb' '150 symlink_hb' '170 fifo_hb' '200 kill_agent' >"$SIM/schedule"
@@ -437,7 +454,7 @@ sc_hostile_heartbeat() {
 
 ALL="fresh_install fresh_install_desc upgrade same_version sig_mismatch corrupt_zip unsupported_api
 kill_loop spread_deaths user_stop boot_stopped idle_death promote crash_before_heartbeat module_disabled
-manual_safe_mode short_lived instant_crash stop_during_backoff hostile_heartbeat"
+manual_safe_mode short_lived instant_crash stop_during_backoff recovering_task hostile_heartbeat"
 echo "module/service.sh simulation with $SIM_SHELL"
 for s in ${*:-$ALL}; do
     "sc_$s"

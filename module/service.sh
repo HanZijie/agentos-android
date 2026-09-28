@@ -182,11 +182,13 @@ read_hb() {
     [ $HB_OK = 1 ]
 }
 
-# Only settled states carry a meaningful task count; starting / recovering keep the previous NEED.
+# Only settled states carry a meaningful task count. While recovering, a positive count is trusted
+# (W6 counts tasks registered during recovery exactly) but zero is not (tasks may not be loaded yet),
+# so the previous NEED is kept; starting never counts (contract b / c, v0.2).
 need_from_hb() {
     case $HB_STATE in
     idle | busy | stopping) if [ "$HB_TASKS" -gt 0 ]; then NEED=1; else NEED=0; fi ;;
-    crashed) [ "$HB_TASKS" -gt 0 ] && NEED=1 ;;
+    crashed | recovering) [ "$HB_TASKS" -gt 0 ] && NEED=1 ;;
     esac
 }
 
@@ -266,7 +268,7 @@ unobserved_death() {
     [ "$HB_PID" != "$LAST_DEAD" ] || return 1
     agent_alive "$HB_PID" && return 1
     case $HB_STATE in
-    busy | idle | stopping | crashed) [ "$HB_TASKS" -gt 0 ] && return 0 ;;
+    busy | idle | stopping | crashed | recovering) [ "$HB_TASKS" -gt 0 ] && return 0 ;;
     esac
     LAST_DEAD=$HB_PID # died idle or before settling: nothing to restart, do not look at it again
     return 1
@@ -463,6 +465,8 @@ api_supported() {
 main() {
     mkdir -p "$STATE_DIR"
     chmod 700 "$STATE_DIR"
+    # Managers do not run a disabled module's service.sh; exit anyway if one does (nothing installed).
+    module_gone && exit 0
     single_instance
     trap on_term TERM INT
     load_module_version

@@ -82,7 +82,7 @@ apk() { # versionCode [corrupt] [pkg]
 
 run() { # -> RC, OUTPUT
     set +e
-    OUTPUT=$(PATH="$T/bin:$PATH" MODDIR="$T/mod" AGENTOS_TMPDIR="$T/tmp" PROCFS="$T/proc" "$SH" -c '
+    OUTPUT=$(PATH="$T/bin:$PATH" MODDIR="$T/mod" AGENTOS_TMPDIR="$T/tmp" PROCFS="$T/proc" $SH -c '
         . "$0/common.sh"; . "$0/apks.sh"
         log() { echo "LOG $*"; }
         apks_install_all "$1"; rc=$?
@@ -147,7 +147,7 @@ verified_fingerprints:
 conflicting_modules:
 other: x
 EOF
-OUTPUT=$("$SH" -c '. "$0/common.sh"
+OUTPUT=$($SH -c '. "$0/common.sh"
     matrix_get "$1" api_min; echo "api_min=[$MV]"
     matrix_get "$1" name; echo "name=[$MV]"
     matrix_get "$1" missing; echo "missing=[$MV] rc=$?"

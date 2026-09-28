@@ -8,8 +8,21 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- W7：root 监督进程的状态广播只能由 root（绕过权限检查）或同证书的 App 发来（docs/spikes/S2.md 契约 e） -->
+    <permission
+        android:name="org.agentos.permission.SEND_SUPERVISOR_STATUS"
+        android:protectionLevel="signature" />
+
     <application
         android:allowBackup="false"
-        android:label="AgentOS" />
+        android:label="AgentOS">
+
+        <!-- W7：在主进程（状态广播不会拉起 :agent），不导出，并要求上面的 signature 权限 -->
+        <receiver
+            android:name=".agent.supervisor.SupervisorStatusReceiver"
+            android:exported="false"
+            android:permission="org.agentos.permission.SEND_SUPERVISOR_STATUS" />
+
+    </application>
 
 </manifest>

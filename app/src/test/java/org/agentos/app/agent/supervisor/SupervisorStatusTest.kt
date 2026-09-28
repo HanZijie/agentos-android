@@ -96,6 +96,20 @@ class SupervisorStatusTest {
     }
 
     @Test
+    fun jsonForIAgentControl() {
+        val s = parse(extras(state = "safe_mode", reason = "crash_loop", seq = 9L))!!
+        assertEquals(
+            "{\"protocol\":1,\"state\":\"safe_mode\",\"reason\":\"crash_loop\",\"seq\":9," +
+                "\"since\":1790000000000,\"deaths\":2,\"boot_count\":7,\"module_version\":\"0.1.0\"," +
+                "\"module_version_code\":1,\"runtime_pid\":1234,\"received_at\":42}",
+            s.toJson(),
+        )
+        // values that could break the JSON never survive parsing
+        val hostile = SupervisorStatus.fromProperties(s.toProperties().replace("0.1.0", "0.1\"}{"))!!
+        assertEquals("unknown", hostile.moduleVersion)
+    }
+
+    @Test
     fun storeKeepsOnlyNewerReports() {
         val store = SupervisorStatusStore(tmp.newFolder("supervisor"))
         assertNull(store.read())
