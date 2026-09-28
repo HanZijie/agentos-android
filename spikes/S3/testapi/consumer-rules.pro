@@ -1,0 +1,2 @@
+-keep class org.agentos.spike.s3.api.I* { *; }
+-keep class org.agentos.spike.s3.api.I*$* { *; }
