@@ -4,8 +4,13 @@
 # Needs MODDIR (the module directory holding app/apks.list).
 
 S1_STATE=${S1_STATE:-/data/adb/agentos-s1}
-PROCFS=${AGENTOS_PROCFS:-/proc} # overridable only for spikes/S1/test/lib-test.sh
+PROCFS=${AGENTOS_PROCFS:-/proc}                 # overridable only for spikes/S1/test/lib-test.sh
+S1_TMPDIR=${S1_TMPDIR:-/data/local/tmp}         # shell_data_file: system_server may read it
 S1_LOG=$S1_STATE/install.log
+# Default order (emulator + adb root, API 35 / 37, docs/spikes/S1.md M7): system_server cannot read
+# /data/adb (adb_data_file) nor an fd redirected from it, so "path" and "stdin" fail there; a copy
+# in /data/local/tmp and a pipe both work. The rest stay as fallbacks until real devices are measured.
+S1_AUTO_ORDER="tmp pipe path stdin session"
 
 cs() { read -r _u _r <"$PROCFS/uptime"; echo "${_u%.*}${_u#*.}"; } # uptime in centiseconds
 
@@ -23,11 +28,11 @@ set_desc() { # text -> module.prop description (Magisk and KernelSU re-read it f
     done <"$_p" >"$_p.tmp" && mv -f "$_p.tmp" "$_p"
 }
 
-load_conf() { # optional override written by the test driver: S1_METHOD=auto|path|tmp|stdin|session
+load_conf() { # optional override written by the test driver: S1_METHOD=auto|tmp|pipe|path|stdin|session
     S1_METHOD=auto
     [ -f "$S1_STATE/s1.conf" ] || return 0
     while IFS='=' read -r _k _v; do
-        [ "$_k" = S1_METHOD ] && case $_v in auto | path | tmp | stdin | session) S1_METHOD=$_v ;; esac
+        [ "$_k" = S1_METHOD ] && case $_v in auto | tmp | pipe | path | stdin | session) S1_METHOD=$_v ;; esac
     done <"$S1_STATE/s1.conf"
 }
 
@@ -48,11 +53,15 @@ pm_install() { # apk method -> INSTALL_OUT; 0 on Success
     case $2 in
     path) INSTALL_OUT=$(pm install -r "$1" </dev/null 2>&1) ;;
     tmp)
-        _t=/data/local/tmp/agentos-install-$$.apk
-        cp -f "$1" "$_t" && chmod 644 "$_t"
-        INSTALL_OUT=$(pm install -r "$_t" </dev/null 2>&1)
+        _t=$S1_TMPDIR/agentos-install-$$.apk
+        if cp -f "$1" "$_t" && chmod 644 "$_t"; then
+            INSTALL_OUT=$(pm install -r "$_t" </dev/null 2>&1)
+        else
+            INSTALL_OUT="copy to $S1_TMPDIR failed"
+        fi
         rm -f "$_t"
         ;;
+    pipe) INSTALL_OUT=$(cat "$1" | pm install -r -S "$(stat -c %s "$1")" 2>&1) ;;
     stdin) INSTALL_OUT=$(pm install -r -S "$(stat -c %s "$1")" <"$1" 2>&1) ;;
     session)
         _sz=$(stat -c %s "$1")
@@ -81,7 +90,7 @@ semantic_failure() { # failures another install method cannot fix
 
 install_apk() { # apk -> METHOD_USED, INSTALL_OUT, DUR_MS
     _methods=$S1_METHOD
-    [ "$_methods" = auto ] && _methods="path tmp stdin session"
+    [ "$_methods" = auto ] && _methods=$S1_AUTO_ORDER
     for _m in $_methods; do
         _t0=$(cs)
         pm_install "$1" "$_m"

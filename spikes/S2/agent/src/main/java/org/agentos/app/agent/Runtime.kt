@@ -54,7 +54,12 @@ object Runtime {
         logExitReasons()
     }
 
-    /** Recovery pass: runs once per process, before any task is accepted. */
+    /**
+     * Recovery pass: runs once per process, before any task is accepted.
+     * It does not decide idle / foreground itself: every caller registers the task carried by the
+     * current command first and then calls onChanged(). Deciding "idle" here dropped a cold-start
+     * task out of the foreground (found by the integrator, S2.md "整合时在模拟器上的观察").
+     */
     @Synchronized
     fun ensureLoaded(reason: String) {
         if (loaded) return
@@ -77,7 +82,6 @@ object Runtime {
         }
         persist()
         SpikeLog.i(app, "RECOVERY_DONE reason=$reason recovered=$recovered")
-        onChanged()
     }
 
     @Synchronized

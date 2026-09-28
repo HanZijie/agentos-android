@@ -2,6 +2,11 @@
 # Host-side driver for the S2 cases on a rooted device (see docs/spikes/S2.md, "测试用例").
 # Uses only the device assigned by the integrator: ANDROID_SERIAL must be set.
 #   sh spikes/S2/s2.sh check|install|boot|kill [n]|loop|crash|forcestop|screenoff [min]|bgtask|spoof|soak [h] [mb]|soak-report|collect
+#
+# AGENTOS_ADB_ROOT=1: userdebug emulator after `adb root` (adbd is uid 0, u:r:su:s0), no Magisk / KernelSU.
+#   Root commands run directly in `adb shell` instead of `su -c`; the module is unpacked into
+#   /data/adb/modules/agentos_s2 by hand and its service.sh is started from adb after each boot.
+#   Without the switch (real devices) every command is exactly as before.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 : "${ANDROID_SERIAL:?set ANDROID_SERIAL to the device assigned to lane D}"
@@ -13,7 +18,21 @@ PKG=org.agentos.spike.s2
 CLI=org.agentos.spike.s2.client
 RCV=org.agentos.app.agent.supervisor
 
-r() { $ADB shell "su -c 'sh $DIR/s2dev.sh $*'"; }
+MOD=/data/adb/modules/agentos_s2
+if [ "${AGENTOS_ADB_ROOT:-0}" = 1 ]; then
+    [ "$($ADB shell id -u | tr -d '\r')" = 0 ] || { echo "AGENTOS_ADB_ROOT=1 but adbd is not root: adb -s $ANDROID_SERIAL root" >&2; exit 1; }
+    r() { $ADB shell "sh $DIR/s2dev.sh $*"; }
+    rsh() { $ADB shell "$*"; }
+    SHELL_UID="su shell"
+else
+    r() { $ADB shell "su -c 'sh $DIR/s2dev.sh $*'"; }
+    rsh() { $ADB shell "su -c '$*'"; }
+    SHELL_UID=
+fi
+# adb-root mode only: what the root manager would do at late_start service
+start_module_service() {
+    rsh "setsid nohup sh $MOD/service.sh >/dev/null 2>&1 </dev/null &"
+}
 say() { printf '\n### %s\n' "$*"; }
 probe() { # extra args for the client's PROBE broadcast (sent as shell uid, no root)
     $ADB shell am broadcast -n "$CLI/.ProbeReceiver" -a org.agentos.spike.s2.client.PROBE "$@" >/dev/null
@@ -34,7 +53,9 @@ install)
     $ADB install -r "$OUT/s2-client.apk"
     $ADB shell mkdir -p $DIR
     $ADB push "$OUT/s2dev.sh" "$OUT/supervisor.sh" "$OUT/agentos-s2-module.zip" $DIR/ >/dev/null
-    if $ADB shell "su -c 'command -v magisk'" >/dev/null 2>&1; then
+    if [ "${AGENTOS_ADB_ROOT:-0}" = 1 ]; then
+        rsh "sh $DIR/s2dev.sh unpack-module $DIR/agentos-s2-module.zip"
+    elif $ADB shell "su -c 'command -v magisk'" >/dev/null 2>&1; then
         $ADB shell "su -c 'magisk --install-module $DIR/agentos-s2-module.zip'"
     else
         $ADB shell "su -c '/data/adb/ksud module install $DIR/agentos-s2-module.zip'"
@@ -45,20 +66,38 @@ boot)
     say "B0 boot: reboot, then the supervisor starts the runtime once (F2)"
     $ADB reboot
     $ADB wait-for-device
+    if [ "${AGENTOS_ADB_ROOT:-0}" = 1 ]; then
+        $ADB root >/dev/null
+        sleep 2
+        $ADB wait-for-device
+        echo "adb-root mode: starting service.sh at boot_completed=$($ADB shell getprop sys.boot_completed | tr -d '\r')"
+        start_module_service
+    fi
     until [ "$($ADB shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 2; done
     echo "boot completed. Unlock the device now (the supervisor waits for user 0 to unlock)."
     i=0
-    until r logs 400 | grep -q "runtime up"; do
+    until r boot-log | grep -q "runtime up"; do
         i=$((i + 1))
         [ $i -gt 90 ] && { echo "runtime not started after 3 min"; break; }
         sleep 2
     done
     r logs 40
     ;;
+supervise)
+    say "replace the running supervisor with the module's current service.sh (no reboot)"
+    r stop-supervisor || true
+    sleep 1
+    start_module_service
+    sleep 3
+    r boot-log | tail -n 6
+    ;;
 kill)
     say "K1 kill -9 while a task is running, ${1:-3} times, 70 s apart (backoff resets after 60 s)"
     r task 0 0 >/dev/null
     r wait-fg 15
+    # Default: give the supervisor one idle poll (5 s) to adopt the process first. S2_ADOPT_WAIT=0
+    # kills it before the supervisor has seen it (the "unobserved runtime" path found on API 35).
+    sleep "${S2_ADOPT_WAIT:-6}"
     n=0
     while [ $n -lt "${1:-3}" ]; do
         r kill-measure
@@ -134,7 +173,8 @@ spoof)
     $ADB shell am broadcast -n "$CLI/.ProbeReceiver" -a org.agentos.spike.s2.client.SPOOF >/dev/null
     for rc in SupervisorStatusReceiver SupervisorStatusReceiverExported; do
         echo "shell uid -> $rc:"
-        $ADB shell am broadcast -n "$PKG/$RCV.$rc" -a org.agentos.action.SUPERVISOR_STATUS \
+        # adb-root mode: adbd is uid 0, so drop to the shell uid with the userdebug `su shell`
+        $ADB shell $SHELL_UID am broadcast -n "$PKG/$RCV.$rc" -a org.agentos.action.SUPERVISOR_STATUS \
             --ei org.agentos.extra.PROTOCOL 1 --es org.agentos.extra.STATE safe_mode --es org.agentos.extra.REASON spoofed_by_shell || true
     done
     echo "root -> both receivers:"
@@ -149,7 +189,7 @@ soak)
     say "L1 ${h} h soak: one long task holding ${mb} MB; CSV every 5 min on the device"
     r task 0 "$mb" >/dev/null
     r wait-fg 30
-    $ADB shell "su -c 'nohup sh $DIR/s2dev.sh monitor 300 $h >/dev/null 2>&1 &'"
+    rsh "nohup sh $DIR/s2dev.sh monitor 300 $h >/dev/null 2>&1 &"
     echo "monitor started. Unplug USB (or: adb shell dumpsys battery unplug). Afterwards: sh $0 soak-report"
     ;;
 soak-report)

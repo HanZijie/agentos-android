@@ -24,14 +24,21 @@ minSdk = "35"
 # ACP Kotlin SDK：固定 0.30.1，Gradle 解析到 JVM 变体 acp-jvm。
 # 不用 master：master 的 Transport 已改成 TransportFrame / onFrame，与 0.30.x 的 JsonRpcMessage / onMessage 不兼容。
 acp = "0.30.1"
-# 与 acp 0.30.1 的传递依赖对齐（acp-jvm-0.30.1.pom），避免解析出两套版本
-kotlinx-coroutines = "1.9.0"
+# 由 1.9.0（acp-jvm-0.30.1.pom 的版本）升到 1.11.0（整合人决定，2026-09-29）：quickjs-kt 1.0.15 需要 ≥ 1.11.0，
+# 1.9.0 / 1.10.2 下运行时 NoSuchMethodError（lane B 的 W3 验证）；不显式升级时，测试类路径被悄悄解析成 1.11.0、
+# 主代码仍是 1.9.0，两边不一致。acp 0.30.1 在 1.11.0 上的行为由 tests/device/acp-channel 回归重跑验证。
+kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.7.3"
 
 # 宿主层的网络出口（给 Pi 用的 fetch，core/runtime/net/HostFetch.kt）。
 # S5 固定 Ktor 的 OkHttp 引擎时如需升级到 5.x，一并评估。
 okhttp = "4.12.0"
 
+# JS 引擎（S8 固定，docs/spikes/S8.md d）：quickjs-kt 1.0.15。它用 Kotlin 2.4.10 构建，要求 Kotlin ≥ 2.3；
+# 运行时传递依赖把 kotlin-stdlib 拉到 2.4.10（编译器仍是 2.3.20，可以读 2.4 元数据；不强行压回 2.3.20）、
+# kotlinx-coroutines-core 需要 1.11.0（已在上面统一锁定）。Kotlin 的最终版本随 S5 定。
+# Gradle 按平台解析：JVM 模块得到 quickjs-kt-jvm（自带桌面原生库，只用于电脑上的测试），Android 得到 quickjs-kt-android。
+quickjs-kt = "1.0.15"
 junit4 = "4.13.2"
 
 # SQLite 驱动（W2 选定，A lane）：androidx.sqlite 的 SQLiteDriver 接口，Android 与电脑测试共用同一套 schema 和 SQL。
@@ -48,6 +55,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
+quickjs-kt = { module = "io.github.dokar3:quickjs-kt", version.ref = "quickjs-kt" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
 kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
 androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidx-sqlite" }
