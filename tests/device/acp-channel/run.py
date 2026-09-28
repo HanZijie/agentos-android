@@ -91,28 +91,40 @@ def app_cases():
         # C3：用户主动停止后的恢复（previousExitStoppedByUser）、Store、BYOK
         ("user-stop-recovery", a, "user-stop", {}, 180, "userstop"),
         ("store-restart", a, "store-restart", {"fresh": True}, 180, "check"),
-        ("byok-roundtrip", a, "byok-roundtrip", {"apiKey": TEST_KEY}, 120, "byok"),
-        ("byok-restart", a, "byok-restart", {"apiKey": TEST_KEY}, 120, "byok"),
-        ("byok-clear", a, "byok-clear", {"apiKey": TEST_KEY}, 120, "byok"),
+        ("byok-roundtrip", a, "byok-roundtrip", {"apiKeyFile": KEY_FILE}, 120, "byok"),
+        ("byok-restart", a, "byok-restart", {"apiKeyFile": KEY_FILE}, 120, "byok"),
+        ("byok-clear", a, "byok-clear", {"apiKeyFile": KEY_FILE}, 120, "byok"),
     ]
 
 
-# BYOK 用例的测试 key：每次运行随机生成，不是任何真实 key。args 里的占位符在运行时替换。
-TEST_KEY = "$TEST_KEY"
+# BYOK 用例的测试 key：每次运行随机生成，不是任何真实 key。不放在 adb shell 的命令行里（API 37 的 adbd 会把整条
+# 命令行写进 logcat），而是经 stdin 写进 App 私有目录下的这个文件（相对 files/），执行器读完立即删除。
+KEY_FILE = "test/byok_key"
 
 
 def make_test_key():
     return "agtest-" + secrets.token_urlsafe(36)
 
 
+def push_test_key(adb, key):
+    """adb exec-in + run-as：key 只走 stdin，命令行里没有它（debug 包可 run-as）。"""
+    cmd = [adb.adb, "-s", adb.serial, "exec-in",
+           f"run-as {APP_PKG} sh -c 'mkdir -p files/test && cat > files/{KEY_FILE}'"]
+    p = subprocess.run(cmd, input=key, capture_output=True, text=True, timeout=60)
+    if p.returncode != 0:
+        raise RuntimeError(f"push test key failed: {p.returncode} {p.stderr.strip()}")
+
+
 def leak_scan(adb, key, result):
     """在整个 logcat（所有缓冲区）和结果 JSON 里找 key 的全文或中段（中段不含掩码用的首尾 4 位）。"""
     middle = key[4:-4]
-    out = adb.run("logcat", "-d", "-b", "all", "-v", "raw", check=False, timeout=120)
+    out = adb.run("logcat", "-d", "-b", "all", "-v", "threadtime", check=False, timeout=120)
     lines = [l for l in out.splitlines() if key in l or middle in l]
     dumped = json.dumps(result, ensure_ascii=False)
+    # 命中的行原样写进结果会再泄漏一次：先把 key 换掉
+    shown = [l.replace(key, "<KEY>").replace(middle, "<KEY-MIDDLE>")[:400] for l in lines[:10]]
     return {"logcatLines": len(out.splitlines()), "logcatHits": len(lines),
-            "resultHits": int(key in dumped or middle in dumped)}
+            "resultHits": int(key in dumped or middle in dumped), "hitLines": shown}
 
 
 class Adb:
@@ -297,9 +309,10 @@ def main():
     for name, activity, scenario, args, timeout, kind in cases:
         if only and name not in only:
             continue
-        args = {k: (test_key if v == TEST_KEY else v) for k, v in args.items()}
         t0 = time.time()
         try:
+            if kind == "byok":
+                push_test_key(adb, test_key)
             if scenario == "client-kill":
                 r = run_client_kill(adb, name, activity, args, timeout)
             elif kind == "userstop":

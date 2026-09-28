@@ -31,7 +31,7 @@ internal suspend fun killAgentAndWait(ctx: Context): Boolean {
  * C3 的设备用例：BYOK（IAgentControl v2、KeystoreSecrets）、Store（AndroidStore + RuntimeEngine）、
  * 用户主动停止后的恢复（HostPort.environment.previousExitStoppedByUser）。
  *
- * BYOK 用例的测试 key 由主机端 run.py 生成（随机，不是任何真实 key），经 args.apiKey 传入；执行器基类不回显它。
+ * BYOK 用例的测试 key 由主机端 run.py 生成（随机，不是任何真实 key），经 stdin 写进 App 私有目录的文件传入（见 [testKey]）。
  * 本执行器检查返回值、诊断、心跳、监督状态和 App 私有目录里的所有文件都没有 key；run.py 再检查整个 logcat（-b all）。
  */
 class ByokStoreScenarios(
@@ -44,9 +44,9 @@ class ByokStoreScenarios(
     private val de = ctx.createDeviceProtectedStorageContext()
 
     suspend fun run(name: String, args: JSONObject): JSONObject? = when (name) {
-        "byok-roundtrip" -> roundtrip(args.getString("apiKey"))
-        "byok-restart" -> restart(args.getString("apiKey"))
-        "byok-clear" -> clear(args.optString("apiKey").takeIf { it.isNotEmpty() })
+        "byok-roundtrip" -> roundtrip(testKey(args))
+        "byok-restart" -> restart(testKey(args))
+        "byok-clear" -> clear(runCatching { testKey(args) }.getOrNull())
         "store-restart" -> storeRestart(args.optBoolean("fresh", true))
         "user-stop-arm" -> userStopArm()
         "user-stop-check" -> userStopCheck(args)
@@ -54,6 +54,21 @@ class ByokStoreScenarios(
     }
 
     // ------------------------------------------------------------------ BYOK
+
+    /**
+     * run.py 经 stdin 写进 files/<apiKeyFile> 的测试 key（不经 adb shell 命令行：API 37 的 adbd 会把命令行写进 logcat）。
+     * 读完立即删除，后面的文件扫描不会把它算成泄漏。
+     */
+    private fun testKey(args: JSONObject): String {
+        val f = File(ctx.filesDir, args.optString("apiKeyFile", "test/byok_key"))
+        try {
+            val key = f.readText().trim()
+            check(key.length >= 16) { "test key file is empty or too short" }
+            return key
+        } finally {
+            f.delete()
+        }
+    }
 
     private fun preset(provider: String, model: String, thinking: String? = null) = JSONObject()
         .put("kind", "preset").put("provider", provider).put("model", model)

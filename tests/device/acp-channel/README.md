@@ -50,7 +50,7 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | byok-restart | inapp + run.py | SIGKILL 后冷启动：key 仍能解密、按端点匹配（`credentialResolves`），Keystore 主密钥在；`model-source.json` 在 CE、只有密文；App 的 CE / DE 私有目录下所有文件里没有明文 key |
 | byok-clear | inapp + run.py | 清除 → 重启后仍未配置，文件已删，Keystore 主密钥已删 |
 
-BYOK 用例的 key 由 run.py 每次随机生成（`agtest-` + 48 字符，不是真实 key），经 `args.apiKey` 传入；执行器基类回显参数时把它换成 `<redacted>`。每个 BYOK 用例结束后 run.py 在整个 logcat（`-b all`）和结果 JSON 里搜 key 的全文和中段，命中就判失败。
+BYOK 用例的 key 由 run.py 每次随机生成（`agtest-` + 48 字符，不是真实 key），经 stdin 写进 App 私有目录的 `files/test/byok_key`（`adb exec-in run-as …`），执行器读完立即删除。**不要把 key 放在 `adb shell` 的命令行里**：API 37 的 adbd 会把整条命令行写进 logcat（`adbd service requested 'shell,v2,…:am start … --es args …'`），C3 就是在 API 37 上这样发现的。执行器基类回显参数时也会把 `apiKey` 换成 `<redacted>`。每个 BYOK 用例结束后 run.py 在整个 logcat（`-b all`）和结果 JSON 里搜 key 的全文和中段，命中就判失败，命中的行（key 已替换）记在 `leakScan.hitLines`。
 
 `inapp/` 的 Activity 导出但要求 `android.permission.DUMP`，只有 shell 和系统能启动；它只在 debug 包里。
 
