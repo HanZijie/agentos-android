@@ -1,0 +1,24 @@
+# 只用于 spikes/S3，版本与 docs/implementation-plan.md 第 2 节一致。
+[versions]
+agp = "8.10.1"
+kotlin = "2.2.20"
+acp = "0.30.1"
+# 与 acp 0.30.1 的传递依赖（kotlinx-coroutines-core 1.9.0、kotlinx-serialization-json 1.7.3）对齐
+coroutines = "1.9.0"
+serialization = "1.7.3"
+junit = "4.13.2"
+compileSdk = "36"
+targetSdk = "36"
+minSdk = "35"
+
+[libraries]
+acp = { module = "com.agentclientprotocol:acp", version.ref = "acp" }
+coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

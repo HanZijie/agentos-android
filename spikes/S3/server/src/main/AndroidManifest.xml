@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <application
+        android:allowBackup="false"
+        android:label="S3 Agent">
+
+        <!-- 模拟 AgentOS 导出的 IAcpService，运行在 :agent 进程 -->
+        <service
+            android:name=".AcpService"
+            android:exported="true"
+            android:process=":agent">
+            <intent-filter>
+                <action android:name="org.agentos.spike.s3.ACP" />
+            </intent-filter>
+        </service>
+
+        <!-- 以下三个只给 spike 用 -->
+        <service
+            android:name=".ProbeService"
+            android:exported="true"
+            android:process=":agent" />
+        <service
+            android:name=".BenchService"
+            android:exported="true"
+            android:process=":agent" />
+
+        <!-- 电脑端网关：抽象 socket agentos-acp，按行收发 ACP JSON；用 am start-foreground-service 拉起 -->
+        <service
+            android:name=".GatewayService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:process=":agent">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local ACP gateway for adb forward (S3 spike)" />
+        </service>
+    </application>
+</manifest>
