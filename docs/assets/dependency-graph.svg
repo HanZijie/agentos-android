@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1724" height="1360" viewBox="0 0 1724 1360" font-family="-apple-system, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+    <marker id="arC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1e293b"/></marker>
+    <marker id="arS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <style>
+      .e { fill: none; stroke: #94a3b8; stroke-width: 1.4; marker-end: url(#ar); }
+      .ec { fill: none; stroke: #1e293b; stroke-width: 2.4; marker-end: url(#arC); }
+      .es { fill: none; stroke: #d97706; stroke-width: 1.4; stroke-dasharray: 5 4; marker-end: url(#arS); }
+      .id { font-size: 13px; font-weight: 700; fill: #0f172a; }
+      .tag { font-size: 10.5px; fill: #475569; }
+      .nm { font-size: 13px; fill: #0f172a; }
+      .rl { font-size: 12px; fill: #94a3b8; }
+      .lg { font-size: 12.5px; fill: #334155; }
+    </style>
+  </defs>
+  <rect width="1724" height="1360" fill="#fafafa"/>
+  <text x="40" y="46" font-size="24" font-weight="700" fill="#0f172a">AgentOS 实现依赖顺序</text>
+  <text x="40" y="76" font-size="13" fill="#475569">从上到下是最早可以开工的顺序。一个工作包只要箭头起点全部完成就可以开工，不必等前一个里程碑验收；里程碑只是验收检查点。</text>
+  <text x="40" y="98" font-size="13" fill="#475569">颜色表示所属里程碑。虚线框是验证项（spike），画在它最晚必须完成的位置，可以提前做。深色粗箭头是全项目最长的依赖链。</text>
+  <text x="40" y="120" font-size="13" fill="#475569">W28 依赖 W18–W25 全部完成；图中省略了能由其他箭头推出的 W21 → W28、W24 → W28。</text>
+  <rect x="24" y="141" width="1676" height="108" rx="8" fill="#f1f5f9" opacity="0.55"/>
+  <text x="40" y="199" class="rl">第 1 批</text>
+  <text x="40" y="315" class="rl">第 2 批</text>
+  <rect x="24" y="373" width="1676" height="108" rx="8" fill="#f1f5f9" opacity="0.55"/>
+  <text x="40" y="431" class="rl">第 3 批</text>
+  <text x="40" y="547" class="rl">第 4 批</text>
+  <rect x="24" y="605" width="1676" height="108" rx="8" fill="#f1f5f9" opacity="0.55"/>
+  <text x="40" y="663" class="rl">第 5 批</text>
+  <text x="40" y="779" class="rl">第 6 批</text>
+  <rect x="24" y="837" width="1676" height="108" rx="8" fill="#f1f5f9" opacity="0.55"/>
+  <text x="40" y="895" class="rl">第 7 批</text>
+  <text x="40" y="1011" class="rl">第 8 批</text>
+  <rect x="24" y="1069" width="1676" height="108" rx="8" fill="#f1f5f9" opacity="0.55"/>
+  <text x="40" y="1127" class="rl">第 9 批</text>
+  <path class="e" d="M733.0,338.0 C733.0,369.0 903.0,369.0 903.0,398.0"/>
+  <path class="e" d="M741.0,222.0 C741.0,253.0 1073.0,253.0 1073.0,282.0"/>
+  <path class="e" d="M903.0,454.0 C903.0,485.0 733.0,485.0 733.0,514.0"/>
+  <path class="e" d="M1065.0,338.0 L1065.0,339.0 Q1065.0,340.0 1056.0,340.0 L829.0,340.0 Q820.0,340.0 820.0,349.0 L820.0,456.0 Q820.0,465.0 811.0,465.0 L758.0,465.0 Q749.0,465.0 749.0,474.0 L749.0,514.0"/>
+  <path class="e" d="M709.0,222.0 C709.0,253.0 385.0,253.0 385.0,282.0"/>
+  <path class="e" d="M685.0,570.0 C685.0,601.0 369.0,601.0 369.0,630.0"/>
+  <path class="e" d="M701.0,570.0 C701.0,601.0 547.0,601.0 547.0,630.0"/>
+  <path class="e" d="M717.0,570.0 C717.0,601.0 725.0,601.0 725.0,630.0"/>
+  <path class="e" d="M369.0,338.0 L369.0,342.0 Q369.0,346.0 360.0,346.0 L289.0,346.0 Q280.0,346.0 280.0,355.0 L280.0,682.0 Q280.0,691.0 289.0,691.0 L352.0,691.0 Q361.0,691.0 361.0,700.0 L361.0,746.0"/>
+  <path class="e" d="M369.0,686.0 C369.0,717.0 377.0,717.0 377.0,746.0"/>
+  <path class="e" d="M733.0,570.0 C733.0,601.0 903.0,601.0 903.0,630.0"/>
+  <path class="e" d="M353.0,686.0 C353.0,717.0 199.0,717.0 199.0,746.0"/>
+  <path class="e" d="M1081.0,338.0 L1081.0,345.0 Q1081.0,352.0 1072.0,352.0 L992.0,352.0 Q983.0,352.0 983.0,361.0 L983.0,688.0 Q983.0,697.0 974.0,697.0 L896.0,697.0 Q887.0,697.0 887.0,706.0 L887.0,746.0"/>
+  <path class="e" d="M385.0,686.0 C385.0,717.0 539.0,717.0 539.0,746.0"/>
+  <path class="e" d="M1041.0,686.0 C1041.0,717.0 555.0,717.0 555.0,746.0"/>
+  <path class="e" d="M547.0,802.0 C547.0,833.0 717.0,833.0 717.0,862.0"/>
+  <path class="e" d="M1057.0,686.0 C1057.0,717.0 725.0,717.0 725.0,746.0"/>
+  <path class="e" d="M1105.0,686.0 C1105.0,717.0 1251.0,717.0 1251.0,746.0"/>
+  <path class="e" d="M1089.0,686.0 C1089.0,717.0 1081.0,717.0 1081.0,746.0"/>
+  <path class="e" d="M385.0,338.0 L385.0,349.0 Q385.0,358.0 394.0,358.0 L1339.0,358.0 Q1348.0,358.0 1348.0,367.0 L1348.0,694.0 Q1348.0,703.0 1357.0,703.0 L1412.0,703.0 Q1421.0,703.0 1421.0,712.0 L1421.0,746.0"/>
+  <path class="e" d="M1121.0,686.0 C1121.0,717.0 1437.0,717.0 1437.0,746.0"/>
+  <path class="e" d="M563.0,802.0 C563.0,833.0 1251.0,833.0 1251.0,862.0"/>
+  <path class="e" d="M1445.0,802.0 C1445.0,833.0 1267.0,833.0 1267.0,862.0"/>
+  <path class="e" d="M1429.0,802.0 L1429.0,803.0 Q1429.0,804.0 1420.0,804.0 L1182.0,804.0 Q1173.0,804.0 1173.0,813.0 L1173.0,917.0 Q1173.0,926.0 1164.0,926.0 L1098.0,926.0 Q1089.0,926.0 1089.0,935.0 L1089.0,978.0"/>
+  <path class="e" d="M1097.0,338.0 L1097.0,355.0 Q1097.0,364.0 1106.0,364.0 L1158.0,364.0 Q1167.0,364.0 1167.0,373.0 L1167.0,575.0 Q1167.0,584.0 1176.0,584.0 L1258.0,584.0 Q1267.0,584.0 1267.0,593.0 L1267.0,630.0"/>
+  <path class="e" d="M765.0,570.0 C765.0,601.0 1251.0,601.0 1251.0,630.0"/>
+  <path class="e" d="M531.0,802.0 C531.0,833.0 361.0,833.0 361.0,862.0"/>
+  <path class="e" d="M1259.0,686.0 L1259.0,700.0 Q1259.0,709.0 1250.0,709.0 L467.0,709.0 Q458.0,709.0 458.0,718.0 L458.0,801.0 Q458.0,810.0 449.0,810.0 L386.0,810.0 Q377.0,810.0 377.0,819.0 L377.0,862.0"/>
+  <path class="e" d="M911.0,802.0 C911.0,833.0 903.0,833.0 903.0,862.0"/>
+  <path class="e" d="M353.0,338.0 C353.0,369.0 191.0,369.0 191.0,398.0"/>
+  <path class="e" d="M725.0,802.0 L725.0,809.0 Q725.0,816.0 734.0,816.0 L805.0,816.0 Q814.0,816.0 814.0,825.0 L814.0,1027.0 Q814.0,1036.0 823.0,1036.0 L870.0,1036.0 Q879.0,1036.0 879.0,1045.0 L879.0,1094.0"/>
+  <path class="e" d="M1259.0,802.0 L1259.0,813.0 Q1259.0,822.0 1250.0,822.0 L1004.0,822.0 Q995.0,822.0 995.0,831.0 L995.0,1033.0 Q995.0,1042.0 986.0,1042.0 L936.0,1042.0 Q927.0,1042.0 927.0,1051.0 L927.0,1094.0"/>
+  <path class="e" d="M1081.0,802.0 L1081.0,819.0 Q1081.0,828.0 1072.0,828.0 L998.0,828.0 Q989.0,828.0 989.0,837.0 L989.0,1039.0 Q989.0,1048.0 980.0,1048.0 L904.0,1048.0 Q895.0,1048.0 895.0,1057.0 L895.0,1094.0"/>
+  <path class="e" d="M1259.0,918.0 L1259.0,925.0 Q1259.0,932.0 1250.0,932.0 L1010.0,932.0 Q1001.0,932.0 1001.0,941.0 L1001.0,1045.0 Q1001.0,1054.0 992.0,1054.0 L952.0,1054.0 Q943.0,1054.0 943.0,1063.0 L943.0,1094.0"/>
+  <path class="e" d="M369.0,918.0 L369.0,929.0 Q369.0,938.0 378.0,938.0 L799.0,938.0 Q808.0,938.0 808.0,947.0 L808.0,1051.0 Q808.0,1060.0 817.0,1060.0 L854.0,1060.0 Q863.0,1060.0 863.0,1069.0 L863.0,1094.0"/>
+  <path class="es" d="M547.0,338.0 C547.0,369.0 539.0,369.0 539.0,398.0"/>
+  <path class="es" d="M1081.0,222.0 C1081.0,253.0 1089.0,253.0 1089.0,282.0"/>
+  <path class="es" d="M377.0,222.0 L377.0,229.0 Q377.0,236.0 386.0,236.0 L627.0,236.0 Q636.0,236.0 636.0,245.0 L636.0,462.0 Q636.0,471.0 645.0,471.0 L692.0,471.0 Q701.0,471.0 701.0,480.0 L701.0,514.0"/>
+  <path class="es" d="M191.0,222.0 C191.0,253.0 353.0,253.0 353.0,282.0"/>
+  <path class="es" d="M361.0,222.0 C361.0,253.0 369.0,253.0 369.0,282.0"/>
+  <path class="es" d="M191.0,686.0 C191.0,717.0 183.0,717.0 183.0,746.0"/>
+  <path class="es" d="M1081.0,570.0 C1081.0,601.0 1089.0,601.0 1089.0,630.0"/>
+  <path class="es" d="M1429.0,686.0 C1429.0,717.0 919.0,717.0 919.0,746.0"/>
+  <path class="es" d="M1445.0,686.0 C1445.0,717.0 1267.0,717.0 1267.0,746.0"/>
+  <path class="es" d="M1615.0,686.0 C1615.0,717.0 1453.0,717.0 1453.0,746.0"/>
+  <path class="ec" d="M725.0,222.0 C725.0,253.0 725.0,253.0 725.0,282.0"/>
+  <path class="ec" d="M717.0,338.0 C717.0,369.0 555.0,369.0 555.0,398.0"/>
+  <path class="ec" d="M547.0,454.0 C547.0,485.0 717.0,485.0 717.0,514.0"/>
+  <path class="ec" d="M749.0,570.0 C749.0,601.0 1073.0,601.0 1073.0,630.0"/>
+  <path class="ec" d="M1073.0,686.0 C1073.0,717.0 903.0,717.0 903.0,746.0"/>
+  <path class="ec" d="M895.0,802.0 C895.0,833.0 733.0,833.0 733.0,862.0"/>
+  <path class="ec" d="M725.0,918.0 C725.0,949.0 1073.0,949.0 1073.0,978.0"/>
+  <path class="ec" d="M1081.0,1034.0 C1081.0,1065.0 911.0,1065.0 911.0,1094.0"/>
+  <rect x="118" y="168" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="128" y="187" class="id">S1</text>
+  <text x="254" y="187" class="tag" text-anchor="end">spike</text>
+  <text x="128" y="209" class="nm">模块安装 APK</text>
+  <rect x="296" y="168" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="306" y="187" class="id">S2</text>
+  <text x="432" y="187" class="tag" text-anchor="end">spike</text>
+  <text x="306" y="209" class="nm">保活与 root 监督</text>
+  <rect x="652" y="168" width="146" height="54" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6"/>
+  <text x="662" y="187" class="id">W1</text>
+  <text x="788" y="187" class="tag" text-anchor="end">基础</text>
+  <text x="662" y="209" class="nm">仓库与构建</text>
+  <rect x="1008" y="168" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="1018" y="187" class="id">S3</text>
+  <text x="1144" y="187" class="tag" text-anchor="end">第一部分已完成</text>
+  <text x="1018" y="209" class="nm">ACP over Binder</text>
+  <rect x="296" y="284" width="146" height="54" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="306" y="303" class="id">W7</text>
+  <text x="432" y="303" class="tag" text-anchor="end">M1</text>
+  <text x="306" y="325" class="nm">模块与打包</text>
+  <rect x="652" y="284" width="146" height="54" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6"/>
+  <text x="662" y="303" class="id">W2</text>
+  <text x="788" y="303" class="tag" text-anchor="end">基础</text>
+  <text x="662" y="325" class="nm">运行时宿主层</text>
+  <rect x="474" y="284" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="484" y="303" class="id">S8</text>
+  <text x="610" y="303" class="tag" text-anchor="end">spike</text>
+  <text x="484" y="325" class="nm">Pi core 在 QuickJS</text>
+  <rect x="1008" y="284" width="146" height="54" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6"/>
+  <text x="1018" y="303" class="id">W5</text>
+  <text x="1144" y="303" class="tag" text-anchor="end">基础</text>
+  <text x="1018" y="325" class="nm">Binder 通道</text>
+  <rect x="118" y="400" width="146" height="54" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+  <text x="128" y="419" class="id">W27</text>
+  <text x="254" y="419" class="tag" text-anchor="end">M5</text>
+  <text x="128" y="441" class="nm">KernelSU 与设备矩阵</text>
+  <rect x="474" y="400" width="146" height="54" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6"/>
+  <text x="484" y="419" class="id">W3</text>
+  <text x="610" y="419" class="tag" text-anchor="end">基础</text>
+  <text x="484" y="441" class="nm">Pi Agent core 接入</text>
+  <rect x="830" y="400" width="146" height="54" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6"/>
+  <text x="840" y="419" class="id">W4</text>
+  <text x="966" y="419" class="tag" text-anchor="end">基础</text>
+  <text x="840" y="441" class="nm">ACP Agent 端</text>
+  <rect x="652" y="516" width="146" height="54" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="662" y="535" class="id">W6</text>
+  <text x="788" y="535" class="tag" text-anchor="end">M1</text>
+  <text x="662" y="557" class="nm">:agent 进程接线</text>
+  <rect x="1008" y="516" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="1018" y="535" class="id">S4</text>
+  <text x="1144" y="535" class="tag" text-anchor="end">spike</text>
+  <text x="1018" y="557" class="nm">插件发现与 bind</text>
+  <rect x="118" y="632" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="128" y="651" class="id">S7</text>
+  <text x="254" y="651" class="tag" text-anchor="end">spike</text>
+  <text x="128" y="673" class="nm">默认助理</text>
+  <rect x="296" y="632" width="146" height="54" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="306" y="651" class="id">W8</text>
+  <text x="432" y="651" class="tag" text-anchor="end">M1</text>
+  <text x="306" y="673" class="nm">自带界面</text>
+  <rect x="474" y="632" width="146" height="54" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="484" y="651" class="id">W9</text>
+  <text x="610" y="651" class="tag" text-anchor="end">M1</text>
+  <text x="484" y="673" class="nm">电脑端接入</text>
+  <rect x="652" y="632" width="146" height="54" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.6"/>
+  <text x="662" y="651" class="id">W10</text>
+  <text x="788" y="651" class="tag" text-anchor="end">M2</text>
+  <text x="662" y="673" class="nm">持久化提交与恢复</text>
+  <rect x="830" y="632" width="146" height="54" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.6"/>
+  <text x="840" y="651" class="id">W12</text>
+  <text x="966" y="651" class="tag" text-anchor="end">M2</text>
+  <text x="840" y="673" class="nm">断网与升级</text>
+  <rect x="1008" y="632" width="146" height="54" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.6"/>
+  <text x="1018" y="651" class="id">W14</text>
+  <text x="1144" y="651" class="tag" text-anchor="end">M3a</text>
+  <text x="1018" y="673" class="nm">Extension Host</text>
+  <rect x="1186" y="632" width="146" height="54" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="1196" y="651" class="id">W24</text>
+  <text x="1322" y="651" class="tag" text-anchor="end">M4</text>
+  <text x="1196" y="673" class="nm">acp-android SDK</text>
+  <rect x="1364" y="632" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="1374" y="651" class="id">S5</text>
+  <text x="1500" y="651" class="tag" text-anchor="end">spike</text>
+  <text x="1374" y="673" class="nm">MCP Kotlin SDK</text>
+  <rect x="1542" y="632" width="146" height="54" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="1552" y="651" class="id">S6</text>
+  <text x="1678" y="651" class="tag" text-anchor="end">spike</text>
+  <text x="1552" y="673" class="nm">Runner</text>
+  <rect x="118" y="748" width="146" height="54" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.6"/>
+  <text x="128" y="767" class="id">W13</text>
+  <text x="254" y="767" class="tag" text-anchor="end">M3a</text>
+  <text x="128" y="789" class="nm">助理入口</text>
+  <rect x="296" y="748" width="146" height="54" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.6"/>
+  <text x="306" y="767" class="id">W11</text>
+  <text x="432" y="767" class="tag" text-anchor="end">M2</text>
+  <text x="306" y="789" class="nm">监督强化与诊断</text>
+  <rect x="474" y="748" width="146" height="54" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.6"/>
+  <text x="484" y="767" class="id">W16</text>
+  <text x="610" y="767" class="tag" text-anchor="end">M3a</text>
+  <text x="484" y="789" class="nm">风险策略与确认</text>
+  <rect x="652" y="748" width="146" height="54" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.6"/>
+  <text x="662" y="767" class="id">W18</text>
+  <text x="788" y="767" class="tag" text-anchor="end">M3b</text>
+  <text x="662" y="789" class="nm">插件包导入</text>
+  <rect x="830" y="748" width="146" height="54" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.6"/>
+  <text x="840" y="767" class="id">W15</text>
+  <text x="966" y="767" class="tag" text-anchor="end">M3a</text>
+  <text x="840" y="789" class="nm">MCP over Binder</text>
+  <rect x="1008" y="748" width="146" height="54" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.6"/>
+  <text x="1018" y="767" class="id">W20</text>
+  <text x="1144" y="767" class="tag" text-anchor="end">M3b</text>
+  <text x="1018" y="789" class="nm">Skills</text>
+  <rect x="1186" y="748" width="146" height="54" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.6"/>
+  <text x="1196" y="767" class="id">W19</text>
+  <text x="1322" y="767" class="tag" text-anchor="end">M3b</text>
+  <text x="1196" y="789" class="nm">远端 MCP</text>
+  <rect x="1364" y="748" width="146" height="54" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.6"/>
+  <text x="1374" y="767" class="id">W21</text>
+  <text x="1500" y="767" class="tag" text-anchor="end">M3b</text>
+  <text x="1374" y="789" class="nm">Runner</text>
+  <rect x="296" y="864" width="146" height="54" rx="8" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="306" y="883" class="id">W25</text>
+  <text x="432" y="883" class="tag" text-anchor="end">M4</text>
+  <text x="306" y="905" class="nm">第三方接入治理</text>
+  <rect x="652" y="864" width="146" height="54" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.6"/>
+  <text x="662" y="883" class="id">W17</text>
+  <text x="788" y="883" class="tag" text-anchor="end">M3a</text>
+  <text x="662" y="905" class="nm">自带插件与示例</text>
+  <rect x="830" y="864" width="146" height="54" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+  <text x="840" y="883" class="id">W26</text>
+  <text x="966" y="883" class="tag" text-anchor="end">M5</text>
+  <text x="840" y="905" class="nm">plugin-sdk 注解</text>
+  <rect x="1186" y="864" width="146" height="54" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.6"/>
+  <text x="1196" y="883" class="id">W22</text>
+  <text x="1322" y="883" class="tag" text-anchor="end">M3b</text>
+  <text x="1196" y="905" class="nm">Hooks</text>
+  <rect x="1008" y="980" width="146" height="54" rx="8" fill="#fce7f3" stroke="#db2777" stroke-width="1.6"/>
+  <text x="1018" y="999" class="id">W23</text>
+  <text x="1144" y="999" class="tag" text-anchor="end">M3b</text>
+  <text x="1018" y="1021" class="nm">shell 工具</text>
+  <rect x="830" y="1096" width="146" height="54" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+  <text x="840" y="1115" class="id">W28</text>
+  <text x="966" y="1115" class="tag" text-anchor="end">M5</text>
+  <text x="840" y="1137" class="nm">发布与安全审计</text>
+  <line x1="24" y1="1172" x2="1700" y2="1172" stroke="#e2e8f0"/>
+  <text x="40" y="1194" font-size="14" font-weight="700" fill="#0f172a">里程碑（验收顺序：M1 → M2 → M3a → M3b ∥ M4 → M5）</text>
+  <rect x="40" y="1216" width="30" height="18" rx="4" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6"/>
+  <text x="80" y="1230" class="lg">基础：W1–W5</text>
+  <rect x="440" y="1216" width="30" height="18" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="480" y="1230" class="lg">M1 一个 zip 跑通对话</text>
+  <rect x="840" y="1216" width="30" height="18" rx="4" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.6"/>
+  <text x="880" y="1230" class="lg">M2 可靠性</text>
+  <rect x="1240" y="1216" width="30" height="18" rx="4" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.6"/>
+  <text x="1280" y="1230" class="lg">M3a 入口与本地插件</text>
+  <rect x="40" y="1246" width="30" height="18" rx="4" fill="#fce7f3" stroke="#db2777" stroke-width="1.6"/>
+  <text x="80" y="1260" class="lg">M3b 插件包 · Skills · Hooks · 远端 MCP</text>
+  <rect x="440" y="1246" width="30" height="18" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="480" y="1260" class="lg">M4 对外开放 ACP</text>
+  <rect x="840" y="1246" width="30" height="18" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6"/>
+  <text x="880" y="1260" class="lg">M5 开发者生态与发布</text>
+  <rect x="1240" y="1246" width="30" height="18" rx="4" fill="#fffbeb" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="1280" y="1260" class="lg">验证项（spike）</text>
+  <path class="e" d="M40,1301 L90,1301"/><text x="100" y="1305" class="lg">依赖：箭头起点完成后，终点才能开工</text>
+  <path class="es" d="M440,1301 L490,1301"/><text x="500" y="1305" class="lg">验证项解锁的工作包</text>
+  <path class="ec" d="M840,1301 L890,1301"/><text x="900" y="1305" class="lg">最长依赖链：W1 → W2 → W3 → W6 → W14 → W15 → W17 → W23 → W28</text>
+</svg>

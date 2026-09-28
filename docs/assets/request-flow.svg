@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1780" height="1810" viewBox="0 0 1780 1810" font-family="-apple-system, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="aS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0d9488"/>
+    </marker>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
+    </marker>
+    <style>
+      .hd { font-size: 14px; font-weight: 700; fill: #0f172a; }
+      .hs { font-size: 11px; fill: #64748b; }
+      .life { stroke: #cbd5e1; stroke-width: 1.2; stroke-dasharray: 5 5; }
+      .call { stroke: #334155; stroke-width: 1.5; fill: none; marker-end: url(#a); }
+      .ret { stroke: #64748b; stroke-width: 1.3; stroke-dasharray: 6 4; fill: none; marker-end: url(#a); }
+      .callS { stroke: #0d9488; stroke-width: 1.8; fill: none; marker-end: url(#aS); }
+      .retS { stroke: #0d9488; stroke-width: 1.6; stroke-dasharray: 6 4; fill: none; marker-end: url(#aS); }
+      .callB { stroke: #7c3aed; stroke-width: 1.8; fill: none; marker-end: url(#aB); }
+      .retB { stroke: #7c3aed; stroke-width: 1.6; stroke-dasharray: 6 4; fill: none; marker-end: url(#aB); }
+      .callR { stroke: #dc2626; stroke-width: 1.8; fill: none; marker-end: url(#aR); }
+      .t { font-size: 12.5px; fill: #0f172a; }
+      .tr { font-size: 12.5px; fill: #475569; }
+      .code { font-size: 11px; fill: #475569; font-family: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; }
+      .note { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1; }
+      .consent { fill: #fef2f2; stroke: #dc2626; stroke-width: 1; }
+      .phase { font-size: 12px; font-weight: 700; fill: #475569; }
+      .frag { fill: none; stroke: #94a3b8; stroke-width: 1.2; stroke-dasharray: 6 4; }
+      .tag { font-size: 12px; font-weight: 700; fill: #334155; }
+      .guard { font-size: 12px; fill: #475569; }
+      .hA { paint-order: stroke; stroke: #f3f7fd; stroke-width: 5px; stroke-linejoin: round; }
+      .hB { paint-order: stroke; stroke: #f2fcf7; stroke-width: 5px; stroke-linejoin: round; }
+      .hC { paint-order: stroke; stroke: #f7f5fe; stroke-width: 5px; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1780" height="1810" fill="#fafafa"/>
+  <text x="40" y="40" font-size="22" font-weight="700" fill="#0f172a">核心链路：后装的 App 通过 ACP 调用 Agent，工具由另一个 App 内嵌的插件提供</text>
+  <text x="40" y="66" font-size="13" fill="#64748b">场景：后装的“会议纪要”App 请求“把明天下午三点和阿岛的会加到日历”。工具来自“日历”App 内嵌的插件（MCP over Binder）；写日历属于写操作，需要用户确认。</text>
+  <text x="40" y="86" font-size="13" fill="#64748b">前提：该插件已启用，工具目录已由 Extension Host 经 IExtensionCallback 推给运行时（F3）；日历 App 进程此刻没在运行；另有一条已信任的 PreToolUse Hook 命中这个工具。</text>
+
+  <!-- Phase bands -->
+  <rect x="10" y="170" width="1760" height="320" fill="#eef4ff" opacity="0.55"/>
+  <rect x="10" y="490" width="1760" height="962" fill="#ecfdf5" opacity="0.55"/>
+  <rect x="10" y="1452" width="1760" height="128" fill="#f5f3ff" opacity="0.7"/>
+
+  <!-- Lane headers: 130 / 380 / 650 / 910 / 1170 / 1410 / 1650 -->
+  <rect x="20" y="104" width="220" height="56" rx="10" fill="#EEF4FF" stroke="#6366f1"/>
+  <text x="130" y="127" text-anchor="middle" class="hd">会议纪要 App</text>
+  <text x="130" y="147" text-anchor="middle" class="hs">ACP Client · acp-android SDK</text>
+  <rect x="270" y="104" width="220" height="56" rx="10" fill="#F3EEFF" stroke="#8b5cf6"/>
+  <text x="380" y="127" text-anchor="middle" class="hd">AgentOS App · 主进程</text>
+  <text x="380" y="147" text-anchor="middle" class="hs">确认界面</text>
+  <rect x="540" y="104" width="220" height="56" rx="10" fill="#CCFBF1" stroke="#14b8a6"/>
+  <text x="650" y="127" text-anchor="middle" class="hd">AgentOS App · :agent</text>
+  <text x="650" y="147" text-anchor="middle" class="hs">宿主层 + Pi Agent core（有任务时前台）</text>
+  <rect x="800" y="104" width="220" height="56" rx="10" fill="#ffffff" stroke="#64748b"/>
+  <text x="910" y="127" text-anchor="middle" class="hd">云端模型</text>
+  <text x="910" y="147" text-anchor="middle" class="hs">MiniMax-M3 · BYOK 端点</text>
+  <rect x="1060" y="104" width="220" height="56" rx="10" fill="#F3EEFF" stroke="#8b5cf6"/>
+  <text x="1170" y="127" text-anchor="middle" class="hd">AgentOS App · :ext</text>
+  <text x="1170" y="147" text-anchor="middle" class="hs">Extension Host</text>
+  <rect x="1300" y="104" width="220" height="56" rx="10" fill="#FAF5FF" stroke="#a855f7" stroke-dasharray="5 3"/>
+  <text x="1410" y="127" text-anchor="middle" class="hd">Runner</text>
+  <text x="1410" y="147" text-anchor="middle" class="hs">独立 APK · 独立 UID</text>
+  <rect x="1540" y="104" width="220" height="56" rx="10" fill="#FFF6E5" stroke="#f59e0b"/>
+  <text x="1650" y="127" text-anchor="middle" class="hd">日历 App</text>
+  <text x="1650" y="147" text-anchor="middle" class="hs">内嵌插件 · MCP over Binder</text>
+
+  <!-- Lifelines -->
+  <line x1="130" y1="160" x2="130" y2="1582" class="life"/>
+  <line x1="380" y1="160" x2="380" y2="1582" class="life"/>
+  <line x1="650" y1="160" x2="650" y2="1582" class="life"/>
+  <line x1="910" y1="160" x2="910" y2="1582" class="life"/>
+  <line x1="1170" y1="160" x2="1170" y2="1582" class="life"/>
+  <line x1="1410" y1="160" x2="1410" y2="1582" class="life"/>
+  <line x1="1650" y1="160" x2="1650" y2="1582" class="life"/>
+
+  <!-- Phase labels (drawn after lifelines so the halo keeps them readable) -->
+  <text x="24" y="188" class="phase hA">A 连接、授权与建会话</text>
+  <text x="24" y="508" class="phase hB">B 一轮 session/prompt</text>
+  <text x="24" y="1470" class="phase hC">C 结束与回收</text>
+
+  <!-- A -->
+  <line x1="134" y1="214" x2="646" y2="214" class="callB"/>
+  <text x="390" y="206" text-anchor="middle" class="t hA">① bindService(IAcpService) → open(客户端通道)</text>
+
+  <line x1="646" y1="256" x2="384" y2="256" class="callR"/>
+  <text x="515" y="248" text-anchor="middle" class="t hA">② 首次调用：弹窗授权</text>
+  <rect x="228" y="268" width="304" height="34" rx="6" class="consent"/>
+  <text x="380" y="290" text-anchor="middle" class="t">允许“会议纪要”使用 AgentOS？（用户同意）</text>
+
+  <line x1="134" y1="342" x2="646" y2="342" class="callB"/>
+  <text x="390" y="334" text-anchor="middle" class="t hA">③ initialize（通道已绑定内核认证的调用方 UID）</text>
+
+  <line x1="646" y1="384" x2="134" y2="384" class="retB"/>
+  <text x="390" y="376" text-anchor="middle" class="tr hA">④ agentCapabilities，_meta 里声明 AgentOS Profile 扩展</text>
+
+  <line x1="134" y1="426" x2="646" y2="426" class="callB"/>
+  <text x="390" y="418" text-anchor="middle" class="t hA">⑤ session/new（mcpServers 为空）</text>
+
+  <line x1="646" y1="468" x2="134" y2="468" class="retB"/>
+  <text x="390" y="460" text-anchor="middle" class="tr hA">⑥ sessionId（归属调用方 UID，其他 App 看不到）</text>
+
+  <!-- B -->
+  <line x1="134" y1="536" x2="646" y2="536" class="callB"/>
+  <text x="390" y="528" text-anchor="middle" class="t hB">⑦ session/prompt（这一轮结束才返回；运行时进入前台）</text>
+
+  <line x1="654" y1="578" x2="906" y2="578" class="call"/>
+  <text x="780" y="570" text-anchor="middle" class="t hB">⑧ 发送 messages + tools（HTTPS）</text>
+
+  <line x1="906" y1="632" x2="654" y2="632" class="ret"/>
+  <text x="780" y="604" text-anchor="middle" class="tr hB">⑨ tool_use</text>
+  <text x="780" y="622" text-anchor="middle" class="code hB">mcp__calendar__events__create_event</text>
+
+  <line x1="646" y1="674" x2="134" y2="674" class="callB"/>
+  <text x="390" y="666" text-anchor="middle" class="t hB">⑩ session/update：tool_call（pending）</text>
+
+  <!-- Optional PreToolUse Hook -->
+  <rect x="560" y="694" width="940" height="212" class="frag"/>
+  <path d="M560,694 H626 V708 L618,716 H560 Z" fill="#e2e8f0" stroke="#94a3b8"/>
+  <text x="572" y="710" class="tag">可选</text>
+  <text x="638" y="711" class="guard hB">[ 有已信任、matcher 命中的 PreToolUse Hook ]</text>
+
+  <line x1="654" y1="752" x2="1166" y2="752" class="callS"/>
+  <text x="910" y="744" text-anchor="middle" class="t hB">IExtensionHost 触发 Hook（PreToolUse）</text>
+
+  <line x1="1174" y1="792" x2="1406" y2="792" class="callB"/>
+  <text x="1290" y="784" text-anchor="middle" class="t hB">run：sh -c，stdin 传事件 JSON</text>
+
+  <line x1="1406" y1="832" x2="1174" y2="832" class="retB"/>
+  <text x="1290" y="824" text-anchor="middle" class="tr hB">退出码 + stdout（决定）</text>
+
+  <line x1="1166" y1="890" x2="654" y2="890" class="retS"/>
+  <text x="910" y="862" text-anchor="middle" class="tr hB">合并后的决定</text>
+  <text x="910" y="880" text-anchor="middle" class="tr hB">（只能拒绝、要求确认、改写输入、补充上下文）</text>
+
+  <!-- Consent -->
+  <line x1="646" y1="962" x2="384" y2="962" class="callS"/>
+  <text x="515" y="934" text-anchor="middle" class="t hB">⑪ 需要确认：App 在前台时</text>
+  <text x="515" y="952" text-anchor="middle" class="t hB">弹出确认界面（否则发通知）</text>
+
+  <rect x="260" y="976" width="240" height="34" rx="6" class="consent"/>
+  <text x="380" y="998" text-anchor="middle" class="t">⑫ 确认界面（写操作），用户同意</text>
+
+  <line x1="384" y1="1048" x2="646" y2="1048" class="retS"/>
+  <text x="515" y="1040" text-anchor="middle" class="tr hB">⑬ 确认结果（IAgentControl）</text>
+
+  <!-- Tool call via Extension Host and binder-channel-v1 -->
+  <line x1="654" y1="1092" x2="1166" y2="1092" class="callS"/>
+  <text x="910" y="1084" text-anchor="middle" class="t hB">⑭ IExtensionHost 发起工具调用</text>
+
+  <line x1="1174" y1="1156" x2="1646" y2="1156" class="callB"/>
+  <text x="1410" y="1124" text-anchor="middle" class="t hB">⑮ 还没连接：bindService(IMcpService) → open(通道)</text>
+  <text x="1410" y="1143" text-anchor="middle" class="t hB">→ MCP 初始化 → IChannel.send(tools/call)</text>
+
+  <rect x="1575" y="1170" width="150" height="28" rx="5" fill="#FFF6E5" stroke="#f59e0b"/>
+  <text x="1650" y="1189" text-anchor="middle" font-size="12" fill="#0f172a">执行工具：写入日程</text>
+
+  <line x1="1646" y1="1256" x2="1174" y2="1256" class="retB"/>
+  <text x="1410" y="1224" text-anchor="middle" class="tr hB">⑯ IChannel.send(结果)</text>
+  <text x="1410" y="1242" text-anchor="middle" class="tr hB">Extension Host 校验发送方 UID</text>
+
+  <line x1="1166" y1="1300" x2="654" y2="1300" class="retS"/>
+  <text x="910" y="1292" text-anchor="middle" class="tr hB">⑰ IExtensionCallback：工具结果</text>
+
+  <line x1="646" y1="1344" x2="134" y2="1344" class="callB"/>
+  <text x="390" y="1336" text-anchor="middle" class="t hB">⑱ session/update：tool_call_update（completed）</text>
+
+  <line x1="654" y1="1388" x2="906" y2="1388" class="call"/>
+  <text x="780" y="1380" text-anchor="middle" class="t hB">⑲ tool_result → 模型生成回复</text>
+
+  <line x1="646" y1="1432" x2="134" y2="1432" class="callB"/>
+  <text x="390" y="1424" text-anchor="middle" class="t hB">⑳ session/update：agent_message_chunk …</text>
+
+  <!-- C -->
+  <line x1="646" y1="1516" x2="134" y2="1516" class="retB"/>
+  <text x="390" y="1488" text-anchor="middle" class="tr hC">㉑ session/prompt 返回 {stopReason: end_turn}</text>
+  <text x="390" y="1506" text-anchor="middle" class="tr hC">没有其他任务时运行时退出前台</text>
+
+  <line x1="1174" y1="1560" x2="1646" y2="1560" class="callB"/>
+  <text x="1410" y="1552" text-anchor="middle" class="t hC">㉒ 空闲 30 秒：close() + unbind，日历 App 进程可被系统回收</text>
+
+  <!-- Notes -->
+  <rect x="40" y="1600" width="1700" height="152" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="56" y="1624" font-size="12.5" fill="#0f172a"><tspan font-weight="700">运行时不直接连接任何插件：</tspan>工具调用和 Hook 都经 IExtensionHost 交给 :ext 进程（Extension Host）；远端第三方 MCP 走同样的 ⑭–⑰，只是 ⑮⑯ 换成 HTTPS 上的 Streamable HTTP。</text>
+  <text x="56" y="1646" font-size="12.5" fill="#0f172a"><tspan font-weight="700">binder-channel-v1：</tspan>ACP（会议纪要 ↔ :agent）和 MCP（:ext ↔ 日历 App）共用同一种 Binder 通道：open 时双方交换各自的 IChannel，每次 send 是一条完整的 JSON-RPC 消息；接收方校验对方 UID 与 open 时一致，任一端进程死亡就关闭通道。</text>
+  <text x="56" y="1668" font-size="12.5" fill="#0f172a"><tspan font-weight="700">Hooks：</tspan>图中只画了 PreToolUse，其他 Hook 事件按同样方式触发。Hook 只能拒绝、要求确认、改写输入、补充上下文，返回 allow 也跳不过 ⑪–⑬；超时、崩溃或输出不合法时忽略它的输出。</text>
+  <text x="56" y="1690" font-size="12.5" fill="#0f172a"><tspan font-weight="700">确认：</tspan>由 :agent 发起，调用方 App 不能替用户同意；App 不在前台（或主进程被杀）时改发带“允许 / 拒绝”按钮的通知，60 秒没有响应视为拒绝；拒绝的结果作为 is_error 的 tool_result 交回模型，这一轮不会因此失败。</text>
+  <text x="56" y="1712" font-size="12.5" fill="#0f172a"><tspan font-weight="700">调用方中途被杀：</tspan>断开连接不等于关闭会话，任务照常跑完，运行时在有任务期间保持前台；App 回来后用 session/load 重放，或用 AgentOS Profile 的增量恢复扩展接着读。</text>
+  <text x="56" y="1734" font-size="12.5" fill="#0f172a"><tspan font-weight="700">其他客户端：</tspan>AgentOS App 自带界面同样经 IAcpService 接入，只是不需要 ② 的首次授权；电脑端经 adb forward 接入 :agent，② 换成一次性配对码。</text>
+
+  <!-- Legend -->
+  <line x1="40" y1="1782" x2="80" y2="1782" class="call"/>
+  <text x="88" y="1786" class="t">调用</text>
+  <line x1="140" y1="1782" x2="180" y2="1782" class="ret"/>
+  <text x="188" y="1786" class="t">返回 / 回调</text>
+  <rect x="300" y="1773" width="30" height="18" rx="4" class="consent"/>
+  <text x="338" y="1786" class="t">用户确认（由 AgentOS 弹出）</text>
+  <line x1="550" y1="1782" x2="590" y2="1782" class="callS"/>
+  <text x="598" y="1786" class="t" style="fill:#0f766e">App 内部 AIDL（不导出，只接受本 App 的 UID）</text>
+  <line x1="950" y1="1782" x2="990" y2="1782" class="callB"/>
+  <text x="998" y="1786" class="t" style="fill:#6d28d9">Android Binder（跨 App，bindService 建立连接）</text>
+  <rect x="1330" y="1773" width="30" height="18" class="frag"/>
+  <text x="1368" y="1786" class="t">可选步骤</text>
+</svg>
