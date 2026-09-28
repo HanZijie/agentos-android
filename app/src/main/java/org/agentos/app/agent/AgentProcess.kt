@@ -42,8 +42,8 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * [RuntimeLifecycle]（前台服务、心跳、wake lock），执行每个进程一次的恢复流程（`runtime.start()`），持有 ACP 连接。
  * 由 `:agent` 里任何一个服务第一次创建时初始化（AgentService、AcpService、AgentControlService，谁先谁后都一样）。
  *
- * 宿主层：[engine] 是 A2 的 RuntimeEngine（HostPortImpl：Store、BYOK 模型来源与 key）；ACP 在 A3 之前由
- * [PlaceholderAgentRuntime] 的假 Agent 回答。A3 进 main 后 `runtime = engine`，其余接线不变。
+ * 宿主层是 A 的 RuntimeEngine（ACP、Store、调度、恢复都是真的），HostPort 是 [HostPortImpl]。Pi Agent core 在 B2 之前
+ * 用 [ScriptedAgentCore] 占位；B2 进 main 后只换 [engine] 的 factory。
  */
 class AgentProcess private constructor(val app: Context) {
 
@@ -65,12 +65,13 @@ class AgentProcess private constructor(val app: Context) {
         catalogSource = { app.assets.open(MODEL_CATALOG_ASSET).bufferedReader().use { ModelCatalog.parse(it.readText()) } },
         log = runtimeLog,
     )
-    val hostPort = HostPortImpl(store, models, secrets, runtimeLog)
-    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, UnwiredAgentCore)
-    private val interim = PlaceholderAgentRuntime(engine, beforeStart = { testRecoveryDelay() })
+    val environment = AndroidEnvironment()
+    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog)
 
-    /** 宿主层。A3 之后换成 [engine]（见类注释）。 */
-    val runtime: AgentRuntime = interim
+    /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
+    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, ScriptedAgentCore)
+    val runtime: AgentRuntime = engine
+    @Volatile private var engineStarted = false
 
     @Volatile private var service: AgentService? = null
     private val startCommands = ConcurrentLinkedDeque<JSONObject>()
@@ -84,8 +85,9 @@ class AgentProcess private constructor(val app: Context) {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "agentos:runtime-task")
             .apply { setReferenceCounted(false) }
     @Volatile private var ticker: Job? = null
+    @Volatile private var idleCheck: Job? = null
 
-    val lifecycle = RuntimeLifecycle(object : RuntimeLifecycle.Port {
+    val lifecycle: RuntimeLifecycle = RuntimeLifecycle(object : RuntimeLifecycle.Port {
         override fun taskCount(): Int = runtime.runState.value.let { it.activeTasks + it.queuedTasks }
 
         override fun requestServiceStart(): Boolean = try {
@@ -105,7 +107,17 @@ class AgentProcess private constructor(val app: Context) {
         override fun publish(status: RuntimeLifecycle.Status) = heartbeat.write(status)
 
         override fun onBusyChanged(busy: Boolean) = setBusy(busy)
-    })
+
+        override fun uptimeMillis(): Long = SystemClock.elapsedRealtime()
+
+        override fun scheduleIdleCheck(delayMillis: Long) {
+            idleCheck?.cancel()
+            idleCheck = scope.launch(CoroutineName("idle-grace")) {
+                delay(delayMillis)
+                lifecycle.onIdleCheck()
+            }
+        }
+    }, idleGraceMillis = IDLE_GRACE_MS)
 
     val acp = AcpConnections(this)
 
@@ -150,15 +162,19 @@ class AgentProcess private constructor(val app: Context) {
             try {
                 val exit = readLastAgentExit()
                 userStopped = RecoveryPolicy.userStopped(exit?.optInt("reason"))
-                if (userStopped) Log.i(TAG, "previous :agent was stopped by the user")
+                if (userStopped) Log.i(TAG, "previous :agent was stopped by the user; queued tasks will not be resumed")
+                // 宿主层在 start() 里读一次：用户主动停止过 → 恢复出来的排队任务取消（S2 契约 a 第 6 条）
+                environment.previousExitStoppedByUser = userStopped
+                testRecoveryDelay()
                 // BYOK 模型来源和 key（Keystore 解密）。失败只影响模型可用性，不挡住恢复
                 try {
                     models.ensureLoaded()
                 } catch (e: Exception) {
                     Log.w(TAG, "model source not loaded: ${e.javaClass.simpleName}")
                 }
-                // 打开 Store、迁移、恢复（F8）。“用户主动停止过就不继续任务”还没有入口交给宿主层，见 RecoveryPolicy。
+                // 打开 Store、迁移、恢复（F8），启动调度器
                 runtime.start()
+                engineStarted = true
             } catch (e: Exception) {
                 recoveryError = e.javaClass.simpleName
                 Log.e(TAG, "recovery failed: ${e.javaClass.simpleName}")
@@ -254,8 +270,9 @@ class AgentProcess private constructor(val app: Context) {
                 .put("wakeLockHeld", wakeLock.isHeld)
                 .put("debuggable", debuggable)
                 .put("implementation", runtime.javaClass.simpleName)
-                .put("engine", engine.javaClass.simpleName)
-                .put("engineStarted", interim.engineStarted)
+                .put("agentCore", ScriptedAgentCore.MODEL_NAME)
+                .put("engineStarted", engineStarted)
+                .put("idleGraceMs", IDLE_GRACE_MS)
                 .put("runState", JSONObject().put("activeTasks", rs.activeTasks).put("queuedTasks", rs.queuedTasks)
                     .put("recoveryPending", rs.recoveryPending).put("core", rs.core.toString())
                     .put("lastError", rs.lastError?.code?.wire ?: JSONObject.NULL)))
@@ -282,8 +299,9 @@ class AgentProcess private constructor(val app: Context) {
     private var systemCursor = 0L
     private var systemEvents = 0
     private val systemCounts = HashMap<String, Int>()
+    private var lastRecovered: String? = null
 
-    /** Store 的摘要：位置（CE）、是否本次新建、系统流里的事件（增量读取）、本进程经 ACP 新建 / 载入的会话数。 */
+    /** Store 的摘要：位置（CE）、是否本次新建、大小、系统流里的事件（增量读取）与最近一次恢复的结果。 */
     private suspend fun storeStats(): JSONObject = storeStatsLock.withLock {
         val path = store.databasePath
         val out = JSONObject()
@@ -291,15 +309,15 @@ class AgentProcess private constructor(val app: Context) {
             .put("storage", if (path.startsWith(app.dataDir.absolutePath + "/")) "ce" else "other")
             .put("existedAtStart", store.existedAtStart)
             .put("sizeBytes", store.sizeBytes())
-            .put("opened", interim.engineStarted)
-            .put("sessions", interim.sessionCounters())
-        if (!interim.engineStarted) return@withLock out.put("error", recoveryError ?: "not_started")
+            .put("opened", engineStarted)
+        if (!engineStarted) return@withLock out.put("error", recoveryError ?: "not_started")
         while (true) {
             val batch = engine.readEvents(EventTypes.SYSTEM_STREAM, systemCursor, 500)
             for (e in batch) {
                 systemCounts.merge(e.eventType, 1, Int::plus)
                 systemEvents++
                 systemCursor = e.sequence
+                if (e.eventType == EventTypes.RUNTIME_RECOVERED) lastRecovered = e.payload.toString()
             }
             if (batch.size < 500) break
         }
@@ -307,13 +325,18 @@ class AgentProcess private constructor(val app: Context) {
             .put("lastSequence", systemCursor)
             .put("events", systemEvents)
             .put("runtimeStarted", systemCounts[EventTypes.RUNTIME_STARTED] ?: 0)
-            .put("runtimeRecovered", systemCounts[EventTypes.RUNTIME_RECOVERED] ?: 0))
+            .put("runtimeRecovered", systemCounts[EventTypes.RUNTIME_RECOVERED] ?: 0)
+            // requeued、recoveryRequired、interrupted、userStopped、cancelled（Recovery 写的计数，不含内容）
+            .put("lastRecovered", lastRecovered?.let { JSONObject(it) } ?: JSONObject.NULL))
     }
 
     companion object {
         private const val TAG = "AgentProcess"
         const val HEARTBEAT_REFRESH_MS = 30_000L
         private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60_000L
+
+        /** 任务数归零后等这么久才退出前台（RuntimeLifecycle 规则 5：接住 session/new 与 prompt 之间的空档）。 */
+        const val IDLE_GRACE_MS = 2_000L
 
         /** BYOK 模型来源（明文部分 + key 的密文），CE 存储 files/ 下。 */
         const val BYOK_DIR = "byok"

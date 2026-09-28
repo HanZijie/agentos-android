@@ -22,6 +22,7 @@ import org.agentos.runtime.ports.HookRequest
 import org.agentos.runtime.ports.HostPort
 import org.agentos.runtime.ports.PiMessages
 import org.agentos.runtime.ports.RuntimeLog
+import org.agentos.runtime.ports.SafeModeState
 import org.agentos.runtime.ports.SkillCatalog
 import org.agentos.runtime.ports.SkillContent
 import org.agentos.runtime.ports.SkillPort
@@ -38,7 +39,8 @@ import org.agentos.runtime.ports.ToolPort
  * | storage | [AndroidStore]：BundledSQLiteDriver，CE 私有目录 | — |
  * | models | [ModelSources]：BYOK 模型来源，热加载 | — |
  * | secrets | [KeystoreSecrets]：Keystore 加密的 key，按 baseUrl 匹配 | — |
- * | clock / environment | 系统时钟 / 正常模式 | W11：safe mode 来自监督状态 |
+ * | clock | 系统时钟 | — |
+ * | environment | [AndroidEnvironment]：previousExitStoppedByUser 来自 ApplicationExitInfo；safe mode 关 | W11：safe mode 来自监督状态 |
  * | log | [AndroidRuntimeLog]：android.util.Log，写之前去掉 key | — |
  * | tools | [NotOpen.TOOLS]：目录为空，调用一律“未开放” | W16：Extension Host |
  * | consent | [NotOpen.CONSENT]：一律拒绝（UNAVAILABLE） | W16：ConsentCoordinator |
@@ -49,6 +51,7 @@ class HostPortImpl(
     override val storage: AndroidStore,
     override val models: ModelSources,
     override val secrets: KeystoreSecrets,
+    override val environment: AndroidEnvironment,
     override val log: RuntimeLog,
 ) : HostPort {
     override val tools: ToolPort = NotOpen.TOOLS
@@ -56,7 +59,16 @@ class HostPortImpl(
     override val hooks: HookPort = NotOpen.HOOKS
     override val consent: ConsentPort = NotOpen.CONSENT
     override val clock: Clock = Clock.SYSTEM
-    override val environment: EnvironmentPort = EnvironmentPort.NORMAL
+}
+
+/**
+ * 运行环境。[previousExitStoppedByUser] 由 [AgentProcess] 在调用 `runtime.start()` 之前按上一个 `:agent` 的
+ * ApplicationExitInfo 设好（RecoveryPolicy，S2 契约 a 第 6 条）；宿主层只在 start 时读一次。
+ */
+class AndroidEnvironment : EnvironmentPort {
+    override val safeMode: StateFlow<SafeModeState> = MutableStateFlow(SafeModeState.OFF).asStateFlow()
+
+    @Volatile override var previousExitStoppedByUser: Boolean = false
 }
 
 /** M1 还没开放的能力：行为明确（空目录、调用返回“未开放”、确认一律拒绝），不会假装成功。 */
@@ -112,9 +124,8 @@ class AndroidRuntimeLog(private val redact: (String) -> String) : RuntimeLog {
 }
 
 /**
- * Pi Agent core 还没接到 Android：`QuickJsEngine` 由 B 在 B2 之后提供，届时换成 PiAdapter 的工厂。
- * 在那之前 ACP 仍由占位 Agent 服务（[PlaceholderAgentRuntime]），不会有任务交给 RuntimeEngine 的调度器；
- * 万一有，CoreSessions 第一次 start 就失败，任务以 agent_core_failed 结束，不会挂住。
+ * Pi Agent core 在 Android 上不可用时的 factory（诊断、测试用）：start 就失败，任务以 agent_core_failed 结束，不会挂住。
+ * 正常接线用 [ScriptedAgentCore]（B2 之前）或 PiAdapter（B2 之后）。
  */
 object UnwiredAgentCore : AgentCoreFactory {
     const val MESSAGE = "the Pi agent core is not wired on Android yet (QuickJsEngine, B2)"

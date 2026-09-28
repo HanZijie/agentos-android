@@ -15,7 +15,7 @@ interface IAgentControl {
     /**
      * 诊断 JSON：runtime（运行状态 + recoveryMs、userStopped、wakeLockHeld、engineStarted、runState…）、
      * startCommands（最近的启动命令）、lastExit（上一个 :agent 进程的 ApplicationExitInfo）、heartbeat（路径和字段）、
-     * store（数据库路径与存储类型 ce、本次是否新建、大小、系统流事件计数、本进程经 ACP 新建 / 载入的会话数）、
+     * store（数据库路径与存储类型 ce、本次是否新建、大小、系统流事件计数、最近一次恢复的计数 lastRecovered）、
      * byok（是否配置、可用、厂商 / 模型 / 协议族、端点只到 scheme + host、keySet、credentialResolves、problems、
      * 目录与 Keystore 主密钥的状态）、supervisorMissing（S2 契约 e：运行 30 秒后还没收到本次开机的监督状态）、
      * acp（连接统计）、supervisor（同 getSupervisorStatus）。

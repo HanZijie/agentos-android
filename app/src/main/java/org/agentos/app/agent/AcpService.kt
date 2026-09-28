@@ -128,7 +128,6 @@ class AcpConnections(private val process: AgentProcess) {
         val open = JSONArray()
         for (c in conns.values) open.put(JSONObject().put("id", c.id).put("peerUid", c.peerUid).put("transport", c.transport.stats()))
         val rs = process.runtime.runState.value
-        val placeholder = process.runtime as? PlaceholderAgentRuntime
         val transportScopes = parent.coroutineContext[Job]?.children?.count() ?: -1
         return JSONObject()
             .put("pid", Process.myPid())
@@ -137,10 +136,11 @@ class AcpConnections(private val process: AgentProcess) {
             .put("connectionsClosed", closed.get())
             .put("rejectedOpens", rejected.get())
             .put("liveChannels", BinderChannel.liveChannels)
-            // 还没释放的连接作用域：本类的传输作用域 + 宿主层的连接（占位实现能报出来）
-            .put("hostJobChildren", transportScopes + (placeholder?.liveConnections() ?: 0))
+            // 还没释放的传输作用域（宿主层的 ACP 连接随传输关闭，见 AgentRuntime.serveAcp）
+            .put("hostJobChildren", transportScopes)
+            // 未结束的任务（执行中 + 排队 + 受理中）。连接断开不取消任务（F7），所以客户端死后它会等任务自己结束才归零
             .put("promptsActive", rs.activeTasks + rs.queuedTasks)
-            .put("promptOutcomes", placeholder?.promptOutcomes() ?: JSONObject())
+            .put("recoveryPending", rs.recoveryPending)
             .put("mainThreadBinderCalls", BinderChannel.mainThreadBinderCalls)
             .put("closeNotifyRetries", BinderChannel.closeNotifyRetries)
             .put("ackRetries", BinderChannel.ackRetries)
