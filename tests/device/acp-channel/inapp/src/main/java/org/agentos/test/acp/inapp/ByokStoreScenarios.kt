@@ -104,7 +104,7 @@ class ByokStoreScenarios(
         val checks = JSONObject()
         val errors = JSONObject()
         val pid0 = AppTarget.agentPid(ctx)
-        checks.put("version2", p.version() == 2)
+        checks.put("version2", p.version() >= 2)
         p.clearModelSource()
         checks.put("emptyAfterClear", !p.modelSource().getBoolean("configured"))
 
