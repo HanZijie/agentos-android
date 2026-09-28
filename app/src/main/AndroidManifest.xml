@@ -67,6 +67,23 @@
             android:exported="false"
             android:permission="org.agentos.permission.SEND_SUPERVISOR_STATUS" />
 
+        <!-- ================= W8：自带界面（主进程） ================= -->
+
+        <!-- 桌面入口与对话界面。主题和图标写在 activity 上，不改 application 的属性 -->
+        <activity
+            android:name=".ui.ConversationActivity"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/ui_title"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.AgentOS"
+            android:windowSoftInputMode="adjustResize|stateHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>
