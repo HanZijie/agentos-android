@@ -9,12 +9,19 @@ import org.json.JSONObject
  * （UTF-16 code unit，下文记作“字符”）计，线上占用约为 2 倍字节。
  */
 data class ChannelConfig(
-    /** 单条消息上限（字符）。发送方超过就不发；接收方收到超过的，视为违规并关闭通道。 */
+    /**
+     * 单条消息上限（字符）。发送方超过就不发；接收方收到超过的，视为违规并关闭通道。
+     * S3 实测：接收方空闲时单个 oneway 事务最多约 520,192 字节（整块异步缓冲），String 为 259,072 字符；
+     * 取 65,536 字符（约 128 KiB，占缓冲的 1/4）。
+     */
     val maxMessageChars: Int = 65_536,
-    /** 在途消息数上限：已发出但对方还没 ack 的条数。 */
-    val windowMessages: Int = 64,
-    /** 在途字符数上限。在途为 0 时，单条不超过 maxMessageChars 的消息总能发出。 */
-    val windowChars: Int = 65_536,
+    /** 在途消息数上限：已发出但对方还没 ack 的条数。取 32，低于内核 oneway spam 判定的 50 个缓冲。 */
+    val windowMessages: Int = 32,
+    /**
+     * 在途字符数上限（约 64 KiB，占缓冲的 1/8）。在途为 0 时，单条不超过 maxMessageChars 的消息总能发出，
+     * 所以一条通道的在途上限是 max(windowChars, maxMessageChars) 字符。
+     */
+    val windowChars: Int = 32_768,
     /** 接收方每处理这么多条，或处理完这么多字符，或收件箱已经处理空了，就回一次 ack。 */
     val ackEveryMessages: Int = maxOf(1, windowMessages / 4),
     val ackEveryChars: Int = maxOf(1, windowChars / 4),

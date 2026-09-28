@@ -79,6 +79,8 @@ class Scenarios(
         .put("pid", Process.myPid())
         .put("liveChannels", BinderChannel.liveChannels)
         .put("mainThreadBinderCalls", BinderChannel.mainThreadBinderCalls)
+        .put("closeNotifyRetries", BinderChannel.closeNotifyRetries)
+        .put("ackRetries", BinderChannel.ackRetries)
         .put("threads", threadCount())
 
     private fun threadCount(): Int = runCatching {
@@ -315,8 +317,11 @@ class Scenarios(
         delay(1500)
         val after = serverStats()
         resetConfig()
+        val noLeak = after.optInt("connectionsOpen") == 0 && after.optInt("liveChannels") == 0 &&
+            after.optInt("promptsActive") == 0 && after.optInt("hostJobChildren") == 0 && BinderChannel.liveChannels == 0
         return JSONObject()
-            .put("ok", okCount == iterations)
+            .put("ok", okCount == iterations && noLeak)
+            .put("noLeak", noLeak)
             .put("iterations", iterations).put("okCount", okCount).put("closeFirst", closeFirst)
             .put("iters", iters)
             .put("serverBefore", pick(before))

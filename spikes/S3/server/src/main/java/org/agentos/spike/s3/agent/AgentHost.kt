@@ -206,6 +206,8 @@ object AgentHost {
             .put("promptsStarted", promptsStarted.get())
             .put("promptOutcomes", outcomes)
             .put("mainThreadBinderCalls", BinderChannel.mainThreadBinderCalls)
+            .put("closeNotifyRetries", BinderChannel.closeNotifyRetries)
+            .put("ackRetries", BinderChannel.ackRetries)
             .put("threads", threadCount())
             .put("pssKb", Debug.getPss())
             .put("channelConfig", channelConfig.toJson())

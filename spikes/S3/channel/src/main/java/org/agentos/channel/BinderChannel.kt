@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -231,7 +233,7 @@ class BinderChannel(
         scope.launch(binderDispatcher + CoroutineName("$name.close")) {
             writerJob?.let { w -> withTimeoutOrNull(config.closeFlushTimeoutMs) { w.join() } }
             writerJob?.cancel()
-            peer?.let { p -> runCatching { binderCall { p.close(reason) } } }
+            peer?.let { p -> notifyPeerClose(p, reason) }
             finish(CloseCause.Local(reason))
         }
     }
@@ -396,16 +398,34 @@ class BinderChannel(
         }
     }
 
+    @Volatile private var latestAck = 0L
+
     private fun sendAck(value: Long) {
         val p = peer ?: return
         if (finished.get()) return
-        try {
-            binderCall { p.ack(value) }
-            st.acksSent.incrementAndGet()
-        } catch (e: Exception) {
-            val alive = runCatching { p.asBinder().isBinderAlive }.getOrDefault(false)
-            abort(if (alive) CloseCause.Failure("ack failed: $e", e) else CloseCause.PeerDied, notifyPeer = alive)
+        latestAck = maxOf(latestAck, value)
+        if (tryAck(p, latestAck)) return
+        if (!runCatching { p.asBinder().isBinderAlive }.getOrDefault(false)) {
+            abort(CloseCause.PeerDied, notifyPeer = false)
+            return
         }
+        // 对端异步缓冲暂时满（ENOSPC）：ack 是累计值，稍后补发最新值即可，不关闭通道。
+        ACK_RETRIES.incrementAndGet()
+        fun schedule(attempt: Int) {
+            if (attempt >= CLOSE_RETRY_DELAYS_MS.size || finished.get()) return
+            RETRY_EXECUTOR.schedule({
+                if (!finished.get() && !tryAck(p, latestAck)) schedule(attempt + 1)
+            }, CLOSE_RETRY_DELAYS_MS[attempt], TimeUnit.MILLISECONDS)
+        }
+        schedule(0)
+    }
+
+    private fun tryAck(p: IChannel, value: Long): Boolean = try {
+        binderCall { p.ack(value) }
+        st.acksSent.incrementAndGet()
+        true
+    } catch (e: Exception) {
+        false
     }
 
     private inline fun binderCall(block: () -> Unit) {
@@ -421,8 +441,35 @@ class BinderChannel(
         state.set(State.CLOSED)
         outbox.close()
         writerJob?.cancel()
-        if (notifyPeer) peer?.let { p -> runCatching { binderCall { p.close(cause.reason) } } }
+        if (notifyPeer) peer?.let { p -> notifyPeerClose(p, cause.reason) }
         finish(cause)
+    }
+
+    /**
+     * 通知对端关闭。对端的异步缓冲满时 oneway 调用也会失败（内核返回 ENOSPC，Java 层是 DeadObjectException），
+     * 这时 close 丢了，对端会永远等下去（S3 无流控实验里复现过），所以按退避重试到成功或对端死亡。
+     */
+    private fun notifyPeerClose(p: IChannel, reason: String) {
+        if (tryClose(p, reason)) return
+        CLOSE_RETRIES.incrementAndGet()
+        fun schedule(attempt: Int) {
+            if (attempt >= CLOSE_RETRY_DELAYS_MS.size) {
+                Log.w(TAG, "$name: giving up notifying peer of close")
+                return
+            }
+            RETRY_EXECUTOR.schedule({
+                if (!runCatching { p.asBinder().isBinderAlive }.getOrDefault(false)) return@schedule
+                if (!tryClose(p, reason)) schedule(attempt + 1)
+            }, CLOSE_RETRY_DELAYS_MS[attempt], TimeUnit.MILLISECONDS)
+        }
+        schedule(0)
+    }
+
+    private fun tryClose(p: IChannel, reason: String): Boolean = try {
+        binderCall { p.close(reason) }
+        true
+    } catch (e: Exception) {
+        false
     }
 
     private fun finish(cause: CloseCause) {
@@ -448,11 +495,23 @@ class BinderChannel(
         private const val TAG = "BinderChannel"
         private val LIVE = AtomicInteger()
         private val MAIN_THREAD_BINDER_CALLS = AtomicLong()
+        private val CLOSE_RETRIES = AtomicLong()
+        private val ACK_RETRIES = AtomicLong()
+        private val CLOSE_RETRY_DELAYS_MS = longArrayOf(10, 50, 200, 1_000, 3_000)
+        private val RETRY_EXECUTOR = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "binder-channel-close-retry").apply { isDaemon = true }
+        }
 
         /** 本进程里还没关闭的通道数，用来查泄漏。 */
         val liveChannels: Int get() = LIVE.get()
 
         /** 本进程里在主线程上发生的 Binder 调用次数，期望为 0。 */
         val mainThreadBinderCalls: Long get() = MAIN_THREAD_BINDER_CALLS.get()
+
+        /** 第一次通知对端关闭失败、转入重试的次数。 */
+        val closeNotifyRetries: Long get() = CLOSE_RETRIES.get()
+
+        /** ack 因对端缓冲满发送失败、转入补发的次数。 */
+        val ackRetries: Long get() = ACK_RETRIES.get()
     }
 }

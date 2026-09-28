@@ -25,7 +25,7 @@ CLIENT_PKG = "org.agentos.spike.s3.client"
 ACTIVITY = CLIENT_PKG + "/.ScenarioActivity"
 
 # 名称、场景、参数、超时（秒）
-WINDOWS = [(8, 16384), (32, 65536), (64, 65536), (128, 131072)]
+WINDOWS = [(8, 16384), (16, 32768), (32, 32768), (64, 65536)]
 
 
 def matrix():
@@ -48,6 +48,8 @@ def matrix():
         ("cancel-peak", "cancel", {"intervalMs": 0, "chunkChars": 32, "cancelAfterChunks": 200}, 180),
         ("cancel-peak-bp", "cancel", {"intervalMs": 0, "chunkChars": 32, "bp": True, "cancelAfterChunks": 200}, 120),
         ("reconnect", "reconnect", {"iterations": 20}, 300),
+        # 不调 close 直接 unbind + 取消作用域：BinderChannel 应在作用域取消时通知对端关闭
+        ("reconnect-noclose", "reconnect", {"iterations": 5, "closeFirst": False}, 120),
         ("server-kill", "server-kill", {"killAfterChunks": 50}, 120),
         ("client-kill", "client-kill", {"killAfterChunks": 50}, 120),
         ("oversize", "oversize", {}, 120),
@@ -69,7 +71,7 @@ def sweep():
                       {"chunks": rate * 4, "chunkChars": 16, "intervalMs": 10, "burst": rate // 100, "bp": True,
                        "cfg": {"windowMessages": wm, "windowChars": wc}}, 120))
     for rep in (1, 2):
-        for wm, wc in [(8, 16384), (16, 32768), (32, 32768), (64, 65536)]:
+        for wm, wc in [(8, 16384), (16, 32768), (32, 32768), (32, 65536), (64, 65536)]:
             m.append((f"peak-w{wm}x{wc}-r{rep}", "stream",
                       {"chunks": 20000, "chunkChars": 64, "intervalMs": 0, "bp": True,
                        "cfg": {"windowMessages": wm, "windowChars": wc}}, 180))
@@ -273,6 +275,10 @@ def main():
             r = {"ok": False, "error": f"driver: {e}"}
         if r is not None:
             r["driverSec"] = round(time.time() - t0, 1)
+            if name == "stream-noflow":
+                # 负向实验：关掉流控后允许失败，但必须在有限时间内结束（不能挂住）
+                r["deliveredAll"] = r.get("ok")
+                r["ok"] = True
         results[name] = r
         print(summarize(name, r), flush=True)
         adb.sh(f"am force-stop {CLIENT_PKG}", check=False)
