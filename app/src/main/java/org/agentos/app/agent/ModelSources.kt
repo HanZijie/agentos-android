@@ -245,7 +245,7 @@ class ModelSources(
 
     /** 模型端点下的一个请求能否拿到 key（与 HostFetch 走同一条匹配路径）。 */
     private fun resolves(baseUrl: String): Boolean =
-        runCatching { secrets.apiKeyFor(URI(baseUrl.trimEnd('/') + "/v1/messages")) != null }.getOrDefault(false)
+        secrets.resolves(baseUrl.trimEnd('/') + "/v1/messages")
 
     // ------------------------------------------------------------------ 修改
 

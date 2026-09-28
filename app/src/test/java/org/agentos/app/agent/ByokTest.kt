@@ -18,7 +18,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
-import java.net.URI
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -119,7 +118,7 @@ class KeystoreSecretsTest {
     fun matchesByParsedEndpoint() = runBlocking {
         val s = KeystoreSecrets(SoftwareCipher())
         s.activate(key, listOf(cn))
-        assertNotNull(s.apiKeyFor(URI("$cn/v1/messages")))
+        assertTrue(s.resolves("$cn/v1/messages"))
         assertEquals(key, s.credentialFor("$cn/v1/messages")?.reveal())
         assertEquals(key, s.credentialFor("HTTPS://API.MINIMAXI.COM:443/anthropic/v1/messages")?.reveal())
         for (bad in listOf(
@@ -132,7 +131,7 @@ class KeystoreSecretsTest {
             "not a url",
         )) {
             assertNull(bad, s.credentialFor(bad))
-            runCatching { URI(bad) }.getOrNull()?.let { assertNull(bad, s.apiKeyFor(it)) }
+            assertFalse(bad, s.resolves(bad))
         }
     }
 
@@ -169,7 +168,7 @@ class KeystoreSecretsTest {
         s.activate(key, listOf(cn))
         assertEquals("sk-t…WXYZ", s.masked())
         val sealed = s.seal(key, listOf(cn))
-        for (text in listOf(s.toString(), sealed.toString(), s.apiKeyFor(URI("$cn/v1/messages")).toString())) {
+        for (text in listOf(s.toString(), sealed.toString(), runBlocking { s.credentialFor("$cn/v1/messages") }.toString())) {
             assertFalse(text, text.contains(key))
         }
         assertEquals("auth failed for **** at x", s.redact("auth failed for $key at x"))
@@ -232,7 +231,7 @@ class ModelSourcesTest {
         assertEquals("MiniMax-M2.7", active.id)
         assertEquals("minimax-cn", active.provider)
         assertEquals("high", active.thinkingLevel)
-        assertNotNull(secrets.apiKeyFor(URI("https://api.minimaxi.com/anthropic/v1/messages")))
+        assertTrue(secrets.resolves("https://api.minimaxi.com/anthropic/v1/messages"))
 
         val file = File(tmp.root, "byok/${ModelSources.FILE_NAME}")
         assertTrue(file.isFile)

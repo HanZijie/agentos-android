@@ -3,12 +3,10 @@ package org.agentos.app.agent
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
-import org.agentos.runtime.net.ApiKey
+import kotlinx.coroutines.runBlocking
 import org.agentos.runtime.net.BaseUrlCredentials
-import org.agentos.runtime.net.CredentialProvider
 import org.agentos.runtime.ports.Credential
 import org.agentos.runtime.ports.SecretPort
-import java.net.URI
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.util.Base64
@@ -21,8 +19,10 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * 模型 key（F9）：Android Keystore 里的 AES-256-GCM 主密钥加密后保存，解密后只留在 `:agent` 的内存里。
  *
- * - 同时是 B 定义的 [CredentialProvider]（给 net/HostFetch 注入 key）和 A 定义的 [SecretPort]（`HostPort.secrets`）。
- *   两者都按 [BaseUrlCredentials] 的规则匹配：scheme、host、port 完全相同，路径在段边界上以 baseUrl 的路径开头。
+ * - 实现 A 定义的 [SecretPort]（`HostPort.secrets`；B2 起 net/HostFetch 也直接用它注入 key），内部委托给 B 的
+ *   [BaseUrlCredentials]：scheme、host、port 完全相同，路径在段边界上以 baseUrl 的路径开头；Entry 的 key 每次请求时求值。
+ * - 解密后的 key 留在 `:agent` 内存里（不是每次请求都经 Keystore 解密）：日志去 key（[redact]）要用明文比对；
+ *   清除后 Keystore 主密钥已删除，进行中的任务仍要用换下来的 key 跑完这一轮。
  * - key 绑定到一组 baseUrl（厂商预设：该厂商的全部 baseUrl；自定义端点：用户填的那一个）。绑定关系同时作为 GCM 的
  *   AAD：密文被挪给别的端点就解不开；换端点必须重新输入 key。
  * - 热加载：[activate] 之后下一个请求就用新 key。换下来的 key 留到运行时空闲（[retire]）再丢弃，
@@ -36,13 +36,13 @@ import javax.crypto.spec.GCMParameterSpec
 class KeystoreSecrets(
     private val cipher: SecretCipher,
     private val idle: () -> Boolean = { true },
-) : CredentialProvider, SecretPort {
+) : SecretPort {
 
     private class Slot(val key: String, val bindings: List<String>) {
-        val apiKey = ApiKey(key)
-        private val credentials = BaseUrlCredentials(bindings.map { BaseUrlCredentials.Entry(it, apiKey) })
+        val credential = Credential(key)
+        private val lookup = BaseUrlCredentials(bindings.map { url -> BaseUrlCredentials.Entry(url) { credential } })
 
-        fun matches(target: URI): Boolean = credentials.apiKeyFor(target) != null
+        suspend fun match(url: String): Credential? = lookup.credentialFor(url)
 
         override fun toString() = "Slot(****, ${bindings.size} endpoints)"
     }
@@ -97,16 +97,15 @@ class KeystoreSecrets(
     /** 主密钥的状态（诊断用，不含任何 key 内容）。 */
     fun keystoreStatus(): Map<String, Any?> = runCatching { cipher.status() }.getOrElse { mapOf("error" to it.javaClass.simpleName) }
 
-    override fun apiKeyFor(target: URI): ApiKey? = slotFor(target)?.apiKey
-
+    /** 新 key 优先；换下来的 key 只服务它自己绑定的端点。 */
     override suspend fun credentialFor(url: String): Credential? {
-        val target = runCatching { URI(url.trim()) }.getOrNull() ?: return null
-        return slotFor(target)?.let { Credential(it.key) }
+        val c = current
+        val r = retired
+        return c?.match(url) ?: r?.match(url)
     }
 
-    /** 新 key 优先；换下来的 key 只服务它自己绑定的端点。 */
-    private fun slotFor(target: URI): Slot? =
-        current?.takeIf { it.matches(target) } ?: retired?.takeIf { it.matches(target) }
+    /** [credentialFor] 的非挂起版本（ModelSources 判断“可用”、诊断用）；匹配本身不挂起、不做 I/O。 */
+    fun resolves(url: String): Boolean = runBlocking { credentialFor(url) != null }
 
     /** 把 [text] 里出现的 key（当前的和换下来的）换成 `****`。 */
     fun redact(text: String): String {
