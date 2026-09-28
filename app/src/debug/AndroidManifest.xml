@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  lane B（W6/B3）：只在 debug 包里生效。app 的设备测试（app/src/androidTest）在 :agent 进程里起假模型端点
+  http://127.0.0.1:<port>，targetSdk 36 默认禁止明文，OkHttp 会拒绝连接。这里只放行回环地址。
+  release 包是否也放行回环明文（手机上的本地模型服务）待定，见 lane B 的 W3/W6 报告。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application android:networkSecurityConfig="@xml/agentos_debug_network_security" />
+</manifest>

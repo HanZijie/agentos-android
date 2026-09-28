@@ -35,9 +35,11 @@ interface JsEngine {
     fun defineAsyncFunction(name: String, body: suspend (args: List<Any?>) -> Any?)
 
     /**
-     * Evaluates [script] as a classic script and suspends until its completion value is known;
-     * a returned promise is awaited, including the async host calls it starts.
-     * Throws [JsException] when the script throws or a promise rejection is left unhandled.
+     * Evaluates [script] as a classic script and suspends until it has settled: when the
+     * completion value is a promise, including the async host calls it starts, evaluate returns
+     * only after that promise settles. The value returned for such a script is the promise
+     * itself (quickjs-kt converts it to a string), not its resolution: pass results back through
+     * a binding. Throws [JsException] when the script throws or a promise rejection is left unhandled.
      */
     suspend fun evaluate(script: JsScript): Any?
 

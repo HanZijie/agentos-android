@@ -69,3 +69,26 @@ val bundlePiAgent = tasks.register<Exec>("bundlePiAgent") {
 tasks.named("preBuild") {
     dependsOn(bundlePiAgent)
 }
+
+// ---- Pi Agent core 的 JS 引擎与设备测试（lane B，W6/B3）----
+// app/.../agent/QuickJsEngine.kt 用 quickjs-kt-android（S8 固定 1.0.15）。原生库只打 arm64-v8a：
+// 目标真机（Pixel 8）和本机的 arm64 模拟器都够用；需要 x86_64 模拟器时再加。
+// androidTest：在 :agent 进程里跑 core:runtime testFixtures 的 PiAdapterContract（同一套契约场景）、
+// 冷启动测量和可选的真实端点冒烟（app/src/androidTest）。
+android {
+    defaultConfig {
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+}
+
+dependencies {
+    implementation(libs.quickjs.kt)
+
+    androidTestImplementation(testFixtures(project(":core:runtime")))
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.kotlin.test.junit)
+}

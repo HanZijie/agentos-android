@@ -172,11 +172,24 @@ class PiBundleContractTest {
         val n0 = fake.requests.size
         val r = coroutineScope {
             val p = async { h.runtime.prompt(sid, "[tool:slow 1 1]") }
-            withTimeout(10_000) { while (h.eventsFor(sid).none { it.type == "tool_execution_start" }) delay(10) }
+            // Wait for the host's tool execution itself, not tool_execution_start: Pi emits that
+            // event before beforeToolCall, and an abort in between (easy under load) ends the call
+            // before it starts, so there is nothing to cancel.
+            val toolCallId = withTimeout(10_000) {
+                var id: String? = null
+                while (id == null) {
+                    id = h.eventsFor(sid).firstOrNull { it.type == "tool_execution_start" }?.e?.get("toolCallId")?.jsonPrimitive?.content
+                        ?.takeIf { it in h.startedTools }
+                    if (id == null) delay(5)
+                }
+                id
+            }
             val t0 = System.nanoTime()
             h.runtime.abort(sid)
             val res = withTimeout(5_000) { p.await() }
-            assertTrue((System.nanoTime() - t0) / 1e6 < 1_000, "abort waited for the tool")
+            // The slow tool takes 3 s; well under that means the abort did not wait for it.
+            assertTrue((System.nanoTime() - t0) / 1e6 < 2_000, "abort waited for the tool")
+            assertTrue(toolCallId in h.cancelledTools, "host was told to cancel the tool")
             res
         }
         // shouldStopAfterTurn ends the run after the tool batch: the last assistant message keeps
@@ -186,8 +199,6 @@ class PiBundleContractTest {
         val roles = r.appended.map { it.jsonObject["role"]!!.jsonPrimitive.content }
         assertEquals(listOf("user", "assistant", "toolResult"), roles)
         assertEquals("true", r.appended.last().jsonObject["isError"]!!.jsonPrimitive.content)
-        val toolCallId = h.eventsFor(sid).first { it.type == "tool_execution_start" }.e["toolCallId"]!!.jsonPrimitive.content
-        assertTrue(toolCallId in h.cancelledTools, "host was told to cancel the tool")
     }
 
     @Test

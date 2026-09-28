@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  lane B（W6/B3）：instrumentation 跑在 :agent 进程里（生产上 PiAdapter 和 QuickJsEngine 所在的进程），
+  不是主进程。AndroidJUnitRunner 只在 targetProcesses 的第一个进程里执行测试。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <instrumentation
+        android:name="androidx.test.runner.AndroidJUnitRunner"
+        android:targetPackage="org.agentos.app"
+        android:targetProcesses="org.agentos.app:agent" />
+</manifest>

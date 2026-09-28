@@ -30,8 +30,10 @@ MINIMAX_API_KEY=... ./gradlew :desktop:run --args="real"      # 可选 OPENAI_CO
 ./gradlew :android:assembleRelease
 ANDROID_SERIAL=<serial> tools/run-android.sh release contract,measure
 ANDROID_SERIAL=<serial> tools/cold-start-android.sh 5
-ANDROID_SERIAL=<serial> tools/run-android.sh release real       # 读取本 shell 的 MINIMAX_API_KEY 等
+ANDROID_SERIAL=<serial> tools/run-android.sh release real       # 读取本 shell 的 MINIMAX_API_KEY 等；只用于 API ≤ 36（见下）
 ```
+
+`real` 模式把 key 作为 intent extra 放在 `adb shell am start` 的命令行里。API 37 的 adbd 会把 `adb shell` 的整条命令行写进 logcat，所以脚本在 API > 36 的设备上拒绝传 key。新设备上的真实端点验证改用 App 的设备测试 `app/src/androidTest/.../MiniMaxLiveDeviceTest`（key 经 stdin 写入 App 私有目录，测试读后即删）。
 
 版本矩阵用 Gradle 属性切换。默认是 S8 推荐的 Kotlin 2.3.20 + quickjs-kt 1.0.15（AGP 8.10.1）；计划锁定的 Kotlin 2.2.20 读不了 1.0.15 的元数据，只能配 1.0.5，而 1.0.5 遇到中文 + emoji 会挂住：
 

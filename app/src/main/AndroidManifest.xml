@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 有任务期间持有 partial wake lock，灭屏后任务不因 CPU 休眠停住 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- W3/W6（lane B）：:agent 里的 HostFetch 调模型端点（Pi Agent core 的全部网络出口） -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- W7：root 监督进程的状态广播只能由 root（绕过权限检查）或同证书的 App 发来（docs/spikes/S2.md 契约 e） -->
     <permission
