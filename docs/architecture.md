@@ -372,7 +372,7 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 
 1. 用户在设置页选择模型来源：
    - **厂商预设**：列表来自 `pi-ai` 的模型目录，MiniMax（国际 / 国内）排在最前。用户只需填写 key，endpoint、协议和模型参数（上下文长度、最大输出、是否支持推理）都已预置。
-   - **自定义兼容端点**：填写 URL、协议（Anthropic Messages 或 OpenAI Chat Completions）、模型名和 key，适用于自建网关和预设里没有的厂商。
+   - **自定义兼容端点**：填写 URL、协议（Anthropic Messages 或 OpenAI Chat Completions）、模型名和 key，适用于自建网关和预设里没有的厂商。URL 必须是 `https://`；唯一的例外是回环地址（`127.0.0.1`、`localhost`、`::1`）允许 `http://`，用于手机上本地运行的模型服务（整合人 2026-09-29 决定，release 包同样生效）。
    首版不支持用订阅账号登录（Claude Pro/Max、ChatGPT、Copilot 等 OAuth）。
 2. 主进程经 `IAgentControl`（v2 的 `setModelSource` 等）交给运行时。宿主层用 Android Keystore 里的 AES-256-GCM 主密钥（不要求���户认证）加密 key，与模型来源一起写入 `:agent` 的 CE 私有目录（`files/byok/model-source.json`，一次原子写入）。key 绑定端点：厂商预设绑定该厂商的全部 baseUrl，自定义端点只绑定它自己的 baseUrl，加密时把 baseUrl 作为附加认证数据，所以换端点必须重新输入 key。
    - **更换**：热加载，下一次模型请求生效，不打断正在运行的这一轮。
