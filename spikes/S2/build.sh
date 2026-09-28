@@ -28,13 +28,11 @@ OFFLINE=
 cp "$HERE/agent/build/outputs/apk/debug/agent-debug.apk" "$OUT/s2-agent.apk"
 cp "$HERE/client/build/outputs/apk/debug/client-debug.apk" "$OUT/s2-client.apk"
 
-STAGE="$HERE/build/module-stage"
-[ -d "$STAGE" ] && mv "$STAGE" "$HERE/build/module-stage.old.$$"
-mkdir -p "$STAGE"
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/agentos-s2-stage.XXXXXX")
 cp -R "$HERE/module/." "$STAGE/"
 cp "$HERE/device/supervisor.sh" "$STAGE/supervisor.sh"
-[ -f "$OUT/agentos-s2-module.zip" ] && mv "$OUT/agentos-s2-module.zip" "$OUT/agentos-s2-module.zip.old"
-(cd "$STAGE" && zip -qrX "$OUT/agentos-s2-module.zip" .)
+(cd "$STAGE" && zip -qrX "$STAGE.zip" .)
+mv -f "$STAGE.zip" "$OUT/agentos-s2-module.zip"
 cp "$HERE/device/supervisor.sh" "$HERE/device/s2dev.sh" "$OUT/"
 
 cd "$OUT"
