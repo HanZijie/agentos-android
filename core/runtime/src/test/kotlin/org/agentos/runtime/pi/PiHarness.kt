@@ -10,10 +10,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
-import org.agentos.runtime.net.ApiKey
 import org.agentos.runtime.net.BaseUrlCredentials
 import org.agentos.runtime.net.HostFetch
 import org.agentos.runtime.net.RetryPolicy
+import org.agentos.runtime.ports.Credential
 import org.agentos.runtime.pi.desktop.QuickJsJvmEngine
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -45,7 +45,7 @@ class PiHarness(
     val cancelledTools = CopyOnWriteArrayList<String>()
     val outcomes = CopyOnWriteArrayList<ModelRequestOutcome>()
     val keyLeaks = CopyOnWriteArrayList<String>()
-    val fetch = HostFetch(BaseUrlCredentials(keys.map { (base, key) -> BaseUrlCredentials.Entry(base, ApiKey(key)) }), retry = retry)
+    val fetch = HostFetch(BaseUrlCredentials(keys.map { (base, key) -> BaseUrlCredentials.Entry(base, Credential(key)) }), retry = retry)
     val runtime = PiRuntime(QuickJsJvmEngine.factory, fetch, this, this)
     private val guarded = keys.map { it.second.toByteArray() }
 
@@ -55,7 +55,7 @@ class PiHarness(
 
     private var seq = 0
 
-    suspend fun session(model: ModelSpec, messages: JsonArray? = null, tools: JsonArray = TOOLS, thinkingLevel: String? = null): String {
+    suspend fun session(model: CatalogModel, messages: JsonArray? = null, tools: JsonArray = TOOLS, thinkingLevel: String? = null): String {
         val sid = "s${++seq}"
         runtime.createSession(sid, model.json, "You are a concise test agent.", tools, messages, thinkingLevel)
         return sid

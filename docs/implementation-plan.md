@@ -37,11 +37,12 @@ agentos-android/
 │   │   └── agent-plugins-1.0/                       [W14] 固定副本：plugin.schema.json、mcp.schema.json（来自 agent-plugins.org）
 │   ├── runtime/                                     # 运行时的 Kotlin 宿主层与 Pi 适配层（Kotlin/JVM 库，由 :agent 进程加载）
 │   │   ├── acp/{AgentSide,UpdateMapper,ProfileExtensions}.kt      [W4] 新写：官方 SDK 的 Agent 端接上宿主层
-│   │   ├── store/{EventLog,SessionStore,TaskStore}.kt             [W2] ← sideagentd/main.cpp 的行为：追加写、sequence、恢复围栏；另存各会话的 Pi messages
+│   │   ├── {AgentRuntime,RuntimeEngine,Ids}.kt · errors/ · events/   [W2] 运行时入口 AgentRuntimes.create、错误码、内部事件
+│   │   ├── store/{Store,Db,Schema,Records,EventLog,SessionStore,TaskStore}.kt   [W2] ← sideagentd/main.cpp 的行为：追加写、sequence、恢复围栏；另存各会话的 Pi messages
 │   │   ├── store/Migrations.kt                                    [W12]
-│   │   ├── scheduler/{Scheduler,Recovery}.kt                      [W2] ← runtime_worker.cpp、main.cpp 的调度与恢复行为
+│   │   ├── scheduler/{Scheduler,Recovery,TaskRunner,CoreSessions,SchedulerConfig,PromptContent}.kt   [W2] ← runtime_worker.cpp、main.cpp 的调度与恢复行为
 │   │   ├── router/{SessionRouter,JevProvider}.kt                  [W2] ← session_selector.cpp 的行为
-│   │   ├── pi/{PiAdapter,PiEventMapper,JsEngine}.kt               [W3] 新写：Pi 适配层；JsEngine 是 QuickJS 的抽象，Android 和电脑上各一个实现
+│   │   ├── pi/{PiAdapter,PiEventMapper,JsEngine,PiRuntime,ModelCatalog}.kt   [W3] 新写：Pi 适配层；JsEngine 是 QuickJS 的抽象，Android 和电脑上各一个实现；PiRuntime 是常驻泵
 │   │   ├── net/HostFetch.kt                                       [W3] 新写：给 Pi 用的 fetch（OkHttp），按 endpoint 注入 key，错误分为可重试和不可重试
 │   │   ├── broker/CapabilityBroker.kt                             [W2] 按目录校验工具名；[W16] 接 Extension Host，处理超时和取消
 │   │   ├── broker/RiskPolicy.kt                                   [W16] 新写
@@ -49,6 +50,7 @@ agentos-android/
 │   │   ├── skills/SkillPrompt.kt                                  [W20] 新写：把 Skill 目录写进系统提示；内置 read_skill 工具
 │   │   ├── ports/{HostPort,AgentCore}.kt                          [W2] 新写：HostPort 是宿主层对 Android 的全部依赖（工具、Skill、Hook、确认、存储、密钥、时钟）；AgentCore 是宿主层对 Agent 循环的依赖，由 Pi 适配层实现，测试时用假实现
 │   │   ├── memory/MemoryProvider.kt                               [M6] 接口占位
+│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer
 │   │   └── src/test/                                              [W2] JUnit，在电脑上运行；[W3] 含可以编排 tool_use 的假模型端点
 │   ├── pi-runtime/                                  # 打包进 APK 的 Pi Agent core（JavaScript）
 │   │   ├── package.json · package-lock.json         [W3] 固定 @earendil-works/pi-agent-core、pi-ai 0.86.1；只引入 anthropic-messages、openai-completions 两个协议族
@@ -84,7 +86,7 @@ agentos-android/
 │       │   ├── ConsentCoordinator.kt                [W16] 前台时弹确认界面，后台时发通知；60 秒无响应视为拒绝
 │       │   ├── DesktopGateway.kt                    [W9] 抽象 socket agentos-acp，开发者开关，一次性配对码
 │       │   ├── {CallerRegistry,QuotaPolicy}.kt      [W25] 第三方 App 授权名单与限额，支持撤销，防止反复弹窗
-│       │   └── supervisor/SupervisorStatusReceiver.kt   [W7] 接收 root 监督进程的状态广播（signature 权限保护）；[W11] safe mode
+│       │   └── supervisor/{SupervisorStatusReceiver,SupervisorStatus,SupervisorStatusStore}.kt   [W7] 接收 root 监督进程的状态广播（signature 权限保护），状态文件 key=value 与 toJson()；[W11] safe mode
 │       ├── ext/                                     # Extension Host，:ext 进程（设计见 docs/extensions.md）
 │       │   ├── ExtensionHostService.kt              [W14] IExtensionHost 的实现
 │       │   ├── registry/AppPluginScanner.kt         [W14] ← AgentManagerService.java 的发现与签名校验
@@ -135,6 +137,8 @@ agentos-android/
 ├── module/                                          # agentos.zip 的脚本，不含任何原生二进制
 │   ├── module.prop.template                         [W7]
 │   ├── customize.sh                                 [W7] 安装前检查
+│   ├── common.sh · apks.sh · META-INF/              [W7] 公共函数、APK 安装与升级（按 S1 规则）、刷入入口
+│   ├── test/{unit,service-sim}.sh                   [W7] 主机侧测试：安装逻辑与支持矩阵；监督状态机（假 procfs、虚拟时钟）
 │   ├── service.sh                                   [W7] 监督进程：安装或升级 App（[W21] 起含 Runner）、开机拉起运行时、判活与退避拉起、状态广播；[W11] 崩溃循环、safe mode
 │   ├── action.sh                                    [W11] 在 root 管理器里手动切换 safe mode
 │   ├── uninstall.sh                                 [W7] 停止监督进程，删除监督状态
@@ -206,7 +210,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 | 支持的系统 | Android 15–17（API 35–37） | Android 17 已正式发布；真机验证覆盖这三个版本 |
 | 传输 | Android 上的 ACP 和 MCP 都走 `binder-channel-v1`；SDK 的 `StdioTransport` 只用于电脑上的测试 | 两种协议都是 JSON-RPC 消息流，共用一套通道 |
 | HTTP | 宿主层的网络出口（给 Pi 用的 `fetch`）用 OkHttp；MCP 远端客户端用 Ktor 加 OkHttp 引擎，不用 Ktor 的 Android 引擎 | 共用一套连接池和证书配置；HTTP 引擎版本在 S5 与 MCP SDK 一起固定 |
-| 存储 | SQLite（WAL）。`core/runtime` 只依赖存储接口；驱动在 W2 选定，要求 Android 和电脑上的测试共用同一套 schema | 运行时的事实都在 Store 里，测试必须覆盖真实的 SQL |
+| 存储 | SQLite（WAL），驱动 `androidx.sqlite` 2.7.1（W2 选定）：`core/runtime` 只依赖 `SQLiteDriver` 接口，电脑测试与 `:agent` 都用 `BundledSQLiteDriver`，共用同一套 schema | 运行时的事实都在 Store 里，测试必须覆盖真实的 SQL |
 | Agent Plugins schema | 固定 1.0.0 的副本，放在 `core/protocol/agent-plugins-1.0/` | 校验插件时不联网；升级到新版规范要单独评估 |
 
 ### CI
@@ -238,7 +242,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 | # | 状态 | 结论 | 还差什么 |
 |---|---|---|---|
-| S1 | 不需要设备的部分完成；root 模拟器（adb root，API 35 / 37）上 M1–M6 通过 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降��、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁；`pm install` 的输入方式按 tmp → pipe → path → stdin → session 依次回退（模拟器上 path 被 SELinux 拒） | Magisk / KernelSU 真机（M1–M8，含 Play Protect） |
+| S1 | 不需要设备的部分完成；root 模拟器（adb root，API 35 / 37）上 M1–M7 通过 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降级、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁；`pm install` 的输入方式按 tmp → pipe → path → stdin → session 依次回退（模拟器上 path 被 SELinux 拒） | Magisk / KernelSU 真机（M1–M8，含 Play Protect） |
 | S2 | 监督契约 v0.1；root 模拟器（adb root，API 35 / 37）上 B0、K1、K2、K4、K5、T1、P1、B1（缩短为 10 分钟）通过 | [spikes/S2.md](spikes/S2.md)：判活看进程，心跳记录任务状态并用来发现短命进程（`boot` 字段必须等于 `Settings.Global.BOOT_COUNT`）；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起，包处于 stopped 时不拉起。**root 拉起前台服务按 `SYSTEM_UID` 豁免后台启动限制**，App 自己在后台被拒时由监督进程 1.9 s 内代为提升 | Magisk / KernelSU 真机（SELinux 上下文与 adb root 不同）；灭屏 30 分钟、24 小时驻留与内存；K3、K5b |
 | S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑） | 可用；通道参数已定 | API 35 / 36 / 37 真机 |
 | S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；MiniMax 国际预设（需要国际 key）；OpenAI 兼容端点 |
@@ -356,11 +360,12 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] 测试：假模型端点编排 `tool_use`；工具轮次上限；`abort`；恢复后上下文一致；JS 里拿不到 key；`pi-ai` 和 SDK 不自己重试
 
 #### W4 ACP Agent 端
-- [ ] 把 `../agentos-acp-profile-v1.md` 迁入 `core/protocol/acp-profile-v1.md`，注明 Profile 中的 `sideagentd` 在本项目里对应 `:agent` 运行时，Pi 的接入用 `pi-agent-core` 而不是 `pi-coding-agent`
-- [ ] 写 `acp-mapping.md`：方法启用范围，以及 Pi 事件（经内部事件）到 `session/update` 的映射
-- [ ] 冻结“自动选会话”扩展的方法名和字段，写入 `acp-extensions.schema.json`
-- [ ] `core/runtime/acp/`：`initialize`、`session/new`、`session/prompt`、`session/update`、`session/cancel`，以及自动选会话扩展
-- [ ] `tests/acp-conformance/`：在电脑上用 SDK 的 `StdioTransport` 启动运行时（Pi 由 `JsEngine` 的电脑实现执行），用官方 TypeScript 客户端跑基础方法
+- [x] 把 `../agentos-acp-profile-v1.md` 迁入 `core/protocol/acp-profile-v1.md`，注明 Profile 中的 `sideagentd` 在本项目里对应 `:agent` 运行时，Pi 的接入用 `pi-agent-core` 而不是 `pi-coding-agent`
+- [x] 写 `acp-mapping.md`：方法启用范围，以及 Pi 事件（经内部事件）到 `session/update` 的映射
+- [x] 冻结“自动选会话”扩展的方法名和字段，写入 `acp-extensions.schema.json`（形式：`session/new` 的 `_meta."org.agentos".autoSelect`，结果经 `session_info_update` 告知）
+- [x] `core/runtime/acp/`：`initialize`、`session/new`、`session/prompt`、`session/update`、`session/cancel`，以及自动选会话扩展
+- [x] `tests/acp-conformance/`：在电脑上用 SDK 的 `StdioTransport` 启动运行时，用官方 TypeScript 客户端跑基础方法（13/13，Agent 循环先用假 core）
+- [ ] 一致性测试换成真实 Pi（`JsEngine` 的电脑实现 + 假模型端点），等 B2 的 PiAdapter
 
 #### W5 Binder 通道
 - [ ] 按 S3 的结论冻结 `core/protocol/binder-channel-v1.md`（AIDL、单条消息上限、顺序、背压、`linkToDeath`、UID 校验）；草案已在，参数见其第 8 节
@@ -379,11 +384,11 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] 换成真的 `AgentRuntime`（A3）和 Pi（B2 的 PiAdapter + QuickJsEngine）
 
 #### W7 模块与打包
-- [ ] `customize.sh`、`uninstall.sh`、`module.prop.template`、`support-matrix.yaml`
-- [ ] `service.sh`：安装或升级 App、开机拉起运行时、判活、有任务时退避拉起、状态广播
-- [ ] `SupervisorStatusReceiver`（signature 权限保护）
-- [ ] `tools/`：`package-module.py`、`check-device.sh`、`smoke-test.sh`
-- [ ] `.github/workflows/module-package.yml`
+- [x] `customize.sh`、`uninstall.sh`、`module.prop.template`、`support-matrix.yaml`（KernelSU 最低版本暂不检查，W27 定）
+- [x] `service.sh`：安装或升级 App、开机拉起运行时、判活、有任务时退避拉起、状态广播
+- [x] `SupervisorStatusReceiver`（signature 权限保护）
+- [x] `tools/`：`package-module.py`、`check-device.sh`、`smoke-test.sh`（已能打出 debug 签名的 `agentos-0.1.0.zip`；root 模拟器上刷入、开机拉起、禁用、重新启用、卸载都通过，真机待测）
+- [x] `.github/workflows/module-package.yml`（还没在 GitHub 上实际跑过）
 
 #### W8 自带界面
 - [ ] `LocalAcpClient`：官方 SDK 客户端 + `BinderAcpTransport`

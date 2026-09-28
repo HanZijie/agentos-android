@@ -17,9 +17,14 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import org.agentos.runtime.errors.ErrorCode
+import org.agentos.runtime.testing.FakeScripts
+import org.agentos.runtime.testing.FakeStep
+import org.agentos.runtime.testing.FakeTurnScript
 import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
@@ -28,19 +33,27 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Fake model endpoint speaking both API families pi-ai uses in AgentOS, with SSE streaming.
- * Kotlin port of core/pi-runtime/test/fake-llm.mjs, for JUnit and desktop runs.
  *
  *   POST {anthropicBaseUrl}/v1/messages      Anthropic Messages
  *   POST {openaiBaseUrl}/chat/completions    OpenAI Chat Completions
  *
- * Behaviour is scripted by directives in the latest user message:
- *   [tool:NAME A B]  first call -> tool_use NAME{a:A, b:B}; after the tool result -> "sum=<result text>"
- *   [slow]           40 text chunks, 100 ms apart (for abort)
- *   [fail500] / [fail429]   HTTP 500 / HTTP 429 with retry-after: 1
- *   otherwise        streams "echo:<user text> n=<message count>" in ~30 ms chunks
- * and, before any directive, by [failNext] (for host retry tests).
+ * What a request gets is decided from the latest real user message of the conversation:
  *
- * Requests with a wrong key get 401. Every request is recorded in [requests].
+ * 1. A script registered with [script] for exactly that text, or A's directive JSON
+ *    (`{"fake": {...}}`, see org.agentos.runtime.testing.FakeScripts.directives) — the same
+ *    [FakeTurnScript] model FakeAgentCore plays, so one prompt drives both. A script is a list of
+ *    model round trips; round `n` is served to the request that already has `n` assistant
+ *    messages after that user message. Steps map to the wire like a real provider would:
+ *    Text / Thinking / ToolUse stream as content blocks, AwaitAbort keeps the stream open until
+ *    the client disconnects, MaxTokens ends with max_tokens / length, and Fail becomes an HTTP
+ *    status before the first byte (429, 401, 402, 400, 413, 503, 408), a dropped connection
+ *    (model_network, model_stream_interrupted) or an in-stream error event after output.
+ * 2. Otherwise the short directives of core/pi-runtime/test/fake-llm.mjs:
+ *    `[tool:NAME A B]` (tool_use NAME{a,b}, then "sum=<result text>"), `[slow]` (40 chunks,
+ *    100 ms apart), `[fail500]`, `[fail429]`, and by default "echo:<user text> n=<message count>".
+ *
+ * [failNext] makes the next requests fail regardless of content (host retry tests). Requests
+ * with a wrong key get 401. Every request is recorded in [requests].
  */
 class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
 
@@ -66,12 +79,16 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
 
     private class Failure(val status: Int, val retryAfter: String?)
 
+    /** Thrown inside the handler to drop the connection without finishing the HTTP response. */
+    private class DropConnection : RuntimeException(null, null, false, false)
+
     private val json = Json { ignoreUnknownKeys = true }
     private val executor: ExecutorService = Executors.newCachedThreadPool { r -> Thread(r, "fake-llm").apply { isDaemon = true } }
     private val server: HttpServer = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
     private val log = CopyOnWriteArrayList<Recorded>()
     private val seq = AtomicInteger()
     private val failures = ConcurrentLinkedQueue<Failure>()
+    private val scripts = ConcurrentHashMap<String, FakeTurnScript>()
 
     val baseUrl: String
     val anthropicBaseUrl: String get() = "$baseUrl/anthropic"
@@ -81,16 +98,26 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
     init {
         server.executor = executor
         server.createContext("/") { ex ->
+            var drop = false
             try {
                 handle(ex)
+            } catch (_: DropConnection) {
+                drop = true
             } catch (_: IOException) {
                 // client went away
             } finally {
-                runCatching { ex.close() }
+                if (!drop) runCatching { ex.close() }
             }
+            // Rethrowing makes the JDK server close the socket without a terminating chunk.
+            if (drop) throw DropConnection()
         }
         server.start()
         baseUrl = "http://127.0.0.1:${server.address.port}"
+    }
+
+    /** Requests whose latest user message is exactly [prompt] play [script]. */
+    fun script(prompt: String, script: FakeTurnScript) {
+        scripts[prompt] = script
     }
 
     /** The next [times] model requests answer [status] (with an optional `retry-after`) regardless of content. */
@@ -101,6 +128,7 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
     fun reset() {
         log.clear()
         failures.clear()
+        scripts.clear()
     }
 
     override fun close() {
@@ -139,34 +167,49 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
 
         if (kind != "real") {
             rec.plan = "auth"
-            val err = if (api == "anthropic") {
-                """{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"""
-            } else {
-                """{"error":{"message":"Incorrect API key","type":"invalid_request_error"}}"""
-            }
-            sendJson(ex, rec, 401, err)
+            sendJson(ex, rec, 401, errorBody(api, 401, "invalid api key"))
             return
         }
         failures.poll()?.let { f ->
             rec.plan = "fail${f.status}"
             f.retryAfter?.let { ex.responseHeaders.add("retry-after", it) }
-            sendJson(ex, rec, f.status, errorBody(api, f.status))
+            sendJson(ex, rec, f.status, errorBody(api, f.status, "fake ${f.status}"))
             return
         }
         val conv = conversation(api, body)
-        val plan = plan(conv)
-        rec.plan = plan.kind
-        if (plan.kind == "fail") {
-            if (plan.status == 429) ex.responseHeaders.add("retry-after", "1")
-            sendJson(ex, rec, plan.status, errorBody(api, plan.status))
-            return
+        val script = scripts[conv.userText] ?: FakeScripts.parseDirective(conv.userText)
+        val steps = if (script != null) {
+            rec.plan = "script#${conv.assistantsSinceUser}"
+            script.rounds.getOrNull(conv.assistantsSinceUser) ?: listOf(FakeStep.Text(FakeTurnScript.FINAL_TEXT))
+        } else {
+            legacyPlan(conv, rec)
+        }
+        play(ex, rec, api, body, steps)
+    }
+
+    /** Streams one assistant message for [steps], or fails like a real provider would. */
+    private fun play(ex: HttpExchange, rec: Recorded, api: String, body: JsonObject, steps: List<FakeStep>) {
+        val firstOutput = steps.indexOfFirst { it is FakeStep.Text || it is FakeStep.Thinking || it is FakeStep.ToolUse }
+        val failAt = steps.indexOfFirst { it is FakeStep.Fail }
+        if (failAt >= 0 && (firstOutput < 0 || failAt < firstOutput)) {
+            val code = (steps[failAt] as FakeStep.Fail).error.code
+            if (code == ErrorCode.MODEL_NETWORK) {
+                rec.plan += ":drop"
+                throw DropConnection()
+            }
+            if (code != ErrorCode.MODEL_STREAM_INTERRUPTED && code != ErrorCode.MODEL_PROTOCOL) {
+                val status = statusFor(code)
+                if (status == 429) ex.responseHeaders.add("retry-after", "1")
+                sendJson(ex, rec, status, errorBody(api, status, "fake ${code.wire}"))
+                return
+            }
         }
         ex.responseHeaders.add("content-type", "text/event-stream")
         ex.responseHeaders.add("cache-control", "no-cache")
         rec.status = 200
         ex.sendResponseHeaders(200, 0)
         val out = ex.responseBody
-        fun send(s: String) {
+        val send: (String) -> Unit = { s ->
             try {
                 out.write(s.toByteArray(Charsets.UTF_8))
                 out.flush()
@@ -179,13 +222,56 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
             }
         }
         val model = body["model"]?.jsonPrimitive?.contentOrNull ?: "fake"
-        try {
-            if (api == "anthropic") streamAnthropic(rec, conv, plan, model, ::send) else streamOpenAi(rec, conv, plan, model, ::send)
-            rec.finished = true
-            out.close()
-        } catch (e: IOException) {
-            // client closed the connection (abort)
+        val w: Writer = if (api == "anthropic") AnthropicWriter(rec, model, body, send) else OpenAiWriter(rec, model, body, send)
+        w.start()
+        var stop = if (steps.any { it is FakeStep.ToolUse }) "tool" else "end"
+        var toolIndex = 0
+        for (step in steps) {
+            when (step) {
+                is FakeStep.Text -> w.text(step.text, step.chunkChars, step.intervalMs)
+                is FakeStep.Thinking -> w.thinking(step.text, step.chunkChars, step.intervalMs)
+                is FakeStep.ToolUse -> w.toolUse(step.id ?: "call_${rec.id}_${toolIndex++}", step.name, step.arguments)
+                is FakeStep.Delay -> Thread.sleep(step.millis)
+                FakeStep.AwaitAbort -> {
+                    // Keep the stream open until the client goes away (a write then fails).
+                    val until = System.currentTimeMillis() + 120_000
+                    while (System.currentTimeMillis() < until) {
+                        Thread.sleep(50)
+                        send(": waiting\n\n")
+                    }
+                }
+                is FakeStep.Fail -> {
+                    val code = step.error.code
+                    if (code == ErrorCode.MODEL_STREAM_INTERRUPTED || code == ErrorCode.MODEL_NETWORK) {
+                        rec.plan += ":cut"
+                        throw DropConnection()
+                    }
+                    if (code == ErrorCode.MODEL_PROTOCOL) {
+                        send("data: {not json\n\n")
+                    } else {
+                        w.error(code)
+                    }
+                    rec.finished = true
+                    out.close()
+                    return
+                }
+                FakeStep.MaxTokens -> stop = "max"
+                is FakeStep.CrashCore -> Unit // a model endpoint cannot crash the JS runtime
+            }
         }
+        w.finish(stop)
+        rec.finished = true
+        out.close()
+    }
+
+    private fun statusFor(code: ErrorCode): Int = when (code) {
+        ErrorCode.MODEL_RATE_LIMITED -> 429
+        ErrorCode.MODEL_AUTH_FAILED -> 401
+        ErrorCode.MODEL_QUOTA_EXHAUSTED -> 402
+        ErrorCode.MODEL_REQUEST_TOO_LARGE -> 413
+        ErrorCode.MODEL_TIMEOUT -> 408
+        ErrorCode.MODEL_UNAVAILABLE -> 503
+        else -> 400
     }
 
     private fun sendJson(ex: HttpExchange, rec: Recorded, status: Int, text: String) {
@@ -197,15 +283,30 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
         ex.responseBody.use { it.write(bytes) }
     }
 
-    private fun errorBody(api: String, status: Int): String = if (api == "anthropic") {
-        """{"type":"error","error":{"type":"${if (status == 429) "rate_limit_error" else "api_error"}","message":"fake $status"}}"""
-    } else {
-        """{"error":{"message":"fake $status","type":"server_error"}}"""
+    private fun errorBody(api: String, status: Int, message: String): String {
+        val type = when (status) {
+            401 -> "authentication_error"
+            429 -> "rate_limit_error"
+            in 500..599 -> "api_error"
+            else -> "invalid_request_error"
+        }
+        return if (api == "anthropic") {
+            buildJsonObject { put("type", "error"); putJsonObject("error") { put("type", type); put("message", message) } }.toString()
+        } else {
+            buildJsonObject { putJsonObject("error") { put("message", message); put("type", type) } }.toString()
+        }
     }
 
-    private class Conversation(val lastKind: String, val lastText: String, val userText: String, val count: Int)
+    // ------------------------------------------------------------------ conversation
 
-    private class Plan(val kind: String, val chunks: List<String> = emptyList(), val gapMs: Long = 0, val tool: String = "", val input: JsonObject = JsonObject(emptyMap()), val status: Int = 0)
+    private class Conversation(
+        val lastKind: String,
+        val lastText: String,
+        val userText: String,
+        val count: Int,
+        /** Assistant messages after the latest real user message: which round trip this is. */
+        val assistantsSinceUser: Int,
+    )
 
     private fun textOf(content: JsonElement?): String = when (content) {
         is JsonPrimitive -> content.contentOrNull.orEmpty()
@@ -233,64 +334,136 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
         } else {
             textOf(last["content"])
         }
-        var userText = lastText
-        if (lastIsTool) {
-            userText = msgs.lastOrNull { it["role"]?.jsonPrimitive?.contentOrNull == "user" && !isToolResultMessage(it) }
-                ?.let { textOf(it["content"]) }.orEmpty()
-        }
-        return Conversation(if (lastIsTool) "tool" else "user", lastText, userText, msgs.size)
+        val userIndex = msgs.indexOfLast { it["role"]?.jsonPrimitive?.contentOrNull == "user" && !isToolResultMessage(it) }
+        val userText = if (userIndex >= 0) textOf(msgs[userIndex]["content"]) else lastText
+        val assistants = if (userIndex < 0) 0 else msgs.drop(userIndex + 1).count { it["role"]?.jsonPrimitive?.contentOrNull == "assistant" }
+        return Conversation(if (lastIsTool) "tool" else "user", lastText, userText, msgs.size, assistants)
     }
 
-    private fun plan(c: Conversation): Plan {
+    /** The short directives shared with fake-llm.mjs. */
+    private fun legacyPlan(c: Conversation, rec: Recorded): List<FakeStep> {
         val tool = TOOL_DIRECTIVE.find(c.userText)
-        if (tool != null && c.lastKind == "user") {
-            val input = buildJsonObject { put("a", tool.groupValues[2].toLong()); put("b", tool.groupValues[3].toLong()) }
-            return Plan("tool", tool = tool.groupValues[1], input = input)
+        return when {
+            tool != null && c.lastKind == "user" -> {
+                rec.plan = "tool"
+                listOf(FakeStep.ToolUse(tool.groupValues[1], buildJsonObject { put("a", tool.groupValues[2].toLong()); put("b", tool.groupValues[3].toLong()) }, "toolu_${rec.id}"))
+            }
+            tool != null -> {
+                rec.plan = "text"
+                listOf(FakeStep.Text("sum=${c.lastText}", chunkChars = chunkSize("sum=${c.lastText}", 4), intervalMs = 20))
+            }
+            "[fail500]" in c.userText -> { rec.plan = "fail"; listOf(FakeStep.Fail(ErrorCode.MODEL_UNAVAILABLE.info("fake 500"))) }
+            "[fail429]" in c.userText -> { rec.plan = "fail"; listOf(FakeStep.Fail(ErrorCode.MODEL_RATE_LIMITED.info("fake 429"))) }
+            "[slow]" in c.userText -> { rec.plan = "text"; listOf(FakeStep.Text((0 until 40).joinToString("") { "tick$it " }, chunkChars = 7, intervalMs = 100)) }
+            else -> {
+                rec.plan = "text"
+                val text = "echo:${c.userText} n=${c.count}"
+                listOf(FakeStep.Text(text, chunkChars = chunkSize(text, 8), intervalMs = 30))
+            }
         }
-        if (tool != null) return Plan("text", chunk("sum=${c.lastText}", 4), 20)
-        if ("[fail500]" in c.userText) return Plan("fail", status = 500)
-        if ("[fail429]" in c.userText) return Plan("fail", status = 429)
-        if ("[slow]" in c.userText) return Plan("text", (0 until 40).map { "tick$it " }, 100)
-        return Plan("text", chunk("echo:${c.userText} n=${c.count}", 8), 30)
     }
 
-    private fun streamAnthropic(rec: Recorded, c: Conversation, p: Plan, model: String, send: (String) -> Unit) {
-        fun ev(type: String, data: JsonObject) = send("event: $type\ndata: ${JsonObject(mapOf("type" to JsonPrimitive(type)) + data)}\n\n")
-        ev("message_start", buildJsonObject {
+    private fun chunkSize(text: String, parts: Int): Int = maxOf(1, (text.codePointCount(0, text.length) + parts - 1) / parts)
+
+    // ------------------------------------------------------------------ wire formats
+
+    private interface Writer {
+        fun start()
+        fun text(text: String, chunkChars: Int, intervalMs: Long)
+        fun thinking(text: String, chunkChars: Int, intervalMs: Long)
+        fun toolUse(id: String, name: String, args: JsonObject)
+        fun error(code: ErrorCode)
+        /** [stop]: "end", "tool" or "max". */
+        fun finish(stop: String)
+    }
+
+    private fun streamChunks(rec: Recorded, text: String, chunkChars: Int, intervalMs: Long, emit: (String) -> Unit) {
+        for (part in chunkByCodePoints(text, chunkChars)) {
+            if (intervalMs > 0) Thread.sleep(intervalMs)
+            rec.chunkTimes.add(System.currentTimeMillis())
+            emit(part)
+        }
+    }
+
+    private inner class AnthropicWriter(
+        private val rec: Recorded,
+        private val model: String,
+        body: JsonObject,
+        private val send: (String) -> Unit,
+    ) : Writer {
+        private val inputTokens = 10 + (body["messages"] as? JsonArray)?.size.let { it ?: 0 }
+        private var index = 0
+        private var outputTokens = 0
+
+        private fun ev(type: String, data: JsonObject) = send("event: $type\ndata: ${JsonObject(mapOf("type" to JsonPrimitive(type)) + data)}\n\n")
+
+        override fun start() = ev("message_start", buildJsonObject {
             putJsonObject("message") {
                 put("id", "msg_${rec.id}"); put("type", "message"); put("role", "assistant"); put("model", model)
                 putJsonArray("content") {}
                 put("stop_reason", null as String?); put("stop_sequence", null as String?)
-                putJsonObject("usage") { put("input_tokens", 10 + c.count); put("output_tokens", 1) }
+                putJsonObject("usage") { put("input_tokens", inputTokens); put("output_tokens", 1) }
             }
         })
-        if (p.kind == "tool") {
-            ev("content_block_start", buildJsonObject {
-                put("index", 0)
-                putJsonObject("content_block") { put("type", "tool_use"); put("id", "toolu_${rec.id}"); put("name", p.tool); putJsonObject("input") {} }
-            })
-            for (part in chunk(p.input.toString(), 3)) {
-                Thread.sleep(10)
-                ev("content_block_delta", buildJsonObject { put("index", 0); putJsonObject("delta") { put("type", "input_json_delta"); put("partial_json", part) } })
+
+        override fun text(text: String, chunkChars: Int, intervalMs: Long) {
+            val i = index++
+            ev("content_block_start", buildJsonObject { put("index", i); putJsonObject("content_block") { put("type", "text"); put("text", "") } })
+            streamChunks(rec, text, chunkChars, intervalMs) { part ->
+                outputTokens++
+                ev("content_block_delta", buildJsonObject { put("index", i); putJsonObject("delta") { put("type", "text_delta"); put("text", part) } })
             }
-            ev("content_block_stop", buildJsonObject { put("index", 0) })
-            ev("message_delta", buildJsonObject { putJsonObject("delta") { put("stop_reason", "tool_use"); put("stop_sequence", null as String?) }; putJsonObject("usage") { put("output_tokens", 12) } })
-        } else {
-            ev("content_block_start", buildJsonObject { put("index", 0); putJsonObject("content_block") { put("type", "text"); put("text", "") } })
-            for (part in p.chunks) {
-                Thread.sleep(p.gapMs)
-                rec.chunkTimes.add(System.currentTimeMillis())
-                ev("content_block_delta", buildJsonObject { put("index", 0); putJsonObject("delta") { put("type", "text_delta"); put("text", part) } })
-            }
-            ev("content_block_stop", buildJsonObject { put("index", 0) })
-            ev("message_delta", buildJsonObject { putJsonObject("delta") { put("stop_reason", "end_turn"); put("stop_sequence", null as String?) }; putJsonObject("usage") { put("output_tokens", p.chunks.size) } })
+            ev("content_block_stop", buildJsonObject { put("index", i) })
         }
-        ev("message_stop", JsonObject(emptyMap()))
+
+        override fun thinking(text: String, chunkChars: Int, intervalMs: Long) {
+            val i = index++
+            ev("content_block_start", buildJsonObject { put("index", i); putJsonObject("content_block") { put("type", "thinking"); put("thinking", ""); put("signature", "") } })
+            streamChunks(rec, text, chunkChars, intervalMs) { part ->
+                ev("content_block_delta", buildJsonObject { put("index", i); putJsonObject("delta") { put("type", "thinking_delta"); put("thinking", part) } })
+            }
+            ev("content_block_delta", buildJsonObject { put("index", i); putJsonObject("delta") { put("type", "signature_delta"); put("signature", "fake-signature-${rec.id}-$i") } })
+            ev("content_block_stop", buildJsonObject { put("index", i) })
+        }
+
+        override fun toolUse(id: String, name: String, args: JsonObject) {
+            val i = index++
+            ev("content_block_start", buildJsonObject { put("index", i); putJsonObject("content_block") { put("type", "tool_use"); put("id", id); put("name", name); putJsonObject("input") {} } })
+            for (part in chunkByCodePoints(args.toString(), maxOf(1, args.toString().length / 3))) {
+                Thread.sleep(10)
+                ev("content_block_delta", buildJsonObject { put("index", i); putJsonObject("delta") { put("type", "input_json_delta"); put("partial_json", part) } })
+            }
+            ev("content_block_stop", buildJsonObject { put("index", i) })
+        }
+
+        override fun error(code: ErrorCode) {
+            val type = when (code) {
+                ErrorCode.MODEL_RATE_LIMITED -> "rate_limit_error"
+                ErrorCode.MODEL_UNAVAILABLE -> "overloaded_error"
+                ErrorCode.MODEL_AUTH_FAILED -> "authentication_error"
+                else -> "api_error"
+            }
+            send("event: error\ndata: ${buildJsonObject { put("type", "error"); putJsonObject("error") { put("type", type); put("message", "fake ${code.wire}") } }}\n\n")
+        }
+
+        override fun finish(stop: String) {
+            val reason = when (stop) { "tool" -> "tool_use"; "max" -> "max_tokens"; else -> "end_turn" }
+            ev("message_delta", buildJsonObject { putJsonObject("delta") { put("stop_reason", reason); put("stop_sequence", null as String?) }; putJsonObject("usage") { put("output_tokens", maxOf(1, outputTokens)) } })
+            ev("message_stop", JsonObject(emptyMap()))
+        }
     }
 
-    private fun streamOpenAi(rec: Recorded, c: Conversation, p: Plan, model: String, send: (String) -> Unit) {
-        val created = System.currentTimeMillis() / 1000
-        fun data(choices: JsonArray, extra: Map<String, JsonElement> = emptyMap()) {
+    private inner class OpenAiWriter(
+        private val rec: Recorded,
+        private val model: String,
+        body: JsonObject,
+        private val send: (String) -> Unit,
+    ) : Writer {
+        private val promptTokens = 10 + ((body["messages"] as? JsonArray)?.size ?: 0)
+        private val created = System.currentTimeMillis() / 1000
+        private var toolIndex = 0
+
+        private fun data(choices: JsonArray, extra: Map<String, JsonElement> = emptyMap()) {
             val o = JsonObject(
                 mapOf(
                     "id" to JsonPrimitive("chatcmpl-${rec.id}"),
@@ -302,34 +475,51 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
             )
             send("data: $o\n\n")
         }
-        fun choice(delta: JsonObject, finish: String?) = buildJsonArray {
+
+        private fun choice(delta: JsonObject, finish: String?) = buildJsonArray {
             add(buildJsonObject { put("index", 0); put("delta", delta); put("finish_reason", finish) })
         }
-        if (p.kind == "tool") {
+
+        override fun start() = data(choice(buildJsonObject { put("role", "assistant"); put("content", "") }, null))
+
+        override fun text(text: String, chunkChars: Int, intervalMs: Long) =
+            streamChunks(rec, text, chunkChars, intervalMs) { part -> data(choice(buildJsonObject { put("content", part) }, null)) }
+
+        override fun thinking(text: String, chunkChars: Int, intervalMs: Long) =
+            streamChunks(rec, text, chunkChars, intervalMs) { part -> data(choice(buildJsonObject { put("reasoning_content", part) }, null)) }
+
+        override fun toolUse(id: String, name: String, args: JsonObject) {
+            val i = toolIndex++
             data(choice(buildJsonObject {
-                put("role", "assistant")
                 putJsonArray("tool_calls") {
-                    add(buildJsonObject { put("index", 0); put("id", "call_${rec.id}"); put("type", "function"); putJsonObject("function") { put("name", p.tool); put("arguments", "") } })
+                    add(buildJsonObject { put("index", i); put("id", id); put("type", "function"); putJsonObject("function") { put("name", name); put("arguments", "") } })
                 }
             }, null))
-            for (part in chunk(p.input.toString(), 3)) {
+            for (part in chunkByCodePoints(args.toString(), maxOf(1, args.toString().length / 3))) {
                 Thread.sleep(10)
                 data(choice(buildJsonObject {
-                    putJsonArray("tool_calls") { add(buildJsonObject { put("index", 0); putJsonObject("function") { put("arguments", part) } }) }
+                    putJsonArray("tool_calls") { add(buildJsonObject { put("index", i); putJsonObject("function") { put("arguments", part) } }) }
                 }, null))
             }
-            data(choice(JsonObject(emptyMap()), "tool_calls"))
-        } else {
-            data(choice(buildJsonObject { put("role", "assistant"); put("content", "") }, null))
-            for (part in p.chunks) {
-                Thread.sleep(p.gapMs)
-                rec.chunkTimes.add(System.currentTimeMillis())
-                data(choice(buildJsonObject { put("content", part) }, null))
-            }
-            data(choice(JsonObject(emptyMap()), "stop"))
         }
-        data(JsonArray(emptyList()), mapOf("usage" to buildJsonObject { put("prompt_tokens", 10 + c.count); put("completion_tokens", 5); put("total_tokens", 15 + c.count) }))
-        send("data: [DONE]\n\n")
+
+        override fun error(code: ErrorCode) {
+            // Wording of real OpenAI-compatible providers; the OpenAI SDK only keeps the message text.
+            val message = when (code) {
+                ErrorCode.MODEL_RATE_LIMITED -> "Rate limit reached for requests (fake)"
+                ErrorCode.MODEL_UNAVAILABLE -> "The server is overloaded (fake)"
+                ErrorCode.MODEL_AUTH_FAILED -> "Incorrect API key provided (fake)"
+                else -> "fake ${code.wire}"
+            }
+            send("data: ${buildJsonObject { putJsonObject("error") { put("message", message); put("type", "server_error") } }}\n\n")
+        }
+
+        override fun finish(stop: String) {
+            val reason = when (stop) { "tool" -> "tool_calls"; "max" -> "length"; else -> "stop" }
+            data(choice(JsonObject(emptyMap()), reason))
+            data(JsonArray(emptyList()), mapOf("usage" to buildJsonObject { put("prompt_tokens", promptTokens); put("completion_tokens", 5); put("total_tokens", promptTokens + 5) }))
+            send("data: [DONE]\n\n")
+        }
     }
 
     companion object {
@@ -337,10 +527,10 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
         private val TOOL_DIRECTIVE = Regex("""\[tool:([A-Za-z_][\w-]*)\s+(-?\d+)\s+(-?\d+)]""")
 
         /** Splits by code points: real servers never cut a surrogate pair across SSE events. */
-        fun chunk(text: String, parts: Int): List<String> {
+        fun chunkByCodePoints(text: String, size: Int): List<String> {
             val cps = text.codePoints().toArray()
-            val size = maxOf(1, (cps.size + parts - 1) / parts)
-            return (cps.indices step size).map { i -> String(cps, i, minOf(size, cps.size - i)) }
+            val n = maxOf(1, size)
+            return (cps.indices step n).map { i -> String(cps, i, minOf(n, cps.size - i)) }
         }
     }
 }
