@@ -39,7 +39,7 @@ X=org.agentos.extra
 
 ST=init; REASON=none; SINCE_MS=0; SEQ=0
 PID=; ALIVE_SINCE=0; NEED=0; ATTEMPT=0; NEXT_START=; DEATHS=; DEATH_COUNT=0; PROMOTED_AT=0
-APP_UID=; BOOT_COUNT=-1; MOD_VER=none; MOD_VC=0; NOW=0; LOG_LINES=0
+APP_UID=; BOOT_COUNT=-1; MOD_VER=none; MOD_VC=0; NOW=0; LOG_LINES=0; LAST_DEAD=
 
 # ---------------------------------------------------------------- helpers
 
@@ -148,7 +148,7 @@ find_pid() {
 
 # Contract item b. Only regular files; integers and a fixed enum; at most 16 lines.
 read_hb() {
-    HB_OK=0; HB_PID=; HB_TASKS=; HB_FG=; HB_STATE=; HB_AT=
+    HB_OK=0; HB_PID=; HB_TASKS=; HB_FG=; HB_STATE=; HB_AT=; HB_BOOT=
     [ -f "$HB" ] && [ ! -L "$HB" ] || return 1
     _n=0
     while IFS='=' read -r _k _v; do
@@ -158,6 +158,7 @@ read_hb() {
         pid) is_uint "$_v" && HB_PID=$_v ;;
         tasks) is_uint "$_v" && HB_TASKS=$_v ;;
         at) is_uint "$_v" && HB_AT=$_v ;;
+        boot) is_uint "$_v" && HB_BOOT=$_v ;;
         fg) case $_v in 0 | 1) HB_FG=$_v ;; esac ;;
         state) case $_v in starting | recovering | idle | busy | stopping | crashed) HB_STATE=$_v ;; esac ;;
         esac
@@ -234,7 +235,7 @@ adopt() { # pid
     broadcast
 }
 
-wait_for_pid() {
+wait_for_pid() { # 0: runtime up and adopted; 1: not up (START_WAIT s) or came up and already died
     _w=0
     while [ $_w -lt $START_WAIT ]; do
         sleep 1
@@ -245,13 +246,60 @@ wait_for_pid() {
             log "runtime up ${_w}s after start"
             return 0
         fi
+        # Found on the API 35 emulator: a runtime that lived < 1 s (e.g. crashed during recovery)
+        # is missed by the 1 s poll. Its heartbeat shows it came up with tasks: fail fast instead of
+        # waiting START_WAIT seconds.
+        if unobserved_death; then
+            LAST_DEAD=$HB_PID
+            NEED=1
+            log "runtime pid=$HB_PID came up and died within ${_w}s (heartbeat tasks=$HB_TASKS state=$HB_STATE)"
+            return 1
+        fi
     done
+    log "runtime did not come up within ${START_WAIT}s"
+    # The caller counts this as one death; a process that lived < 1 s may have left a heartbeat,
+    # which must not be counted a second time by unobserved_death.
+    read_hb && LAST_DEAD=$HB_PID
+    return 1
+}
+
+# A start did not leave a live runtime: count it like a death while there is work to do.
+start_failed() {
+    uptime_s
+    if [ "$NEED" != 1 ]; then
+        log "no runtime after start and no task known: not retrying (a bind will start it)"
+        return 0
+    fi
+    record_death
+    if [ "$DEATH_COUNT" -ge $LOOP_MAX ]; then
+        enter_safe crash_loop
+        return 0
+    fi
+    schedule_restart
+}
+
+agent_alive() { # pid -> 0 when it is still our runtime process
+    [ -d "$PROCFS/$1" ] && proc_uid "$1" && [ "$PROC_UID" = "$APP_UID" ]
+}
+
+# Called when no runtime process is tracked. True when the heartbeat belongs to this boot, names a
+# pid we have not handled, that pid is gone, and it had tasks. Sets HB_* for on_death.
+unobserved_death() {
+    read_hb || return 1
+    [ "$BOOT_COUNT" != -1 ] && [ "$HB_BOOT" = "$BOOT_COUNT" ] || return 1
+    [ "$HB_PID" != "$LAST_DEAD" ] || return 1
+    agent_alive "$HB_PID" && return 1
+    case $HB_STATE in
+    busy | idle | stopping | crashed) [ "$HB_TASKS" -gt 0 ] && return 0 ;;
+    esac
+    LAST_DEAD=$HB_PID # died idle or before settling: nothing to restart, do not look at it again
     return 1
 }
 
 on_death() {
     _dead=$PID
     PID=
+    LAST_DEAD=$_dead
     if read_hb && [ "$HB_PID" = "$_dead" ]; then need_from_hb; fi
     log "runtime pid=$_dead gone (heartbeat pid=$HB_PID tasks=$HB_TASKS fg=$HB_FG state=$HB_STATE) need=$NEED"
     [ "$NEED" = 1 ] || { update_desc; return 0; }
@@ -272,21 +320,22 @@ on_death() {
 
 do_restart() {
     NEXT_START=
+    # A root start clears the package's stopped state (seen in B0), so re-check it right before
+    # starting: the user may have force-stopped the App during the backoff.
+    if pkg_stopped; then
+        log "package was force-stopped during backoff: not restarting"
+        NEED=0
+        set_state stopped user_stopped
+        return 0
+    fi
     if start_runtime restart "$ATTEMPT"; then
         if [ -n "$PID" ] && [ -d "$PROCFS/$PID" ]; then
             log "start delivered to running pid=$PID"
             return 0
         fi
         wait_for_pid && return 0
-        log "runtime did not come up within ${START_WAIT}s"
     fi
-    uptime_s
-    record_death
-    if [ "$DEATH_COUNT" -ge $LOOP_MAX ]; then
-        enter_safe crash_loop
-        return 0
-    fi
-    schedule_restart
+    start_failed
 }
 
 observe_alive() {
@@ -392,10 +441,19 @@ main() {
         set_state safe_mode "$SAFE_REASON"
         broadcast
     else
-        set_state ok boot
-        # F2: start the runtime once after boot so it can run recovery (F8).
-        if start_runtime boot 0; then wait_for_pid || log "runtime not up ${START_WAIT}s after boot start"; fi
-        [ -n "$PID" ] || broadcast # adopt() already broadcast otherwise
+        if pkg_stopped; then
+            # Force-stopped by the user, or installed but never opened. A root start would clear the
+            # stopped state and resume what the user stopped (seen on the API 37 emulator after K5).
+            NEED=0
+            set_state stopped user_stopped
+            log "package is in the stopped state at boot: not starting the runtime"
+        else
+            set_state ok boot
+            # F2: start the runtime once after boot so it can run recovery (F8).
+            if start_runtime boot 0 && wait_for_pid; then :; else start_failed; fi
+            # adopt() / schedule_restart() / enter_safe() broadcast themselves; otherwise report ok once
+            [ -n "$PID" ] || [ "$ST" != ok ] || broadcast
+        fi
     fi
 
     while :; do
@@ -419,7 +477,15 @@ main() {
             observe_alive
         else
             [ -n "$PID" ] && on_death
-            find_pid && adopt "$FOUND"
+            if find_pid; then
+                adopt "$FOUND"
+            elif unobserved_death; then
+                # A runtime lived shorter than one poll (e.g. started by a bind, took a task and died
+                # within 5 s). We never saw it, but its heartbeat says it had tasks: treat it as a death.
+                PID=$HB_PID
+                log "unobserved runtime pid=$PID left a heartbeat and is gone"
+                on_death
+            fi
         fi
 
         if [ -n "$NEXT_START" ] && [ "$NOW" -ge "$NEXT_START" ] && [ "$ST" != safe_mode ]; then

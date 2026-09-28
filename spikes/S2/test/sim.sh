@@ -228,11 +228,23 @@ sc_spread_deaths() {
 }
 
 sc_user_stop() {
-    setup user_stop LIFE=20 STOPPED=true END=300
+    setup user_stop LIFE=20 END=300
+    printf '%s\n' '115 sed -i.bak "s/^STOPPED=.*/STOPPED=true/" "$SIM/scenario"' >"$SIM/schedule"
     run
     check "no restart after user force-stop" [ "$(count 'START reason=restart' "$SIM/events.log")" = 0 ]
     check "logged as user force-stop" has "user force-stop" "$LOGF"
     check "state went to stopped (user_stopped)" has "state -> stopped (user_stopped)" "$LOGF"
+}
+
+sc_boot_stopped() {
+    # Package still stopped at boot (force-stopped before the reboot, or never opened): no boot start.
+    # Later the user opens the App / a client binds, and the supervisor adopts the new process.
+    setup boot_stopped STOPPED=true TASKS=0 END=300
+    printf '%s\n' '150 spawn' >"$SIM/schedule"
+    run
+    check "no boot start for a stopped package" [ "$(count 'START reason=boot' "$SIM/events.log")" = 0 ]
+    check "reported stopped at boot" has "package is in the stopped state at boot" "$LOGF"
+    check "process started later is adopted, state ok" has "state -> ok (runtime_up)" "$LOGF"
 }
 
 sc_idle_death() {
@@ -283,6 +295,46 @@ sc_manual_safe_mode() {
     check "leaving safe mode starts the runtime once" [ "$(count 'START reason=safe_mode_exit' "$SIM/events.log")" = 1 ]
 }
 
+sc_short_lived() {
+    # Found on the API 35 emulator (K1): a runtime started by a bind took a task and was killed
+    # 0.2 s later, between two 5 s idle polls, so the supervisor never saw it.
+    setup short_lived TASKS=0 END=300
+    printf '%s\n' \
+        '120 kill_agent' \
+        '150 TASKS=1; spawn; kill_agent' \
+        '200 TASKS=0; spawn; kill_agent' >"$SIM/schedule"
+    run
+    check "unobserved busy runtime is noticed" has "unobserved runtime pid=2001" "$LOGF"
+    _tr=$(sed -n 's/^\([0-9]*\) START reason=restart/\1/p' "$SIM/events.log" | head -n 1)
+    check "restarted within 7 s (t=${_tr:-none})" [ "${_tr:-999}" -le 157 ]
+    check "unobserved idle runtime is not restarted (exactly 1 restart)" \
+        [ "$(count 'START reason=restart' "$SIM/events.log")" = 1 ]
+    check "no shell errors" no_shell_errors
+}
+
+sc_instant_crash() {
+    # Every runtime dies within its first second, after writing a busy heartbeat (crash during
+    # recovery). Includes the boot start, which used to be neither counted nor retried.
+    setup instant_crash LIFE=0 END=400
+    run
+    check "boot start failure is counted and retried" has "restart in 1s (attempt 1, deaths in window 1)" "$LOGF"
+    check "fails fast, never waits the full START_WAIT" lacks "did not come up within" "$LOGF"
+    check "delays 1 2 4 8, then safe mode" [ "$(delays)" = "1 2 4 8" ]
+    check "crash loop ends in safe mode" has "STATUS state=safe_mode reason=crash_loop" "$SIM/events.log"
+    _ts=$(sed -n 's/^\([0-9]*\) STATUS state=safe_mode.*/\1/p' "$SIM/events.log")
+    check "safe mode reached by t=125 (t=${_ts:-none})" [ "${_ts:-999}" -le 125 ]
+    check "no shell errors" no_shell_errors
+}
+
+sc_stop_during_backoff() {
+    setup stop_during_backoff LIFE=10 END=300
+    # First death at t=110 (detected at once); the force-stop lands at t=111, inside the 1 s backoff.
+    printf '%s\n' '111 sed -i.bak "s/^STOPPED=.*/STOPPED=true/" "$SIM/scenario"' >"$SIM/schedule"
+    run
+    check "no restart after a force-stop during backoff" [ "$(count 'START reason=restart' "$SIM/events.log")" = 0 ]
+    check "detected right before the restart" has "force-stopped during backoff" "$LOGF"
+}
+
 sc_hostile_heartbeat() {
     setup hostile_hb END=400
     printf '%s\n' '130 write_hostile_hb' '150 symlink_hb' '170 fifo_hb' '200 kill_agent' >"$SIM/schedule"
@@ -294,7 +346,7 @@ sc_hostile_heartbeat() {
     check "no shell errors" no_shell_errors
 }
 
-ALL="kill_loop spread_deaths user_stop idle_death promote crash_before_heartbeat module_disabled manual_safe_mode hostile_heartbeat"
+ALL="kill_loop spread_deaths user_stop boot_stopped idle_death promote crash_before_heartbeat module_disabled manual_safe_mode short_lived instant_crash stop_during_backoff hostile_heartbeat"
 echo "supervisor.sh simulation with $SIM_SHELL"
 for s in ${*:-$ALL}; do
     "sc_$s"

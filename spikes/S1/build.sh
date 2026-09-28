@@ -1,9 +1,10 @@
 #!/bin/sh
 # Build the S1 spike into build/out/:
-#   apk/s1-v1-a.apk  s1-v2-a.apk  s1-v2-b.apk  s1-v3-a.apk      (R8 release, spike key a or b)
+#   apk/s1-v1-a.apk  s1-v2-a.apk  s1-v3-b.apk  s1-v3-a.apk      (R8 release, spike key a or b)
 #   s1-v1.zip            fresh install from service.sh
 #   s1-v2.zip            upgrade over v1
-#   s1-v2-badsig.zip     v2 signed with key b: must stop with a visible reason
+#   s1-v3-badsig.zip     v3 signed with key b over v2 (key a): must stop with a visible reason.
+#                        It has to be newer than the installed App, otherwise the version check skips it.
 #   s1-v3-customize.zip  fallback: install while flashing (customize.sh, BOOTMODE)
 # Env: SPIKE_KEY_PASS overrides the throwaway key password; GRADLE_OFFLINE=1 adds --offline.
 set -eu
@@ -48,11 +49,11 @@ pack() { # zip-name apk versionCode mode module-versionCode
 
 build_apk 1 a
 build_apk 2 a
-build_apk 2 b
+build_apk 3 b
 build_apk 3 a
 pack s1-v1 s1-v1-a.apk 1 service 1
 pack s1-v2 s1-v2-a.apk 2 service 2
-pack s1-v2-badsig s1-v2-b.apk 2 service 3
+pack s1-v3-badsig s1-v3-b.apk 3 service 3
 pack s1-v3-customize s1-v3-a.apk 3 customize 4
 
 cd "$OUT"
