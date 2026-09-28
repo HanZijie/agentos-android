@@ -53,6 +53,17 @@ class ModelCatalogTest {
     }
 
     @Test
+    fun `custom endpoints may use http only on loopback`() {
+        val c = ModelCatalog.parse(sample)
+        for (url in listOf("http://127.0.0.1:11434/v1", "http://localhost:8080/v1", "http://[::1]:8080/v1")) {
+            assertEquals(url, c.customModel("openai-completions", "local", url).baseUrl)
+        }
+        for (url in listOf("http://10.0.2.2:8080/v1", "http://192.168.1.20:11434/v1", "http://127.0.0.2/v1", "http://127.example.com/v1", "http://localhost.example.com/v1")) {
+            assertFailsWith<IllegalArgumentException>(url) { c.customModel("openai-completions", "lan", url) }
+        }
+    }
+
+    @Test
     fun `unknown schema version is refused`() {
         assertFailsWith<IllegalArgumentException> { ModelCatalog.parse(sample.replace("\"schemaVersion\":1", "\"schemaVersion\":2")) }
     }

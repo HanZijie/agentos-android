@@ -63,7 +63,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * the app process on a device. A dropped connection is a socket closed without the terminating
  * chunk, which the client sees as an unexpected end of stream.
  */
-class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
+class FakeModelServer(
+    val key: String = DEFAULT_KEY,
+    /** Loopback host to listen on and to put in the URLs: "127.0.0.1" (default), "localhost" or "::1". */
+    host: String = "127.0.0.1",
+) : AutoCloseable {
 
     class Recorded(
         val id: Int,
@@ -92,15 +96,16 @@ class FakeModelServer(val key: String = DEFAULT_KEY) : AutoCloseable {
 
     private val json = Json { ignoreUnknownKeys = true }
     private val executor: ExecutorService = Executors.newCachedThreadPool { r -> Thread(r, "fake-llm").apply { isDaemon = true } }
-    // Explicitly 127.0.0.1: on Android InetAddress.getLoopbackAddress() is ::1, and the URLs below use 127.0.0.1.
-    private val server = ServerSocket(0, 50, InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)))
+    // Bound to exactly the address the URLs name: on Android InetAddress.getLoopbackAddress() is ::1,
+    // and "localhost" resolves to 127.0.0.1 there, so never mix the two.
+    private val server = ServerSocket(0, 50, InetAddress.getByName(host))
     private val open = ConcurrentHashMap.newKeySet<Socket>()
     private val log = CopyOnWriteArrayList<Recorded>()
     private val seq = AtomicInteger()
     private val failures = ConcurrentLinkedQueue<Failure>()
     private val scripts = ConcurrentHashMap<String, FakeTurnScript>()
 
-    val baseUrl: String = "http://127.0.0.1:${server.localPort}"
+    val baseUrl: String = "http://${if (':' in host) "[$host]" else host}:${server.localPort}"
     val anthropicBaseUrl: String get() = "$baseUrl/anthropic"
     val openaiBaseUrl: String get() = "$baseUrl/openai"
     val requests: List<Recorded> get() = log.toList()
