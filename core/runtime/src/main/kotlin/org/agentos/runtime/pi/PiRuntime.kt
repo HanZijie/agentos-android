@@ -203,6 +203,12 @@ class PiRuntime(
     private val ready = CompletableDeferred<JsonObject>()
     @Volatile private var closing = false
 
+    /**
+     * Async host functions currently running. quickjs-kt can livelock when the runtime is closed
+     * while async bindings are still active, so [close] waits for them to finish first.
+     */
+    private val activeBindings = java.util.concurrent.atomic.AtomicInteger()
+
     /** Test hook: sees everything that flows into JS (commands, response heads and bodies, host call results). */
     @Volatile
     var ingressObserver: ((ByteArray) -> Unit)? = null
@@ -304,7 +310,12 @@ class PiRuntime(
             withTimeoutOrNull(5_000) { pumpJob?.join() }
         }
         stop(null)
-        withContext(NonCancellable) { runCatching { engine?.close() } }
+        withContext(NonCancellable) {
+            // stop() released every host-side wait (commands, timers, fetches); give the bindings
+            // that were blocked on them a moment to return into JS before the runtime goes away.
+            withTimeoutOrNull(3_000) { while (activeBindings.get() > 0) kotlinx.coroutines.delay(5) }
+            runCatching { engine?.close() }
+        }
         scope.cancel()
     }
 
@@ -405,6 +416,11 @@ class PiRuntime(
         })
     }
 
+    /** Replaces the host's system prompt (section "agentos") from the next model request on. Not while a prompt runs. */
+    suspend fun setSystemPrompt(sid: String, systemPrompt: String) {
+        request("setSystemPrompt", buildJsonObject { put("sid", sid); put("systemPrompt", systemPrompt) })
+    }
+
     /** Full transcript of [sid], system message first. */
     suspend fun history(sid: String): JsonArray = request("history", buildJsonObject { put("sid", sid) }).jsonArray
 
@@ -425,14 +441,22 @@ class PiRuntime(
     // ------------------------------------------------------------------ host primitives
 
     private fun defineBindings(js: JsEngine) {
+        fun asyncBinding(name: String, body: suspend (List<Any?>) -> Any?) = js.defineAsyncFunction(name) { args ->
+            activeBindings.incrementAndGet()
+            try {
+                body(args)
+            } finally {
+                activeBindings.decrementAndGet()
+            }
+        }
         js.defineFunction("__host_emit") { args ->
             onEmit(args[0] as String)
             null
         }
-        js.defineAsyncFunction("__host_next") {
+        asyncBinding("__host_next") {
             commands.receiveCatching().getOrNull()
         }
-        js.defineAsyncFunction("__host_timer") { args ->
+        asyncBinding("__host_timer") { args ->
             val id = (args[0] as Number).toLong()
             val ms = (args[1] as Number).toLong()
             val signal = CompletableDeferred<String>()
@@ -447,17 +471,17 @@ class PiRuntime(
             timers.remove((args[0] as Number).toLong())?.complete("cancelled")
             null
         }
-        js.defineAsyncFunction("__host_fetch") { args ->
+        asyncBinding("__host_fetch") { args ->
             openFetch((args[0] as Number).toLong(), args[1] as String)
         }
-        js.defineAsyncFunction("__host_fetch_read") { args ->
+        asyncBinding("__host_fetch_read") { args ->
             readFetch((args[0] as Number).toLong())
         }
         js.defineFunction("__host_fetch_abort") { args ->
             abortFetch((args[0] as Number).toLong())
             null
         }
-        js.defineAsyncFunction("__host_call") { args ->
+        asyncBinding("__host_call") { args ->
             val result = hostCall(args[0] as String, json.parseToJsonElement(args[1] as String).jsonObject)
             val text = result?.toString() ?: "{}"
             observe(text)
