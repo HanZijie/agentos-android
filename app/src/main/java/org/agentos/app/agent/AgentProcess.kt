@@ -69,7 +69,7 @@ class AgentProcess private constructor(val app: Context) {
     val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog)
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
-    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, ScriptedAgentCore)
+    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, ScriptedAgentCore(secrets))
     val runtime: AgentRuntime = engine
     @Volatile private var engineStarted = false
 

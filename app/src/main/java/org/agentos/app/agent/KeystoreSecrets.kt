@@ -10,6 +10,7 @@ import org.agentos.runtime.ports.SecretPort
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -21,12 +22,15 @@ import javax.crypto.spec.GCMParameterSpec
  *
  * - 实现 A 定义的 [SecretPort]（`HostPort.secrets`；B2 起 net/HostFetch 也直接用它注入 key），内部委托给 B 的
  *   [BaseUrlCredentials]：scheme、host、port 完全相同，路径在段边界上以 baseUrl 的路径开头；Entry 的 key 每次请求时求值。
- * - 解密后的 key 留在 `:agent` 内存里（不是每次请求都经 Keystore 解密）：日志去 key（[redact]）要用明文比对；
- *   清除后 Keystore 主密钥已删除，进行中的任务仍要用换下来的 key 跑完这一轮。
+ * - 解密后的 key 留在 `:agent` 内存里（不是每次请求都经 Keystore 解密）：日志去 key（[redact]）要用明文比对，
+ *   更换 key 时进行中的这一轮还要用换下来的 key。
  * - key 绑定到一组 baseUrl（厂商预设：该厂商的全部 baseUrl；自定义端点：用户填的那一个）。绑定关系同时作为 GCM 的
  *   AAD：密文被挪给别的端点就解不开；换端点必须重新输入 key。
- * - 热加载：[activate] 之后下一个请求就用新 key。换下来的 key 留到运行时空闲（[retire]）再丢弃，
- *   所以进行中的任务在这一轮里的后续请求不受影响。
+ * - **更换 = 热加载**（[activate]）：下一个请求就用新 key。换下来的 key 只服务它自己绑定的端点，留到运行时空闲
+ *   （[retire]）再丢弃，所以进行中的这一轮不被打断。
+ * - **清除 = 立即作废**（[revoke]，architecture F9）：当前的和换下来的 key 一起丢掉，不等空闲；此后 [credentialFor]
+ *   一律返回 null，之后的模型请求（包括同一轮里工具调用之后的下一次请求）都拿不到 key，以 model_not_configured 结束。
+ *   已经在传输中的那一次 HTTP 响应要由网络出口中止（需要 SecretPort 的撤销信号，见 C3.1 报告），不在本类。
  * - key 不进日志、诊断、心跳、异常消息：本类的 toString 不含 key，[redact] 是日志的最后一道防线。
  *
  * 持久化由 [ModelSources] 负责（与模型来源写在同一个文件里，一次 rename 原子替换）；本类只做加解密和匹配。
@@ -51,6 +55,11 @@ class KeystoreSecrets(
 
     /** 换下来、还没丢弃的 key（进行中的任务可能还在用）。 */
     @Volatile private var retired: Slot? = null
+
+    private val served = AtomicLong()
+    private val denied = AtomicLong()
+    private val revocations = AtomicLong()
+    @Volatile private var lastRevokedAtMs = 0L
 
     /** 用主密钥加密 [key]，绑定到 [bindings]。不改变当前生效的 key。 */
     fun seal(key: String, bindings: List<String>): SealedKey {
@@ -82,6 +91,21 @@ class KeystoreSecrets(
         retired = null
     }
 
+    /**
+     * 清除模型来源时调用：当前的和换下来的 key **立即**丢掉，不管有没有进行中的任务。此后 [credentialFor] 一律返回 null。
+     * 主密钥由调用方随后用 [destroyMasterKey] 删除。
+     */
+    @Synchronized
+    fun revoke() {
+        val had = current != null || retired != null
+        current = null
+        retired = null
+        if (had) {
+            revocations.incrementAndGet()
+            lastRevokedAtMs = System.currentTimeMillis()
+        }
+    }
+
     /** 清除模型来源时调用：删除 Keystore 里的主密钥，旧密文从此无法解密。下次 [seal] 会新建一把。 */
     fun destroyMasterKey() = cipher.destroy()
 
@@ -97,15 +121,27 @@ class KeystoreSecrets(
     /** 主密钥的状态（诊断用，不含任何 key 内容）。 */
     fun keystoreStatus(): Map<String, Any?> = runCatching { cipher.status() }.getOrElse { mapOf("error" to it.javaClass.simpleName) }
 
-    /** 新 key 优先；换下来的 key 只服务它自己绑定的端点。 */
+    /** 新 key 优先；换下来的 key 只服务它自己绑定的端点。清除之后一律返回 null。 */
     override suspend fun credentialFor(url: String): Credential? {
         val c = current
         val r = retired
-        return c?.match(url) ?: r?.match(url)
+        val found = c?.match(url) ?: r?.match(url)
+        if (found != null) served.incrementAndGet() else denied.incrementAndGet()
+        return found
     }
 
-    /** [credentialFor] 的非挂起版本（ModelSources 判断“可用”、诊断用）；匹配本身不挂起、不做 I/O。 */
-    fun resolves(url: String): Boolean = runBlocking { credentialFor(url) != null }
+    /** 请求计数（诊断、设备用例用，不含任何 key 内容）：交出 key 的次数、找不到 key 的次数、撤销次数。 */
+    fun stats(): Map<String, Any?> = mapOf(
+        "served" to served.get(), "denied" to denied.get(),
+        "revocations" to revocations.get(), "lastRevokedAtMs" to lastRevokedAtMs,
+    )
+
+    /** 只判断能否匹配（ModelSources 判断“可用”、诊断用），不计入 [stats]；匹配本身不挂起、不做 I/O。 */
+    fun resolves(url: String): Boolean = runBlocking {
+        val c = current
+        val r = retired
+        (c?.match(url) ?: r?.match(url)) != null
+    }
 
     /** 把 [text] 里出现的 key（当前的和换下来的）换成 `****`。 */
     fun redact(text: String): String {

@@ -416,8 +416,8 @@ class ChannelScenarios(
             out.put("B_nearLimitPrompt", JSONObject().put("ok", b.stopReason == "END_TURN").put("prompt", b.json()))
 
             // C. 服务端要发超长通知：测试 Agent 丢弃该条、本轮其他消息照常；AgentOS 宿主层把长文字切成不超过 8,192 字符的块，
-            //    根本不会产生超长通知。注意：宿主层的事件日志对单个超过 65,536 字符的事件按 events.md 第 5 节截断字段
-            //    （一条 65K 的增量只剩 16,384 字符），textComplete 记录这一点，不作为本用例（通道）的通过条件
+            //    根本不会产生超长通知；文字要完整送达（A4 起宿主层把单条超长增量先切到 ≤ 8,192 字符再写日志，
+            //    之前按 events.md 第 5 节被截断到 16,384 字符，C3 发现）
             val c3 = PromptRun()
             val big = max + 100
             prompt(session, JSONObject().put("chunks", 3).put("intervalMs", 0).put("bigChunkChars", big).toString(), c3)
@@ -426,7 +426,8 @@ class ChannelScenarios(
                 (0 until arr.length()).sumOf { arr.getJSONObject(it).optJSONObject("transport")?.optLong("droppedTooLarge") ?: 0L }
             } ?: -1L
             val cOk = if (target.hostRuntime) {
-                c3.stopReason == "END_TURN" && c3.chunks >= 2 && c3.maxChunkChars <= 8_192 && dropped == 0L
+                c3.stopReason == "END_TURN" && c3.chunks >= 2 && c3.maxChunkChars <= 8_192 && dropped == 0L &&
+                    c3.chunkChars == expectedChars(3, 0, big)
             } else {
                 c3.stopReason == "END_TURN" && c3.chunks == 3 && dropped >= 1
             }

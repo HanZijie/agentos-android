@@ -93,6 +93,8 @@ def app_cases():
         ("store-restart", a, "store-restart", {"fresh": True}, 180, "check"),
         ("byok-roundtrip", a, "byok-roundtrip", {"apiKeyFile": KEY_FILE}, 120, "byok"),
         ("byok-restart", a, "byok-restart", {"apiKeyFile": KEY_FILE}, 120, "byok"),
+        # C3.1：清除 = 立即作废（长流式进行中清除）
+        ("byok-clear-inflight", a, "byok-clear-inflight", {"apiKeyFile": KEY_FILE}, 120, "byok"),
         ("byok-clear", a, "byok-clear", {"apiKeyFile": KEY_FILE}, 120, "byok"),
     ]
 

@@ -36,8 +36,10 @@ interface IAgentControl {
     //   IllegalArgumentException("agentos.byok.<code>: <说明>")：请求不对，code 见各方法；
     //   IllegalStateException("agentos.byok.storage_failed: <说明>")：保存失败（磁盘、Android Keystore）。
     // key 只在 setModelSource 的参数里出现；任何返回值里只有首尾各 4 位，诊断、日志、心跳里没有。
-    // 修改立即生效（热加载）：宿主层从下一轮起用新的模型和 key，进行中的一轮不受影响
-    // （换下来的 key 留在 :agent 内存里，运行时空闲后丢弃）。
+    // 更换（setModelSource）= 热加载：下一次模型请求就用新的模型和 key，进行中的这一轮不被打断
+    //   （换下来的 key 只服务它原来的端点，留在 :agent 内存里，运行时空闲后丢弃）。
+    // 清除（clearModelSource）= 立即作废（architecture F9）：key 当场丢掉，进行中的这一轮之后的模型请求也拿不到 key，
+    //   以 model_not_configured 结束（错误消息不含 key）。
 
     /**
      * 厂商预设（assets/model-catalog.json，B 的 ModelCatalog；MiniMax 国际 minimax、国内 minimax-cn 排在最前）。
@@ -85,7 +87,11 @@ interface IAgentControl {
      */
     String setModelSource(String sourceJson, String apiKey);
 
-    /** 清除模型来源和 key，并删除 Keystore 主密钥。之后任务以 model_not_configured 失败。 */
+    /**
+     * 清除模型来源和 key：删除保存的文件和 Keystore 主密钥，key 立即作废（不等进行中的任务结束）。进行中的这一轮
+     * 下一次模型请求就拿不到 key，以 model_not_configured 结束；之后的任务同样以 model_not_configured 失败。
+     * 已经在传输中的那一次响应目前会继续到结束（中止它需要网络出口配合，见 C3.1 报告）。
+     */
     void clearModelSource();
 
     // ---------------------------------------------------------------- v3：电脑端接入（F11，W9）
