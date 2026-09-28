@@ -223,7 +223,7 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 
 | 接口 | 服务端 | 调用方 | 用途 |
 |---|---|---|---|
-| `IAgentControl` | `:agent` | 主进程 | BYOK 配置、设置、会话管理与审计、诊断信息、监督状态；注册确认界面回调，提交确认结果。v1（W6）只有版本、运行状态、诊断、监督状态，返回 JSON；BYOK 与确认按版本在末尾追加 |
+| `IAgentControl` | `:agent` | 主进程 | BYOK 配置、设置、会话管理与审计、诊断信息、监督状态；注册确认界面回调，提交确认结果。v1（W6）：版本、运行状态、诊断、监督状态，返回 JSON；v2（W6）末尾追加 BYOK：`getModelPresets(providerId)`（不传参数返回厂商列表，传厂商返回其模型，控制 Binder 返回值大小）、`getModelSource()`、`setModelSource(sourceJson, apiKey)`、`clearModelSource()`；之后的确认、电脑端接入按版本继续在末尾追加 |
 | `IExtensionHost` | `:ext` | `:agent` | 取工具与 Skill 目录并订阅变化；工具调用与取消；读取 Skill；触发 Hook 事件并取回合并后的决定 |
 | `IExtensionCallback` | `:agent` | `:ext` | 目录变化、工具结果、连接状态 |
 
@@ -374,7 +374,10 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
    - **厂商预设**：列表来自 `pi-ai` 的模型目录，MiniMax（国际 / 国内）排在最前。用户只需填写 key，endpoint、协议和模型参数（上下文长度、最大输出、是否支持推理）都已预置。
    - **自定义兼容端点**：填写 URL、协议（Anthropic Messages 或 OpenAI Chat Completions）、模型名和 key，适用于自建网关和预设里没有的厂商。
    首版不支持用订阅账号登录（Claude Pro/Max、ChatGPT、Copilot 等 OAuth）。
-2. 主进程经 `IAgentControl` 交给运行时。宿主层用 Android Keystore 里的密钥加密后写入 `:agent` 的私有目录，热加载生效，不影响正在运行的任务。
+2. 主进程经 `IAgentControl`（v2 的 `setModelSource` 等）交给运行时。宿主层用 Android Keystore 里的 AES-256-GCM 主密钥（不要求���户认证）加密 key，与模型来源一起写入 `:agent` 的 CE 私有目录（`files/byok/model-source.json`，一次原子写入）。key 绑定端点：厂商预设绑定该厂商的全部 baseUrl，自定义端点只绑定它自己的 baseUrl，加密时把 baseUrl 作为附加认证数据，所以换端点必须重新输入 key。
+   - **更换**：热加载，下一次模型请求生效，不打断正在运行的这一轮。
+   - **清除**：立即作废（整合人 2026-09-29 决定）：删除文件和 Keystore 主密钥，进行中用到这个 key 的请求随之中止，不再用旧 key 跑完这一轮。
+   - 错误以 `agentos.byok.<code>` 返回，错误消息里不含 key。
 3. key 只在 Kotlin 宿主层里使用：Pi 发出的模型请求经过宿主层的 `fetch` 时才注入请求头，QuickJS 里的 Pi Agent core 看不到 key。
 4. key 不会出现在事件、快照、日志、诊断输出和模型输入里。界面上只显示首尾各 4 位。
 
