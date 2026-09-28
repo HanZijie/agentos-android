@@ -4,6 +4,8 @@
 //
 // testFixtures（src/testFixtures/kotlin）：FakeAgentCore、FakeHostPort 等假实现，供本模块测试、
 // W4 的 ACP 一致性测试和其他模块复用：testImplementation(testFixtures(project(":core:runtime")))。
+// lane B（W3）：testFixtures 里还有 JsEngine 的电脑实现（pi/desktop，quickjs-kt-jvm）和假模型端点
+// （pi/testing）；主代码不依赖 quickjs-kt。
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
@@ -28,4 +30,22 @@ dependencies {
     testImplementation(libs.junit4)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.sqlite.bundled)
+
+    // lane B（W3）：JsEngine 的电脑实现与假模型端点（src/testFixtures）
+    testFixturesImplementation(libs.quickjs.kt)
+    testFixturesImplementation(libs.kotlinx.serialization.json)
+    testImplementation(libs.okhttp)
+    testImplementation(libs.okhttp.mockwebserver)
+}
+
+// lane B（W3）：Pi 打包产物的契约测试（org.agentos.runtime.pi.PiBundleContractTest）读取
+// core/pi-runtime/build.mjs 生成的 app/src/main/assets/pi-agent.js；没有生成时这些用例跳过。
+// 同一次构建里也要打包 APK 时，先让 :app:bundlePiAgent 生成产物（只约束顺序，不会因此拉起 app 的打包）。
+tasks.named<Test>("test") {
+    val piAssets = rootProject.layout.projectDirectory.dir("app/src/main/assets")
+    systemProperty("agentos.piAssetsDir", piAssets.asFile.absolutePath)
+    inputs.files(piAssets.file("pi-agent.js"), piAssets.file("model-catalog.json"))
+        .optional()
+        .withPropertyName("piBundle")
+    mustRunAfter(":app:bundlePiAgent")
 }
