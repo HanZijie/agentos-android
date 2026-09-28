@@ -15,6 +15,7 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import org.agentos.runtime.net.BaseUrlCredentials
 import org.agentos.runtime.net.HostFetch
 import org.agentos.runtime.pi.desktop.QuickJsJvmEngine
 import java.util.concurrent.CopyOnWriteArrayList
@@ -83,7 +84,7 @@ class PiRuntimeTest {
     }
 
     private fun runtime(rec: Recorder, cache: BytecodeCache? = null) =
-        PiRuntime(QuickJsJvmEngine.factory, HostFetch(credentials = { null }), rec, rec, cache)
+        PiRuntime(QuickJsJvmEngine.factory, HostFetch(BaseUrlCredentials(emptyList())), rec, rec, cache)
 
     @Test
     fun `starts, answers commands and closes cleanly`() = runBlocking<Unit> {

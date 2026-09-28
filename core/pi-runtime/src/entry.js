@@ -11,10 +11,11 @@
  *   ping                                         -> {protocol, apis}
  *   create   {sid, model, systemPrompt?, tools?, messages?, thinkingLevel?}
  *                                                -> {sid, messages}     (messages = restore)
- *   prompt   {sid, text, images?}                -> after agent_end: {stopReason, errorMessage?, text, messageCount, appended}
+ *   prompt   {sid, text, images?}                -> after agent_end: {stopReason, errorMessage?, text, usage?, messageCount, appended}
  *   abort    {sid}                               -> {}                  (the prompt then replies stopReason "aborted")
  *   setTools {sid, tools}                        -> {tools}             (takes effect on the next provider request)
  *   setModel {sid, model, thinkingLevel?}        -> {}
+ *   setSystemPrompt {sid, systemPrompt}          -> {messageCount}      (appends a system message replacing the "agentos" section)
  *   history  {sid}                               -> messages[]          (full transcript, system message first)
  *   dispose  {sid}                               -> {disposed}
  *   stats                                        -> {sessions, inflightFetches, activeTimers}
@@ -24,6 +25,7 @@
  */
 import "./polyfills.js";
 import { Agent } from "pi-agent-core/agent";
+import { toToolDeclaration } from "@earendil-works/pi-ai/utils/transcript";
 import { call, emit, inflightFetchCount, nextCommand, PROTOCOL_VERSION } from "./host-bridge.js";
 import { hostStreamFn, SUPPORTED_APIS } from "./stream-fn.js";
 
@@ -63,10 +65,15 @@ function toolFromDeclaration(sid, decl) {
 }
 
 /** Keep events small: deltas instead of whole partial messages on every token. */
+// Assistant stream updates that carry no information beyond message_start / message_end /
+// toolcall_end are not sent to the host (core/contracts/events.md, section 3).
+const DROPPED_UPDATES = new Set(["start", "text_start", "text_end", "thinking_start", "thinking_end", "toolcall_start", "toolcall_delta"]);
+
 function compactEvent(event) {
   switch (event.type) {
     case "message_update": {
       const e = event.assistantMessageEvent;
+      if (DROPPED_UPDATES.has(e.type)) return null;
       const out = { type: e.type, contentIndex: e.contentIndex };
       if (e.delta !== undefined) out.delta = e.delta;
       if (e.type === "toolcall_end") out.toolCall = e.toolCall;
@@ -103,6 +110,26 @@ function lastAssistant(messages) {
   return undefined;
 }
 
+/** Section name that carries the host's system prompt, so a later system message can replace it. */
+const SYSTEM_SECTION = "agentos";
+
+/**
+ * The leading system message for a new session. Same as Pi's own initial message, except that
+ * the prompt lives in the named section SYSTEM_SECTION instead of `content`: a later
+ * `setSystemPrompt` then replaces it (pi-ai merges sections, later values win).
+ */
+function initialSystemMessage(systemPrompt, tools) {
+  const declared = tools.map(toToolDeclaration);
+  if (!systemPrompt && declared.length === 0) return [];
+  return [{
+    role: "system",
+    content: "",
+    ...(systemPrompt ? { sections: { [SYSTEM_SECTION]: systemPrompt } } : {}),
+    ...(declared.length ? { toolsAdded: declared } : {}),
+    timestamp: 0,
+  }];
+}
+
 const ops = {
   ping: async () => ({ protocol: PROTOCOL_VERSION, apis: SUPPORTED_APIS }),
 
@@ -110,17 +137,21 @@ const ops = {
     if (typeof sid !== "string" || !sid) throw new Error("create: sid is required");
     if (sessions.has(sid)) throw new Error(`Session already exists: ${sid}`);
     if (!model?.api || !model?.id) throw new Error("create: model is required");
+    const agentTools = (tools ?? []).map((d) => toolFromDeclaration(sid, d));
     const agent = new Agent({
       streamFn: hostStreamFn,
       sessionId: sid,
       toolExecution: "sequential",
       initialState: {
         model,
-        systemPrompt: systemPrompt ?? "",
         thinkingLevel: thinkingLevel ?? "off",
-        tools: (tools ?? []).map((d) => toolFromDeclaration(sid, d)),
-        messages: messages ?? [],
+        tools: agentTools,
+        // A restored transcript is used verbatim; a new one starts with our system message.
+        messages: messages ?? initialSystemMessage(systemPrompt ?? "", agentTools),
       },
+      // After an abort, end the run at the next turn boundary instead of starting another
+      // provider request that would only produce an empty aborted assistant message.
+      shouldStopAfterTurn: async (_context, signal) => signal?.aborted === true,
       beforeToolCall: async ({ toolCall, args }) => {
         const decision = await call("beforeToolCall", { sid, toolCallId: toolCall.id, name: toolCall.name, args });
         if (!decision?.block) return undefined;
@@ -135,7 +166,8 @@ const ops = {
       },
     });
     const unsubscribe = agent.subscribe((event) => {
-      emit({ t: "event", sid, e: compactEvent(event) });
+      const e = compactEvent(event);
+      if (e) emit({ t: "event", sid, e });
     });
     sessions.set(sid, { agent, unsubscribe });
     return { sid, messages: agent.state.messages.length };
@@ -152,9 +184,20 @@ const ops = {
       stopReason: last?.stopReason,
       errorMessage: last?.errorMessage,
       text: (last?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join(""),
+      usage: last?.usage,
       messageCount: messages.length,
       appended: messages.slice(before),
     };
+  },
+
+  setSystemPrompt: async ({ sid, systemPrompt }) => {
+    const { agent } = requireSession(sid);
+    if (agent.state.isStreaming) throw new Error("setSystemPrompt: a prompt is running");
+    agent.state.messages = [
+      ...agent.state.messages,
+      { role: "system", content: "", sections: { [SYSTEM_SECTION]: String(systemPrompt ?? "") }, timestamp: Date.now() },
+    ];
+    return { messageCount: agent.state.messages.length };
   },
 
   abort: async ({ sid }) => {
