@@ -10,7 +10,7 @@
   "buildType": "userdebug",
   "isEmulator": true
  },
- "time": "2026-09-29T06:45:57+0800",
+ "time": "2026-09-29T07:41:57+0800",
  "results": {
   "handshake": {
    "ok": true,
@@ -18,10 +18,10 @@
    "protocolVersion": "1",
    "sessionId": "t-1-1",
    "timingsMs": {
-    "bound": 4.872208,
-    "opened": 224.527833,
-    "initialized": 478.359,
-    "session": 509.779208
+    "bound": 70.6575,
+    "opened": 458.148667,
+    "initialized": 700.35925,
+    "session": 733.410417
    },
    "prompt": {
     "chunks": 20,
@@ -30,28 +30,28 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 105.808125,
-    "totalMs": 266.98875,
-    "chunksPerSec": 74.9095233413393,
+    "firstChunkMs": 37.9745,
+    "totalMs": 223.44675,
+    "chunksPerSec": 89.50678405481395,
     "latency": {
      "n": 20,
-     "p50ms": 32.31375,
-     "p90ms": 83.131333,
-     "p99ms": 85.467,
-     "maxms": 85.467,
-     "meanms": 36.32762075,
-     "first10pctMeanMs": 16.8533125,
-     "last10pctMeanMs": 84.2991665
+     "p50ms": 18.024,
+     "p90ms": 145.021666,
+     "p99ms": 147.8205,
+     "maxms": 147.8205,
+     "meanms": 64.4569917,
+     "first10pctMeanMs": 15.5913755,
+     "last10pctMeanMs": 130.5663125
     }
    },
    "closeCause": "local(transport closed)",
    "scenario": "handshake",
-   "run": "handshake-2611f9",
+   "run": "handshake-f2dae0",
    "args": {},
-   "wallMs": 1193.309584,
+   "wallMs": 2148.338293,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 4999,
+    "pid": 4847,
     "uid": 10209,
     "debuggable": true
    },
@@ -61,8 +61,10 @@
     "release": "15",
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
-   "logcatWarnings": [],
-   "driverSec": 3.4
+   "logcatWarnings": [
+    "09-29 07:39:47.487  1127  1987 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
+   ],
+   "driverSec": 4.4
   },
   "stream-realtime": {
    "ok": true,
@@ -95,24 +97,24 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 36.620209,
-    "totalMs": 6446.694212,
-    "chunksPerSec": 77.5591308595482,
+    "firstChunkMs": 75.956666,
+    "totalMs": 7288.974628,
+    "chunksPerSec": 68.59675407282815,
     "latency": {
      "n": 500,
-     "p50ms": 1.718875,
-     "p90ms": 5.00875,
-     "p99ms": 23.893208,
-     "maxms": 46.78775,
-     "meanms": 2.906410338,
-     "first10pctMeanMs": 9.442882560000001,
-     "last10pctMeanMs": 1.7937658
+     "p50ms": 3.090791,
+     "p90ms": 10.785,
+     "p99ms": 37.510875,
+     "maxms": 73.223875,
+     "meanms": 5.224876096,
+     "first10pctMeanMs": 9.12660002,
+     "last10pctMeanMs": 3.50005336
     }
    },
    "mainThread": {
-    "ticks": 545,
-    "maxLateMs": 20.136875,
-    "lateOver16ms": 3,
+    "ticks": 588,
+    "maxLateMs": 43.529375,
+    "lateOver16ms": 13,
     "lateOver50ms": 0,
     "lateOver100ms": 0
    },
@@ -141,7 +143,7 @@
       "unackedChars": 0
      },
      "enqueued": 3,
-     "acksSent": 499,
+     "acksSent": 500,
      "acksReceived": 3,
      "windowWaits": 0,
      "windowWaitMsTotal": 0,
@@ -149,12 +151,12 @@
      "maxInFlightMessages": 1,
      "maxInFlightChars": 227,
      "maxQueuedChars": 227,
-     "maxUnackedMessages": 3,
-     "maxUnackedChars": 633,
+     "maxUnackedMessages": 2,
+     "maxUnackedChars": 424,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 3938.319,
-     "binderSendUsMax": 11102.625
+     "binderSendUsAvg": 211.125,
+     "binderSendUsMax": 315.375
     }
    },
    "serverConnections": [
@@ -187,7 +189,7 @@
        },
        "enqueued": 503,
        "acksSent": 3,
-       "acksReceived": 499,
+       "acksReceived": 500,
        "windowWaits": 0,
        "windowWaitMsTotal": 0,
        "windowWaitMsMax": 0,
@@ -198,33 +200,33 @@
        "maxUnackedChars": 227,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 96.78,
-       "binderSendUsMax": 6495.917
+       "binderSendUsAvg": 211.94,
+       "binderSendUsMax": 11931.916
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 5076,
+    "pid": 4929,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
     "ackRetries": 0,
-    "threads": 25
+    "threads": 26
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-realtime-32cae9",
+   "run": "stream-realtime-3b8e8f",
    "args": {
     "chunks": 500,
     "chunkChars": 16,
     "intervalMs": 10
    },
-   "wallMs": 6828.193753,
+   "wallMs": 8446.527379,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5076,
+    "pid": 4929,
     "uid": 10209,
     "debuggable": true
    },
@@ -235,9 +237,9 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [
-    "09-29 06:44:45.000  1070  2811 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
+    "09-29 07:39:50.649  1127  2020 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
    ],
-   "driverSec": 8.6
+   "driverSec": 11.5
   },
   "stream-peak-bp": {
    "ok": true,
@@ -270,25 +272,25 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 66.631833,
-    "totalMs": 5279.177961,
-    "chunksPerSec": 3788.468611543364,
+    "firstChunkMs": 252.261167,
+    "totalMs": 8390.129129,
+    "chunksPerSec": 2383.7535385326964,
     "latency": {
      "n": 20000,
-     "p50ms": 701.556584,
-     "p90ms": 830.472251,
-     "p99ms": 867.942542,
-     "maxms": 889.880584,
-     "meanms": 614.3564224618,
-     "first10pctMeanMs": 419.4809405365,
-     "last10pctMeanMs": 334.807829959
+     "p50ms": 681.385417,
+     "p90ms": 1572.225542,
+     "p99ms": 1674.879376,
+     "maxms": 1687.494792,
+     "meanms": 797.91022579765,
+     "first10pctMeanMs": 849.5224688635,
+     "last10pctMeanMs": 776.991736141
     }
    },
    "mainThread": {
-    "ticks": 425,
-    "maxLateMs": 39.74125,
-    "lateOver16ms": 9,
-    "lateOver50ms": 0,
+    "ticks": 595,
+    "maxLateMs": 83.88125,
+    "lateOver16ms": 42,
+    "lateOver50ms": 3,
     "lateOver100ms": 0
    },
    "clientTransport": {
@@ -316,7 +318,7 @@
       "unackedChars": 0
      },
      "enqueued": 3,
-     "acksSent": 3072,
+     "acksSent": 3009,
      "acksReceived": 3,
      "windowWaits": 0,
      "windowWaitMsTotal": 0,
@@ -328,8 +330,8 @@
      "maxUnackedChars": 8384,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 3717.528,
-     "binderSendUsMax": 10443.292
+     "binderSendUsAvg": 45.111,
+     "binderSendUsMax": 89.542
     }
    },
    "serverConnections": [
@@ -362,26 +364,26 @@
        },
        "enqueued": 20003,
        "acksSent": 3,
-       "acksReceived": 3072,
-       "windowWaits": 1062,
-       "windowWaitMsTotal": 3550.041998,
-       "windowWaitMsMax": 96.184541,
+       "acksReceived": 3009,
+       "windowWaits": 1103,
+       "windowWaitMsTotal": 5202.199377,
+       "windowWaitMsMax": 98.105959,
        "maxInFlightMessages": 32,
        "maxInFlightChars": 8384,
-       "maxQueuedChars": 16641,
+       "maxQueuedChars": 16645,
        "maxUnackedMessages": 1,
        "maxUnackedChars": 227,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 26.367,
-       "binderSendUsMax": 27952.167
+       "binderSendUsAvg": 41.835,
+       "binderSendUsMax": 60836.083
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 5164,
+    "pid": 5016,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -390,17 +392,17 @@
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-peak-bp-30c09b",
+   "run": "stream-peak-bp-da38fc",
    "args": {
     "chunks": 20000,
     "chunkChars": 64,
     "intervalMs": 0,
     "bp": true
    },
-   "wallMs": 5706.425753,
+   "wallMs": 9202.55913,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5164,
+    "pid": 5016,
     "uid": 10209,
     "debuggable": true
    },
@@ -411,9 +413,10 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [
-    "09-29 06:44:48.041  1070  1079 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
+    "09-29 07:40:08.711  1127  2020 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:40:11.716  1127  2483 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
    ],
-   "driverSec": 6.5
+   "driverSec": 11.6
   },
   "stream-peak32-bp": {
    "ok": true,
@@ -446,25 +449,25 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 36.604,
-    "totalMs": 6055.530836,
-    "chunksPerSec": 3302.7657758920873,
+    "firstChunkMs": 80.685417,
+    "totalMs": 10905.05413,
+    "chunksPerSec": 1834.0119876140404,
     "latency": {
      "n": 20000,
-     "p50ms": 518.323667,
-     "p90ms": 993.883084,
-     "p99ms": 1141.112793,
-     "maxms": 1239.867167,
-     "meanms": 595.4739609651001,
-     "first10pctMeanMs": 898.8869907359999,
-     "last10pctMeanMs": 345.66557164
+     "p50ms": 634.210959,
+     "p90ms": 1512.277542,
+     "p99ms": 1819.023917,
+     "maxms": 1854.123542,
+     "meanms": 787.0908741818,
+     "first10pctMeanMs": 1186.0982998440002,
+     "last10pctMeanMs": 251.73377264750002
     }
    },
    "mainThread": {
-    "ticks": 446,
-    "maxLateMs": 221.956125,
-    "lateOver16ms": 18,
-    "lateOver50ms": 3,
+    "ticks": 683,
+    "maxLateMs": 102.539417,
+    "lateOver16ms": 69,
+    "lateOver50ms": 10,
     "lateOver100ms": 1
    },
    "clientTransport": {
@@ -492,7 +495,7 @@
       "unackedChars": 0
      },
      "enqueued": 3,
-     "acksSent": 2898,
+     "acksSent": 3029,
      "acksReceived": 3,
      "windowWaits": 0,
      "windowWaitMsTotal": 0,
@@ -504,8 +507,8 @@
      "maxUnackedChars": 7360,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 3223.694,
-     "binderSendUsMax": 8915.792
+     "binderSendUsAvg": 236.403,
+     "binderSendUsMax": 586.125
     }
    },
    "serverConnections": [
@@ -538,45 +541,45 @@
        },
        "enqueued": 20003,
        "acksSent": 3,
-       "acksReceived": 2898,
-       "windowWaits": 1188,
-       "windowWaitMsTotal": 4627.859031,
-       "windowWaitMsMax": 224.546917,
+       "acksReceived": 3029,
+       "windowWaits": 1229,
+       "windowWaitMsTotal": 7907.825626,
+       "windowWaitMsMax": 112.215916,
        "maxInFlightMessages": 32,
        "maxInFlightChars": 7360,
-       "maxQueuedChars": 16612,
+       "maxQueuedChars": 16609,
        "maxUnackedMessages": 1,
        "maxUnackedChars": 227,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 23.454,
-       "binderSendUsMax": 33576.583
+       "binderSendUsAvg": 55.846,
+       "binderSendUsMax": 86992.708
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 5252,
+    "pid": 5150,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
     "ackRetries": 0,
-    "threads": 37
+    "threads": 39
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-peak32-bp-24ca02",
+   "run": "stream-peak32-bp-53c02b",
    "args": {
     "chunks": 20000,
     "chunkChars": 32,
     "intervalMs": 0,
     "bp": true
    },
-   "wallMs": 6670.049879,
+   "wallMs": 12344.943422,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5252,
+    "pid": 5150,
     "uid": 10209,
     "debuggable": true
    },
@@ -587,10 +590,13 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [
-    "09-29 06:44:54.116  1070  1079 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
-    "09-29 06:44:57.045  1070  2811 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
+    "09-29 07:40:17.751  1127  3144 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:40:20.860  1127  3144 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:40:23.314  1127  3144 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:40:23.847  1127  3144 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:40:26.943  1127  3144 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
    ],
-   "driverSec": 7.8
+   "driverSec": 14.8
   },
   "stream-bigchunks-bp": {
    "ok": true,
@@ -623,26 +629,26 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 95.094792,
-    "totalMs": 2519.143001,
-    "chunksPerSec": 198.4801973534332,
+    "firstChunkMs": 288.81525,
+    "totalMs": 2437.387501,
+    "chunksPerSec": 205.13767293664316,
     "latency": {
      "n": 500,
-     "p50ms": 8.297541,
-     "p90ms": 148.071167,
-     "p99ms": 322.918583,
-     "maxms": 407.432334,
-     "meanms": 40.31222526,
-     "first10pctMeanMs": 206.38623008000002,
-     "last10pctMeanMs": 7.98196744
+     "p50ms": 20.871,
+     "p90ms": 81.108041,
+     "p99ms": 214.199209,
+     "maxms": 271.641917,
+     "meanms": 34.991910276,
+     "first10pctMeanMs": 115.69923678,
+     "last10pctMeanMs": 24.819309899999997
     }
    },
    "mainThread": {
-    "ticks": 164,
-    "maxLateMs": 81.562916,
-    "lateOver16ms": 12,
+    "ticks": 173,
+    "maxLateMs": 108.560875,
+    "lateOver16ms": 9,
     "lateOver50ms": 1,
-    "lateOver100ms": 0
+    "lateOver100ms": 1
    },
    "clientTransport": {
     "state": "STARTED",
@@ -677,12 +683,12 @@
      "maxInFlightMessages": 1,
      "maxInFlightChars": 228,
      "maxQueuedChars": 228,
-     "maxUnackedMessages": 3,
-     "maxUnackedChars": 32451,
+     "maxUnackedMessages": 2,
+     "maxUnackedChars": 32392,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 554.486,
-     "binderSendUsMax": 1355.75
+     "binderSendUsAvg": 361.374,
+     "binderSendUsMax": 726.291
     }
    },
    "serverConnections": [
@@ -716,25 +722,25 @@
        "enqueued": 503,
        "acksSent": 3,
        "acksReceived": 503,
-       "windowWaits": 389,
-       "windowWaitMsTotal": 2312.805087,
-       "windowWaitMsMax": 104.834791,
-       "maxInFlightMessages": 3,
-       "maxInFlightChars": 32451,
-       "maxQueuedChars": 81039,
+       "windowWaits": 372,
+       "windowWaitMsTotal": 1958.425949,
+       "windowWaitMsMax": 81.8505,
+       "maxInFlightMessages": 2,
+       "maxInFlightChars": 32392,
+       "maxQueuedChars": 80980,
        "maxUnackedMessages": 1,
        "maxUnackedChars": 228,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 79.644,
-       "binderSendUsMax": 15938.292
+       "binderSendUsAvg": 127.757,
+       "binderSendUsMax": 4453.459
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 5335,
+    "pid": 5265,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -743,7 +749,7 @@
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-bigchunks-bp-06801a",
+   "run": "stream-bigchunks-bp-51a6a7",
    "args": {
     "chunks": 500,
     "chunkChars": 16000,
@@ -751,10 +757,10 @@
     "bp": true,
     "bpChars": 65536
    },
-   "wallMs": 2818.707668,
+   "wallMs": 3783.398043,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5335,
+    "pid": 5265,
     "uid": 10209,
     "debuggable": true
    },
@@ -764,8 +770,11 @@
     "release": "15",
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
-   "logcatWarnings": [],
-   "driverSec": 4.6
+   "logcatWarnings": [
+    "09-29 07:40:30.269  1127  3144 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:40:33.369  1127  2483 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
+   ],
+   "driverSec": 6.5
   },
   "stream-cjk-bp": {
    "ok": true,
@@ -798,25 +807,25 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 31.394166,
-    "totalMs": 3752.233585,
-    "chunksPerSec": 1332.5396425180177,
+    "firstChunkMs": 362.810042,
+    "totalMs": 6710.185295,
+    "chunksPerSec": 745.1359061165837,
     "latency": {
      "n": 5000,
-     "p50ms": 463.287875,
-     "p90ms": 1153.888667,
-     "p99ms": 1293.858834,
-     "maxms": 1320.087584,
-     "meanms": 580.4638595456,
-     "first10pctMeanMs": 405.73463556800004,
-     "last10pctMeanMs": 165.8996345
+     "p50ms": 1463.105375,
+     "p90ms": 1914.683043,
+     "p99ms": 2027.446042,
+     "maxms": 2045.435501,
+     "meanms": 1306.2310650196,
+     "first10pctMeanMs": 391.652005386,
+     "last10pctMeanMs": 1637.064773542
     }
    },
    "mainThread": {
-    "ticks": 265,
-    "maxLateMs": 113.857791,
-    "lateOver16ms": 15,
-    "lateOver50ms": 2,
+    "ticks": 420,
+    "maxLateMs": 289.677084,
+    "lateOver16ms": 39,
+    "lateOver50ms": 8,
     "lateOver100ms": 1
    },
    "clientTransport": {
@@ -844,7 +853,7 @@
       "unackedChars": 0
      },
      "enqueued": 3,
-     "acksSent": 667,
+     "acksSent": 699,
      "acksReceived": 3,
      "windowWaits": 0,
      "windowWaitMsTotal": 0,
@@ -856,8 +865,8 @@
      "maxUnackedChars": 8352,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 201.68,
-     "binderSendUsMax": 433.875
+     "binderSendUsAvg": 13532.708,
+     "binderSendUsMax": 39510.792
     }
    },
    "serverConnections": [
@@ -890,35 +899,35 @@
        },
        "enqueued": 5003,
        "acksSent": 3,
-       "acksReceived": 667,
-       "windowWaits": 455,
-       "windowWaitMsTotal": 3067.394915,
-       "windowWaitMsMax": 63.047917,
+       "acksReceived": 699,
+       "windowWaits": 426,
+       "windowWaitMsTotal": 3878.761414,
+       "windowWaitMsMax": 315.924126,
        "maxInFlightMessages": 32,
        "maxInFlightChars": 8352,
-       "maxQueuedChars": 16645,
+       "maxQueuedChars": 16641,
        "maxUnackedMessages": 1,
        "maxUnackedChars": 225,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 27.996,
-       "binderSendUsMax": 24549.417
+       "binderSendUsAvg": 75.464,
+       "binderSendUsMax": 41335.833
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 5415,
-    "liveChannels": 0,
+    "pid": 5332,
+    "liveChannels": 1,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
     "ackRetries": 0,
-    "threads": 37
+    "threads": 38
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-cjk-bp-109277",
+   "run": "stream-cjk-bp-8ab564",
    "args": {
     "chunks": 5000,
     "chunkChars": 64,
@@ -926,10 +935,10 @@
     "bp": true,
     "cjk": true
    },
-   "wallMs": 4493.061502,
+   "wallMs": 7548.886546,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5415,
+    "pid": 5332,
     "uid": 10209,
     "debuggable": true
    },
@@ -940,7 +949,7 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 5.7
+   "driverSec": 10.0
   },
   "stream-window-8x16384": {
    "ok": true,
@@ -973,26 +982,26 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 151.278666,
-    "totalMs": 6884.515961,
-    "chunksPerSec": 2905.06988629233,
+    "firstChunkMs": 71.308583,
+    "totalMs": 11978.167381,
+    "chunksPerSec": 1669.7045018526278,
     "latency": {
      "n": 20000,
-     "p50ms": 12.694625,
-     "p90ms": 150.766,
-     "p99ms": 352.137958,
-     "maxms": 899.505334,
-     "meanms": 41.50171707075,
-     "first10pctMeanMs": 239.9204919425,
-     "last10pctMeanMs": 10.9170104985
+     "p50ms": 33.311542,
+     "p90ms": 344.605708,
+     "p99ms": 578.237751,
+     "maxms": 750.236375,
+     "meanms": 93.02821427285001,
+     "first10pctMeanMs": 418.3982988165,
+     "last10pctMeanMs": 24.174497162999998
     }
    },
    "mainThread": {
-    "ticks": 513,
-    "maxLateMs": 132.8395,
-    "lateOver16ms": 24,
-    "lateOver50ms": 6,
-    "lateOver100ms": 3
+    "ticks": 791,
+    "maxLateMs": 88.91125,
+    "lateOver16ms": 64,
+    "lateOver50ms": 8,
+    "lateOver100ms": 0
    },
    "clientTransport": {
     "state": "STARTED",
@@ -1019,7 +1028,7 @@
       "unackedChars": 0
      },
      "enqueued": 3,
-     "acksSent": 10569,
+     "acksSent": 10725,
      "acksReceived": 3,
      "windowWaits": 0,
      "windowWaitMsTotal": 0,
@@ -1031,8 +1040,8 @@
      "maxUnackedChars": 2096,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 7545.764,
-     "binderSendUsMax": 21107.5
+     "binderSendUsAvg": 1506.458,
+     "binderSendUsMax": 4415.208
     }
    },
    "serverConnections": [
@@ -1065,10 +1074,10 @@
        },
        "enqueued": 20003,
        "acksSent": 3,
-       "acksReceived": 10569,
-       "windowWaits": 3894,
-       "windowWaitMsTotal": 5692.367635,
-       "windowWaitMsMax": 135.777333,
+       "acksReceived": 10725,
+       "windowWaits": 4003,
+       "windowWaitMsTotal": 9490.924055,
+       "windowWaitMsMax": 126.869791,
        "maxInFlightMessages": 8,
        "maxInFlightChars": 2096,
        "maxQueuedChars": 16645,
@@ -1076,15 +1085,15 @@
        "maxUnackedChars": 227,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 23.938,
-       "binderSendUsMax": 26966.042
+       "binderSendUsAvg": 51.621,
+       "binderSendUsMax": 85442.833
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 5493,
+    "pid": 5486,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -1093,7 +1102,7 @@
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-window-8x16384-1becd9",
+   "run": "stream-window-8x16384-ac287c",
    "args": {
     "chunks": 20000,
     "chunkChars": 64,
@@ -1104,10 +1113,10 @@
      "windowChars": 16384
     }
    },
-   "wallMs": 7349.169629,
+   "wallMs": 12893.771756,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5493,
+    "pid": 5486,
     "uid": 10209,
     "debuggable": true
    },
@@ -1117,8 +1126,11 @@
     "release": "15",
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
-   "logcatWarnings": [],
-   "driverSec": 8.9
+   "logcatWarnings": [
+    "09-29 07:40:51.470  1127  1136 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:40:54.656  1127  1136 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
+   ],
+   "driverSec": 14.5
   },
   "cancel-realtime": {
    "ok": true,
@@ -1138,21 +1150,21 @@
     "outOfOrder": 0,
     "stopReason": "CANCELLED",
     "error": null,
-    "firstChunkMs": 90.408166,
-    "totalMs": 1265.089334,
-    "chunksPerSec": 79.04580120347454,
+    "firstChunkMs": 39.199042,
+    "totalMs": 1020.671709,
+    "chunksPerSec": 97.97469560312855,
     "latency": {
      "n": 100,
-     "p50ms": 7.162917,
-     "p90ms": 65.111084,
-     "p99ms": 199.257833,
-     "maxms": 199.257833,
-     "meanms": 27.294429670000003,
-     "first10pctMeanMs": 44.602446,
-     "last10pctMeanMs": 3.6134543999999997
+     "p50ms": 6.040625,
+     "p90ms": 42.964166,
+     "p99ms": 71.784417,
+     "maxms": 71.784417,
+     "meanms": 14.98938785,
+     "first10pctMeanMs": 30.059337600000003,
+     "last10pctMeanMs": 3.450625
     }
    },
-   "cancelToStopMs": 7.325125,
+   "cancelToStopMs": 9.39175,
    "chunksAfterCancel": 0,
    "followUp": {
     "chunks": 5,
@@ -1161,18 +1173,18 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 9.014125,
-    "totalMs": 24.579834,
-    "chunksPerSec": 203.41878631076193,
+    "firstChunkMs": 6.426958,
+    "totalMs": 12.104541,
+    "chunksPerSec": 413.068120468178,
     "latency": {
      "n": 5,
-     "p50ms": 6.632166,
-     "p90ms": 20.071209,
-     "p99ms": 20.071209,
-     "maxms": 20.071209,
-     "meanms": 9.1185998,
-     "first10pctMeanMs": 5.613833,
-     "last10pctMeanMs": 20.071209
+     "p50ms": 5.654709,
+     "p90ms": 7.7145,
+     "p99ms": 7.7145,
+     "maxms": 7.7145,
+     "meanms": 5.65865,
+     "first10pctMeanMs": 3.2125,
+     "last10pctMeanMs": 7.7145
     }
    },
    "serverPromptOutcomes": {
@@ -1181,15 +1193,15 @@
    },
    "closeCause": "local(transport closed)",
    "scenario": "cancel",
-   "run": "cancel-realtime-0faff7",
+   "run": "cancel-realtime-ebc097",
    "args": {
     "intervalMs": 5,
     "cancelAfterChunks": 100
    },
-   "wallMs": 1565.983626,
+   "wallMs": 1784.343626,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5584,
+    "pid": 5586,
     "uid": 10209,
     "debuggable": true
    },
@@ -1200,7 +1212,7 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 3.1
+   "driverSec": 4.3
   },
   "cancel-peak-bp": {
    "ok": true,
@@ -1214,28 +1226,28 @@
     "cjk": false
    },
    "cancelled": {
-    "chunks": 551,
-    "chars": 17632,
+    "chunks": 383,
+    "chars": 12256,
     "maxChunkChars": 32,
     "outOfOrder": 0,
     "stopReason": "CANCELLED",
     "error": null,
-    "firstChunkMs": 267.64725,
-    "totalMs": 1963.126459,
-    "chunksPerSec": 280.67473568700956,
+    "firstChunkMs": 251.810167,
+    "totalMs": 1265.849084,
+    "chunksPerSec": 302.5637138273586,
     "latency": {
-     "n": 551,
-     "p50ms": 707.576417,
-     "p90ms": 896.174625,
-     "p99ms": 978.557167,
-     "maxms": 980.488084,
-     "meanms": 639.9289203557169,
-     "first10pctMeanMs": 139.13424856363636,
-     "last10pctMeanMs": 709.7444222545455
+     "n": 383,
+     "p50ms": 308.20375,
+     "p90ms": 526.950667,
+     "p99ms": 562.991083,
+     "maxms": 563.098542,
+     "meanms": 363.71134542558747,
+     "first10pctMeanMs": 154.9276272105263,
+     "last10pctMeanMs": 494.5259508684211
     }
    },
-   "cancelToStopMs": 736.292709,
-   "chunksAfterCancel": 351,
+   "cancelToStopMs": 508.960167,
+   "chunksAfterCancel": 183,
    "followUp": {
     "chunks": 5,
     "chars": 40,
@@ -1243,18 +1255,18 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 19.80575,
-    "totalMs": 38.424084,
-    "chunksPerSec": 130.12671948145857,
+    "firstChunkMs": 11.27525,
+    "totalMs": 20.323375,
+    "chunksPerSec": 246.02212969056566,
     "latency": {
      "n": 5,
-     "p50ms": 17.192709,
-     "p90ms": 20.125666,
-     "p99ms": 20.125666,
-     "maxms": 20.125666,
-     "meanms": 16.8421248,
-     "first10pctMeanMs": 10.948666,
-     "last10pctMeanMs": 20.125666
+     "p50ms": 8.853834,
+     "p90ms": 13.8665,
+     "p99ms": 13.8665,
+     "maxms": 13.8665,
+     "meanms": 10.292550199999999,
+     "first10pctMeanMs": 8.683,
+     "last10pctMeanMs": 13.8665
     }
    },
    "serverPromptOutcomes": {
@@ -1263,17 +1275,17 @@
    },
    "closeCause": "local(transport closed)",
    "scenario": "cancel",
-   "run": "cancel-peak-bp-74fbe1",
+   "run": "cancel-peak-bp-017400",
    "args": {
     "intervalMs": 0,
     "chunkChars": 32,
     "bp": true,
     "cancelAfterChunks": 200
    },
-   "wallMs": 3038.572502,
+   "wallMs": 1999.737917,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5645,
+    "pid": 5647,
     "uid": 10209,
     "debuggable": true
    },
@@ -1284,7 +1296,7 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 4.0
+   "driverSec": 4.5
   },
   "reconnect": {
    "ok": true,
@@ -1296,106 +1308,106 @@
     {
      "i": 0,
      "ok": true,
-     "ms": 243.323625
+     "ms": 766.292083
     },
     {
      "i": 1,
      "ok": true,
-     "ms": 149.93875
+     "ms": 322.089916
     },
     {
      "i": 2,
      "ok": true,
-     "ms": 421.524417
+     "ms": 90.045833
     },
     {
      "i": 3,
      "ok": true,
-     "ms": 65.843208
+     "ms": 195.925042
     },
     {
      "i": 4,
      "ok": true,
-     "ms": 223.687834
+     "ms": 110.367542
     },
     {
      "i": 5,
      "ok": true,
-     "ms": 140.270791
+     "ms": 295.910083
     },
     {
      "i": 6,
      "ok": true,
-     "ms": 41.47225
+     "ms": 172.47125
     },
     {
      "i": 7,
      "ok": true,
-     "ms": 67.151709
+     "ms": 91.323708
     },
     {
      "i": 8,
      "ok": true,
-     "ms": 66.303375
+     "ms": 104.670208
     },
     {
      "i": 9,
      "ok": true,
-     "ms": 71.355667
+     "ms": 56.346667
     },
     {
      "i": 10,
      "ok": true,
-     "ms": 39.603083
+     "ms": 63.20875
     },
     {
      "i": 11,
      "ok": true,
-     "ms": 48.077
+     "ms": 81.434958
     },
     {
      "i": 12,
      "ok": true,
-     "ms": 39.6075
+     "ms": 54.834125
     },
     {
      "i": 13,
      "ok": true,
-     "ms": 181.51875
+     "ms": 95.199375
     },
     {
      "i": 14,
      "ok": true,
-     "ms": 182.351542
+     "ms": 93.3665
     },
     {
      "i": 15,
      "ok": true,
-     "ms": 144.011042
+     "ms": 47.539084
     },
     {
      "i": 16,
      "ok": true,
-     "ms": 97.10375
+     "ms": 74.466333
     },
     {
      "i": 17,
      "ok": true,
-     "ms": 25.499708
+     "ms": 131.949084
     },
     {
      "i": 18,
      "ok": true,
-     "ms": 157.477042
+     "ms": 73.091708
     },
     {
      "i": 19,
      "ok": true,
-     "ms": 86.2925
+     "ms": 51.108917
     }
    ],
    "serverBefore": {
-    "pid": 5019,
+    "pid": 4866,
     "connectionsOpen": 0,
     "connectionsOpened": 9,
     "connectionsClosed": 9,
@@ -1406,12 +1418,12 @@
      "cancelled": 2,
      "end_turn": 9
     },
-    "threads": 27,
-    "pssKb": 28805,
+    "threads": 33,
+    "pssKb": 28670,
     "mainThreadBinderCalls": 0
    },
    "serverAfter": {
-    "pid": 5019,
+    "pid": 4866,
     "connectionsOpen": 0,
     "connectionsOpened": 29,
     "connectionsClosed": 29,
@@ -1422,12 +1434,12 @@
      "cancelled": 2,
      "end_turn": 29
     },
-    "threads": 27,
-    "pssKb": 29314,
+    "threads": 33,
+    "pssKb": 28908,
     "mainThreadBinderCalls": 0
    },
    "client": {
-    "pid": 5731,
+    "pid": 5726,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -1435,14 +1447,109 @@
     "threads": 31
    },
    "scenario": "reconnect",
-   "run": "reconnect-87da5c",
+   "run": "reconnect-0b5405",
    "args": {
     "iterations": 20
    },
-   "wallMs": 2858.192793,
+   "wallMs": 3614.801752,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5731,
+    "pid": 5726,
+    "uid": 10209,
+    "debuggable": true
+   },
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 35,
+    "release": "15",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
+   },
+   "logcatWarnings": [],
+   "driverSec": 5.3
+  },
+  "reconnect-noclose": {
+   "ok": true,
+   "noLeak": true,
+   "iterations": 5,
+   "okCount": 5,
+   "closeFirst": false,
+   "iters": [
+    {
+     "i": 0,
+     "ok": true,
+     "ms": 1074.788917
+    },
+    {
+     "i": 1,
+     "ok": true,
+     "ms": 202.112334
+    },
+    {
+     "i": 2,
+     "ok": true,
+     "ms": 61.2145
+    },
+    {
+     "i": 3,
+     "ok": true,
+     "ms": 141.269208
+    },
+    {
+     "i": 4,
+     "ok": true,
+     "ms": 109.678125
+    }
+   ],
+   "serverBefore": {
+    "pid": 4866,
+    "connectionsOpen": 0,
+    "connectionsOpened": 29,
+    "connectionsClosed": 29,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 2,
+     "end_turn": 29
+    },
+    "threads": 33,
+    "pssKb": 28972,
+    "mainThreadBinderCalls": 0
+   },
+   "serverAfter": {
+    "pid": 4866,
+    "connectionsOpen": 0,
+    "connectionsOpened": 34,
+    "connectionsClosed": 34,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 2,
+     "end_turn": 34
+    },
+    "threads": 33,
+    "pssKb": 28992,
+    "mainThreadBinderCalls": 0
+   },
+   "client": {
+    "pid": 5795,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 32
+   },
+   "scenario": "reconnect",
+   "run": "reconnect-noclose-f0a98f",
+   "args": {
+    "iterations": 5,
+    "closeFirst": false
+   },
+   "wallMs": 2355.000418,
+   "runner": {
+    "package": "org.agentos.test.acp.client",
+    "pid": 5795,
     "uid": 10209,
     "debuggable": true
    },
@@ -1455,116 +1562,19 @@
    "logcatWarnings": [],
    "driverSec": 4.2
   },
-  "reconnect-noclose": {
-   "ok": true,
-   "noLeak": true,
-   "iterations": 5,
-   "okCount": 5,
-   "closeFirst": false,
-   "iters": [
-    {
-     "i": 0,
-     "ok": true,
-     "ms": 424.332084
-    },
-    {
-     "i": 1,
-     "ok": true,
-     "ms": 59.15475
-    },
-    {
-     "i": 2,
-     "ok": true,
-     "ms": 196.602917
-    },
-    {
-     "i": 3,
-     "ok": true,
-     "ms": 599.82675
-    },
-    {
-     "i": 4,
-     "ok": true,
-     "ms": 234.546208
-    }
-   ],
-   "serverBefore": {
-    "pid": 5019,
-    "connectionsOpen": 0,
-    "connectionsOpened": 29,
-    "connectionsClosed": 29,
-    "liveChannels": 0,
-    "hostJobChildren": 0,
-    "promptsActive": 0,
-    "promptOutcomes": {
-     "cancelled": 2,
-     "end_turn": 29
-    },
-    "threads": 28,
-    "pssKb": 28852,
-    "mainThreadBinderCalls": 0
-   },
-   "serverAfter": {
-    "pid": 5019,
-    "connectionsOpen": 0,
-    "connectionsOpened": 34,
-    "connectionsClosed": 34,
-    "liveChannels": 0,
-    "hostJobChildren": 0,
-    "promptsActive": 0,
-    "promptOutcomes": {
-     "cancelled": 2,
-     "end_turn": 34
-    },
-    "threads": 28,
-    "pssKb": 29394,
-    "mainThreadBinderCalls": 0
-   },
-   "client": {
-    "pid": 5800,
-    "liveChannels": 0,
-    "mainThreadBinderCalls": 0,
-    "closeNotifyRetries": 0,
-    "ackRetries": 0,
-    "threads": 31
-   },
-   "scenario": "reconnect",
-   "run": "reconnect-noclose-968b20",
-   "args": {
-    "iterations": 5,
-    "closeFirst": false
-   },
-   "wallMs": 1759.874292,
-   "runner": {
-    "package": "org.agentos.test.acp.client",
-    "pid": 5800,
-    "uid": 10209,
-    "debuggable": true
-   },
-   "device": {
-    "model": "sdk_gphone64_arm64",
-    "sdk": 35,
-    "release": "15",
-    "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
-   },
-   "logcatWarnings": [
-    "09-29 06:45:33.458  1070  1923 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
-   ],
-   "driverSec": 3.2
-  },
   "server-kill": {
    "ok": true,
-   "killedAfterChunks": 54,
+   "killedAfterChunks": 52,
    "closeCause": "peer_died(peer died)",
-   "detectMs": 178.072917,
+   "detectMs": 161.4145,
    "promptError": {
     "class": "java.util.concurrent.CancellationException",
     "message": "Protocol closed"
    },
-   "promptEndMs": 183.871334,
+   "promptEndMs": 164.269542,
    "promptHung": false,
-   "serviceRestartMs": 1378.255834,
-   "recoveredMs": 1705.654168,
+   "serviceRestartMs": 1425.722251,
+   "recoveredMs": 1613.449209,
    "afterRestartPrompt": {
     "chunks": 5,
     "chars": 40,
@@ -1572,23 +1582,23 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 50.289708,
-    "totalMs": 95.613417,
-    "chunksPerSec": 52.293916030634065,
+    "firstChunkMs": 31.326292,
+    "totalMs": 38.946,
+    "chunksPerSec": 128.38288912853693,
     "latency": {
      "n": 5,
-     "p50ms": 11.93225,
-     "p90ms": 33.050041,
-     "p99ms": 33.050041,
-     "maxms": 33.050041,
-     "meanms": 16.912158,
-     "first10pctMeanMs": 21.25425,
-     "last10pctMeanMs": 33.050041
+     "p50ms": 3.924125,
+     "p90ms": 6.59725,
+     "p99ms": 6.59725,
+     "maxms": 6.59725,
+     "meanms": 4.4461084,
+     "first10pctMeanMs": 6.59725,
+     "last10pctMeanMs": 3.145291
     }
    },
-   "clientLiveChannelsAfterDeath": 0,
+   "clientLiveChannelsAfterDeath": 1,
    "serverBefore": {
-    "pid": 5019,
+    "pid": 4866,
     "connectionsOpen": 0,
     "connectionsOpened": 34,
     "connectionsClosed": 34,
@@ -1599,12 +1609,12 @@
      "cancelled": 2,
      "end_turn": 34
     },
-    "threads": 28,
-    "pssKb": 28920,
+    "threads": 33,
+    "pssKb": 29083,
     "mainThreadBinderCalls": 0
    },
    "serverAfter": {
-    "pid": 5905,
+    "pid": 5898,
     "connectionsOpen": 0,
     "connectionsOpened": 1,
     "connectionsClosed": 1,
@@ -1614,12 +1624,12 @@
     "promptOutcomes": {
      "end_turn": 1
     },
-    "threads": 18,
-    "pssKb": 27632,
+    "threads": 17,
+    "pssKb": 26872,
     "mainThreadBinderCalls": 0
    },
    "client": {
-    "pid": 5863,
+    "pid": 5859,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -1627,14 +1637,14 @@
     "threads": 28
    },
    "scenario": "server-kill",
-   "run": "server-kill-85aa13",
+   "run": "server-kill-a83b2a",
    "args": {
     "killAfterChunks": 50
    },
-   "wallMs": 3517.41971,
+   "wallMs": 4165.606127,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 5863,
+    "pid": 5859,
     "uid": 10209,
     "debuggable": true
    },
@@ -1644,32 +1654,30 @@
     "release": "15",
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
-   "logcatWarnings": [
-    "09-29 06:45:39.424  1070  2206 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
-   ],
-   "driverSec": 5.2
+   "logcatWarnings": [],
+   "driverSec": 5.7
   },
   "client-kill": {
    "ok": true,
-   "detectMs": 17.661667,
+   "detectMs": 55.251667,
    "closes": [
     {
      "id": 2,
      "peerUid": 10209,
      "cause": "peer_died(peer died)",
-     "aliveMs": 636,
-     "closedAtNs": 621695761962
+     "aliveMs": 1793,
+     "closedAtNs": 371811147302
     }
    ],
    "dying": {
     "scenario": "client-kill",
     "phase": "dying",
-    "pid": 5949,
-    "dyingAtNs": 621678100295,
+    "pid": 5942,
+    "dyingAtNs": 371755895635,
     "chunks": 50
    },
    "server": {
-    "pid": 5905,
+    "pid": 5898,
     "connectionsOpen": 0,
     "liveChannels": 0,
     "hostJobChildren": 0,
@@ -1679,12 +1687,12 @@
      "end_turn": 1
     },
     "threads": 20,
-    "pssKb": 28154
+    "pssKb": 27559
    },
-   "clientPidBefore": 5949,
-   "clientPidAfter": 6000,
+   "clientPidBefore": 5942,
+   "clientPidAfter": 6017,
    "statsPolls": 1,
-   "driverSec": 5.6
+   "driverSec": 10.7
   },
   "oversize": {
    "maxMessageChars": 65536,
@@ -1694,7 +1702,7 @@
      "class": "com.agentclientprotocol.protocol.JsonRpcException",
      "message": "binder-channel-v1: message of 66654 chars exceeds 65536"
     },
-    "ms": 51.474583
+    "ms": 102.319916
    },
    "B_nearLimitPrompt": {
     "ok": true,
@@ -1705,18 +1713,18 @@
      "outOfOrder": 0,
      "stopReason": "END_TURN",
      "error": null,
-     "firstChunkMs": 96.184416,
-     "totalMs": 699.091417,
-     "chunksPerSec": 28.60856178985244,
+     "firstChunkMs": 96.8805,
+     "totalMs": 875.788042,
+     "chunksPerSec": 22.836575793301364,
      "latency": {
       "n": 20,
-      "p50ms": 10.769459,
-      "p90ms": 51.236459,
-      "p99ms": 57.679541,
-      "maxms": 57.679541,
-      "meanms": 17.300848,
-      "first10pctMeanMs": 43.4643745,
-      "last10pctMeanMs": 4.7031665
+      "p50ms": 15.436458,
+      "p90ms": 66.611542,
+      "p99ms": 103.95625,
+      "maxms": 103.95625,
+      "meanms": 20.9373626,
+      "first10pctMeanMs": 26.6448545,
+      "last10pctMeanMs": 5.485479
      }
     }
    },
@@ -1732,18 +1740,18 @@
      "outOfOrder": 0,
      "stopReason": "END_TURN",
      "error": null,
-     "firstChunkMs": 15.876333,
-     "totalMs": 45.185917,
-     "chunksPerSec": 66.3923673386998,
+     "firstChunkMs": 18.871958,
+     "totalMs": 39.537708,
+     "chunksPerSec": 75.87693247165465,
      "latency": {
       "n": 3,
-      "p50ms": 12.517875,
-      "p90ms": 12.765959,
-      "p99ms": 12.765959,
-      "maxms": 12.765959,
-      "meanms": 11.012389,
-      "first10pctMeanMs": 7.753333,
-      "last10pctMeanMs": 12.517875
+      "p50ms": 22.50725,
+      "p90ms": 22.740042,
+      "p99ms": 22.740042,
+      "maxms": 22.740042,
+      "meanms": 17.28668066666667,
+      "first10pctMeanMs": 6.61275,
+      "last10pctMeanMs": 22.50725
      }
     },
     "serverDroppedTooLarge": 1
@@ -1751,16 +1759,16 @@
    "D_rawOversizeInjection": {
     "ok": true,
     "closeCause": "remote(message of 65537 chars exceeds 65536)",
-    "ms": 19.904458
+    "ms": 84.713125
    },
    "ok": true,
    "scenario": "oversize",
-   "run": "oversize-355c15",
+   "run": "oversize-7e6e1e",
    "args": {},
-   "wallMs": 1782.011959,
+   "wallMs": 1737.645917,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 6047,
+    "pid": 6065,
     "uid": 10209,
     "debuggable": true
    },
@@ -1771,11 +1779,11 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 2.8
+   "driverSec": 2.9
   },
   "window-violation": {
    "ok": true,
-   "injected": 9,
+   "injected": 8,
    "units": 30000,
    "sendError": {
     "class": "android.os.DeadObjectException",
@@ -1783,15 +1791,15 @@
    },
    "closeCause": "remote(window exceeded: 2 messages / 60000 chars unacked)",
    "scenario": "window-violation",
-   "run": "window-violation-670da2",
+   "run": "window-violation-cb2273",
    "args": {
     "units": 30000,
     "n": 200
    },
-   "wallMs": 690.164042,
+   "wallMs": 1479.866126,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 6120,
+    "pid": 6121,
     "uid": 10209,
     "debuggable": true
    },
@@ -1802,11 +1810,11 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [
-    "09-29 06:45:50.594  6120  6142 E IPCThreadState: Process seems to be sending too many oneway calls.",
-    "09-29 06:45:50.594  6120  6142 W oneway spamming: CallStack::logStackInternal not linked",
-    "09-29 06:45:50.594  6120  6142 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 60084)"
+    "09-29 07:41:41.175  6121  6144 E IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 07:41:41.175  6121  6144 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 07:41:41.175  6121  6144 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 60084)"
    ],
-   "driverSec": 2.1
+   "driverSec": 3.8
   },
   "stream-noflow": {
    "ok": true,
@@ -1839,26 +1847,26 @@
     "outOfOrder": 0,
     "stopReason": "END_TURN",
     "error": null,
-    "firstChunkMs": 53.574792,
-    "totalMs": 6821.70067,
-    "chunksPerSec": 732.9550564991296,
+    "firstChunkMs": 298.697584,
+    "totalMs": 12653.076006,
+    "chunksPerSec": 395.16082868932705,
     "latency": {
      "n": 5000,
-     "p50ms": 3395.012793,
-     "p90ms": 3879.629876,
-     "p99ms": 3959.640252,
-     "maxms": 3972.108335,
-     "meanms": 2732.9178227314,
-     "first10pctMeanMs": 666.1139045240001,
-     "last10pctMeanMs": 3803.361316422
+     "p50ms": 6952.438587,
+     "p90ms": 8819.600338,
+     "p99ms": 8929.999837,
+     "maxms": 8951.573713,
+     "meanms": 5833.0628334938,
+     "first10pctMeanMs": 282.692260264,
+     "last10pctMeanMs": 8539.251383792
     }
    },
    "mainThread": {
-    "ticks": 390,
-    "maxLateMs": 182.267541,
-    "lateOver16ms": 41,
-    "lateOver50ms": 6,
-    "lateOver100ms": 2
+    "ticks": 574,
+    "maxLateMs": 293.872833,
+    "lateOver16ms": 110,
+    "lateOver50ms": 26,
+    "lateOver100ms": 9
    },
    "clientTransport": {
     "state": "STARTED",
@@ -1885,7 +1893,7 @@
       "unackedChars": 0
      },
      "enqueued": 3,
-     "acksSent": 629,
+     "acksSent": 638,
      "acksReceived": 3,
      "windowWaits": 0,
      "windowWaitMsTotal": 0,
@@ -1893,12 +1901,12 @@
      "maxInFlightMessages": 1,
      "maxInFlightChars": 227,
      "maxQueuedChars": 227,
-     "maxUnackedMessages": 3814,
-     "maxUnackedChars": 995454,
+     "maxUnackedMessages": 3584,
+     "maxUnackedChars": 935424,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 2083.611,
-     "binderSendUsMax": 3839.375
+     "binderSendUsAvg": 2431.069,
+     "binderSendUsMax": 3378.5
     }
    },
    "serverConnections": [
@@ -1931,26 +1939,26 @@
        },
        "enqueued": 5003,
        "acksSent": 3,
-       "acksReceived": 629,
+       "acksReceived": 638,
        "windowWaits": 0,
        "windowWaitMsTotal": 0,
        "windowWaitMsMax": 0,
-       "maxInFlightMessages": 3861,
-       "maxInFlightChars": 1007519,
-       "maxQueuedChars": 115943,
+       "maxInFlightMessages": 3600,
+       "maxInFlightChars": 939600,
+       "maxQueuedChars": 39933,
        "maxUnackedMessages": 1,
        "maxUnackedChars": 227,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 141.638,
-       "binderSendUsMax": 98186.917
+       "binderSendUsAvg": 83.563,
+       "binderSendUsMax": 67646.25
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 6171,
+    "pid": 6181,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -1959,7 +1967,7 @@
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-noflow-567628",
+   "run": "stream-noflow-281d0c",
    "args": {
     "chunks": 5000,
     "chunkChars": 64,
@@ -1969,10 +1977,10 @@
      "enforceInboundLimits": false
     }
    },
-   "wallMs": 7212.850212,
+   "wallMs": 13141.306673,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 6171,
+    "pid": 6181,
     "uid": 10209,
     "debuggable": true
    },
@@ -1983,9 +1991,10 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys"
    },
    "logcatWarnings": [
-    "09-29 06:45:54.513  1070  2206 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
+    "09-29 07:41:52.497  1127  2483 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl",
+    "09-29 07:41:55.520  1127  2483 I ChimeraSrvcProxy: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl"
    ],
-   "driverSec": 8.6,
+   "driverSec": 15.2,
    "deliveredAll": true
   }
  }
