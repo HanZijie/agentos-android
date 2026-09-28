@@ -41,6 +41,8 @@ def sdk_cases():
         ("handshake", c, "handshake", {}, 60, "check"),
         ("stream-realtime", c, "stream", {"chunks": 500, "chunkChars": 16, "intervalMs": 10}, 120, "check"),
         ("stream-peak-bp", c, "stream", {"chunks": 20000, "chunkChars": 64, "intervalMs": 0, "bp": True}, 180, "check"),
+        # 与 spikes/S3 的 stream-peak-bp 参数相同（每条 32 字符），用来对比 SDK 化前后的吞吐
+        ("stream-peak32-bp", c, "stream", {"chunks": 20000, "chunkChars": 32, "intervalMs": 0, "bp": True}, 180, "check"),
         ("stream-bigchunks-bp", c, "stream",
          {"chunks": 500, "chunkChars": 16000, "intervalMs": 0, "bp": True, "bpChars": 65536}, 180, "check"),
         ("stream-cjk-bp", c, "stream", {"chunks": 5000, "chunkChars": 64, "intervalMs": 0, "bp": True, "cjk": True}, 180, "check"),
