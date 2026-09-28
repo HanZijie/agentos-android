@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentos.org/schemas/acp-extensions/v1.json",
+  "title": "AgentOS ACP Profile v1 — extensions",
+  "description": "AgentOS 在 ACP v1 之上的扩展数据（core/protocol/acp-profile-v1.md、acp-mapping.md 第 5 节）。所有扩展数据都放在标准对象的 `_meta` 里，键名固定为 \"org.agentos\"；不在标准对象根上加字段，不改变标准方法的含义。扩展在 initialize 时协商：服务端在响应里声明支持的扩展，客户端在请求里声明要用的；没协商就使用扩展的请求返回 -32602（agentosCode = invalid_params），不静默降级。状态：sessionAutoSelect v1 在 W4 冻结；持久化提交与增量恢复在 W10 追加（名字已保留，见 reservedExtensions）。实现：core/runtime/.../acp/ProfileExtensions.kt。",
+  "$comment": "只追加：已冻结的字段不改名、不改类型；新增字段必须是可选的。",
+
+  "$defs": {
+    "extensionName": {
+      "description": "扩展名。v1 只有 sessionAutoSelect。",
+      "type": "string",
+      "enum": ["sessionAutoSelect"]
+    },
+
+    "initializeRequestMeta": {
+      "description": "initialize 请求的 _meta：客户端声明要用的扩展。服务端只记下它支持的；不认识的名字忽略。",
+      "type": "object",
+      "properties": {
+        "org.agentos": {
+          "type": "object",
+          "properties": {
+            "extensions": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    },
+
+    "initializeResponseMeta": {
+      "description": "initialize 响应的 _meta：Profile 版本、运行时版本、安全等级、支持的扩展及其版本。",
+      "type": "object",
+      "required": ["org.agentos"],
+      "properties": {
+        "org.agentos": {
+          "type": "object",
+          "required": ["profile", "runtime", "securityLevel", "extensions"],
+          "properties": {
+            "profile": { "description": "AgentOS Profile 版本，与 ACP protocolVersion 独立。", "const": 1 },
+            "runtime": { "description": "运行时版本（AgentOS App 的 versionName）。", "type": "string" },
+            "securityLevel": {
+              "description": "architecture 原则 6：设备已 root，安全等级固定为 best_effort，如实告知。",
+              "const": "best_effort"
+            },
+            "extensions": {
+              "type": "object",
+              "properties": {
+                "sessionAutoSelect": {
+                  "type": "object",
+                  "required": ["version"],
+                  "properties": { "version": { "const": 1 } }
+                }
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": ["version"],
+                "properties": { "version": { "type": "integer", "minimum": 1 } }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "sessionNewRequestMeta": {
+      "description": "sessionAutoSelect：session/new 请求的 _meta。带上 autoSelect 时，服务端在调用方自己的会话里选一个与 query 最相关的继续，或者新建一个（core/contracts/session-selection.md），并在响应的 sessionId 里返回；选中的可能是已有会话。没有 autoSelect 时是标准的新建会话。",
+      "type": "object",
+      "properties": {
+        "org.agentos": {
+          "type": "object",
+          "properties": {
+            "autoSelect": {
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": {
+                  "description": "用来选会话的问题，通常就是接下来要发的 prompt 文字。",
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "selection": {
+      "description": "自动选会话的结果。",
+      "type": "object",
+      "required": ["sessionId", "created", "method"],
+      "properties": {
+        "sessionId": { "type": "string", "pattern": "^ses_[0-9A-Z]{26}$" },
+        "created": { "description": "true：新建的会话；false：选中了已有会话。", "type": "boolean" },
+        "method": {
+          "description": "jev：由 Jev 选出（含 Jev 选择新建）；no_candidates：调用方没有候选会话，直接新建；fallback_new_session：选择失败，回退为新建。",
+          "type": "string",
+          "enum": ["jev", "no_candidates", "fallback_new_session"]
+        },
+        "fallbackReason": {
+          "description": "只在 method = fallback_new_session 时出现，取值见 session-selection.md 第 4 节（如 jev_unconfigured、jev_timeout、jev_invalid_choice、selected_session_unavailable）。仅供诊断，客户端不应依赖具体取值。",
+          "type": "string"
+        }
+      }
+    },
+
+    "selectionNotificationMeta": {
+      "description": "sessionAutoSelect：session/new 返回之后，服务端对这个会话发一条 session/update（sessionUpdate = session_info_update），在它的 _meta 里告知选择结果。普通字段（title 等）为空；没协商扩展的客户端不会收到它（它们无法触发自动选会话）。",
+      "type": "object",
+      "required": ["org.agentos"],
+      "properties": {
+        "org.agentos": {
+          "type": "object",
+          "required": ["selection"],
+          "properties": { "selection": { "$ref": "#/$defs/selection" } }
+        }
+      }
+    },
+
+    "promptResponseMeta": {
+      "description": "session/prompt 响应的 _meta：本轮对应的任务 ID（诊断用；W10 的恢复扩展会用它）。对所有客户端都返回，普通客户端忽略即可。",
+      "type": "object",
+      "properties": {
+        "org.agentos": {
+          "type": "object",
+          "required": ["taskId"],
+          "properties": { "taskId": { "type": "string", "pattern": "^tsk_[0-9A-Z]{26}$" } }
+        }
+      }
+    },
+
+    "errorData": {
+      "description": "JSON-RPC 错误的 data（core/contracts/errors.md 第 5 节）。标准码与 ACP 定义的码沿用 SDK 的值，AgentOS 自己的码占用 -32040 至 -32059；一轮 prompt 因模型或任务错误失败时 code = -32051。",
+      "type": "object",
+      "required": ["agentosCode", "retryable"],
+      "properties": {
+        "agentosCode": { "description": "errors.md 第 3 节的错误码。", "type": "string", "pattern": "^[a-z][a-z_]*$" },
+        "retryable": { "type": "boolean" },
+        "sessionId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "details": { "type": "object" }
+      }
+    }
+  },
+
+  "reservedExtensions": {
+    "$comment": "W10 冻结方法名和字段；名字先保留，本版本不声明、不接受。",
+    "durableSubmit": "持久化提交：客户端提交标识 + 服务端持久化回执，重复提交关联到同一逻辑输入（Profile：持久化提交与安全重试）",
+    "incrementalRecovery": "增量恢复：客户端报告事件位置（sequence），服务端补发缺失事件；约定顺序、重复、保留期限和游标失效（cursor_too_old）"
+  }
+}

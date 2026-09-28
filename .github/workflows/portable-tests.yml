@@ -95,6 +95,10 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
+      # Gradle 配置全部项目时 AGP 需要 Android SDK
+      - uses: android-actions/setup-android@v3
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+
       - uses: gradle/actions/setup-gradle@v4
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
 
@@ -109,6 +113,10 @@ jobs:
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         working-directory: tests/acp-conformance
         run: npm ci
+
+      - name: 构建电脑端 Agent 进程的类路径
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        run: ./gradlew --stacktrace :core:runtime:acpConformanceClasspath -Pagentos.skipPiBundle=true
 
       - name: 一致性测试
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''

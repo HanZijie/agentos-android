@@ -124,6 +124,16 @@ paused     --用户放弃结果未知的任务----------------> queued | created
 
 **safe mode**（F13、W11）：不接受新任务（`safe_mode`），也不启动排队的任务（包括恢复出来的）；safe mode 结束后照常调度。
 
+**用户主动停止**（S2 监督契约 a 第 6 条）：W6 在进程启动时根据 `ApplicationExitInfo` 判断上一个 `:agent` 是否被用户主动停止（`REASON_USER_REQUESTED` / `REASON_USER_STOPPED`），经 `HostPort.environment.previousExitStoppedByUser` 告诉运行时。为 true 时，恢复流程把排队的任务取消（`task.cancel_requested { by: user_stop, phase: queued }`、`task.cancelled`），不继续、不计入 runState，运行时不会因为它们进入前台；运行中、取消中的任务照常标记为结果未知（本来就不重放）。`runtime.recovered` 记录 `userStopped` 和取消的条数。
+
+### 7.1 启动与恢复期间的请求
+
+W6 在 `:agent` 进程启动时调用 `AgentRuntime.start()`（打开 Store、恢复流程、启动调度器），同时 ACP 连接可能已经到达：
+
+- `serveAcp` 立即返回，不挂起、不做 I/O，可以在 `start()` 完成之前调用（acp-mapping.md 第 1 节）。`initialize` 不需要 Store，立即应答；`session/new`、`session/prompt` 等在运行时的协程里等 `start()` 完成，不会失败。
+- **收到即计数**：`session/new`、自动选会话和 `session/prompt` 从收到的那一刻起就计入 `runState.queuedTasks`，直到调度器接手（任务持久化后由调度器自己的计数接替）。恢复期间收到的 prompt 同样在收到时计入，不等恢复结束。两段计数的交接只会短暂地多计，不会出现空档，所以 W6 按 `activeTasks + queuedTasks` 做的空闲判断不会在“收到 prompt、还没开始跑”之间让出前台。
+- `start()` 失败时，这些等待中的请求以同一个异常结束。
+
 ## 8. 工具调用与“结果未知”
 
 Broker（`broker/CapabilityBroker`）处理 Pi 回到宿主层的每一次工具调用：
@@ -165,6 +175,9 @@ Broker（`broker/CapabilityBroker`）处理 Pi 回到宿主层的每一次工具
 | 排队取消、运行中取消 | `SchedulerTest.cancel stops a running prompt and removes queued ones` |
 | 执行超时 | `SchedulerTest.execution deadline cancels the turn…` |
 | 重启不重放结果未知的执行和工具调用 | `RecoveryTest`（两例） |
+| 用户主动停止后恢复出来的任务不继续、不计入 runState | `RuntimeStartTest.after a user stop…` |
+| 恢复期间收到的 prompt 在收到时计入 runState；收到到调度之间没有空档 | `RuntimeStartTest`（两例） |
+| `serveAcp` 在 `start()` 之前立即返回，之后连接照常工作 | `RuntimeStartTest.serveAcp returns immediately…` |
 | 泵故障后重建 | `SchedulerTest.a pump failure fences the task…` |
 | sequence 追加写、不留空洞、重开后继续 | `StoreTest` |
 | 目录外的工具被拒绝、先落盘再调用 | `CapabilityBrokerTest` |

@@ -29,6 +29,9 @@ dependencies {
     implementation(project(":sdk:acp-android"))
     implementation(project(":sdk:plugin-sdk"))
 
+    // W6 设备用例的 in-app 执行器（tests/device/acp-channel/inapp）：只进 debug 包，release 包里没有
+    debugImplementation(project(":tests:device:acp-channel:inapp"))
+
     testImplementation(libs.junit4)
 }
 

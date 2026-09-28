@@ -223,7 +223,7 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 
 | 接口 | 服务端 | 调用方 | 用途 |
 |---|---|---|---|
-| `IAgentControl` | `:agent` | 主进程 | BYOK 配置、设置、会话管理与审计、诊断信息、监督状态；注册确认界面回调，提交确认结果 |
+| `IAgentControl` | `:agent` | 主进程 | BYOK 配置、设置、会话管理与审计、诊断信息、监督状态；注册确认界面回调，提交确认结果。v1（W6）只有版本、运行状态、诊断、监督状态，返回 JSON；BYOK 与确认按版本在末尾追加 |
 | `IExtensionHost` | `:ext` | `:agent` | 取工具与 Skill 目录并订阅变化；工具调用与取消；读取 Skill；触发 Hook 事件并取回合并后的决定 |
 | `IExtensionCallback` | `:agent` | `:ext` | 目录变化、工具结果、连接状态 |
 
@@ -378,9 +378,9 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 
 ### F10 后装的 App 通过 ACP 调用 Agent
 
-1. 开发者在 App 里引入 `acp-android`，并在 Manifest 的 `<queries>` 里声明 AgentOS 的 ACP intent action。不需要声明任何权限，所以 App 和 AgentOS 谁先安装都不影响。
+1. 开发者在 App 里引入 `acp-android`，并在 Manifest 的 `<queries>` 里声明 AgentOS 的 ACP intent action（`org.agentos.intent.action.ACP`）。不需要声明任何权限，所以 App 和 AgentOS 谁先安装都不影响。
 2. SDK 找到 AgentOS，bind 上它的 ACP 服务，打开通道。运行时没在运行时，由系统按 bind 拉起。AgentOS 没装时，SDK 返回明确的“未安装”状态，由 App 自己决定如何提示用户。
-3. 运行时取 Binder 调用方 UID。首次调用时弹窗授权，结果记录下来，可以在设置页撤销。
+3. 运行时取 Binder 调用方 UID。首次调用时弹窗授权，结果记录下来，可以在设置页撤销。M1 只接受 AgentOS App 自己，其他调用方在 `open` 时被拒，原因码 `agentos.acp.not_open`（W25 起改为授权流程）。
 4. 之后就是标准 ACP：`initialize` → `session/new` → `session/prompt` → 接收 `session/update`。会话隔离、确认规则、限额按 5.3 执行。
 5. 调用方所在的 App 在后台也可以调用；它需要一直保持绑定，才能收到流式更新。
 
