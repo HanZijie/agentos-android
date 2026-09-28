@@ -124,7 +124,10 @@ internal class TaskRunner(
         suspend fun flush() {
             val p = pending ?: return
             pending = null
-            commit { tx -> tx.events.append(p.toEvent(sessionId, taskId)) }
+            // 一次到达的超长增量（> coalesceMaxChars）切成多条写入同一个事务，日志里的每条增量都不超过上限（events.md 6.3），
+            // 也就不会被 EventLog 的单条上限截断
+            val events = p.toEvents(sessionId, taskId, config.coalesceMaxChars)
+            commit { tx -> events.forEach(tx.events::append) }
         }
         while (true) {
             val item = if (pending != null) {
@@ -191,12 +194,26 @@ internal class TaskRunner(
         fun matches(e: AgentEvent.MessageUpdate) =
             e.update.kind == first.update.kind && e.update.contentIndex == first.update.contentIndex && e.role == first.role
 
-        fun toEvent(sessionId: String, taskId: String) =
-            PendingEvent.of(sessionId, taskId, first.copy(update = first.update.copy(delta = text.toString())))
+        fun toEvents(sessionId: String, taskId: String, maxChars: Int): List<PendingEvent> =
+            splitText(text.toString(), maxChars).map { PendingEvent.of(sessionId, taskId, first.copy(update = first.update.copy(delta = it))) }
     }
 
     companion object {
         private val COALESCED = setOf(AssistantUpdate.TEXT_DELTA, AssistantUpdate.THINKING_DELTA)
+
+        /** 按 [maxChars] 切分，不切开代理对。 */
+        internal fun splitText(text: String, maxChars: Int): List<String> {
+            if (text.length <= maxChars) return listOf(text)
+            val out = ArrayList<String>(text.length / maxChars + 1)
+            var start = 0
+            while (start < text.length) {
+                var end = minOf(start + maxChars, text.length)
+                if (end < text.length && end - start > 1 && Character.isHighSurrogate(text[end - 1])) end--
+                out += text.substring(start, end)
+                start = end
+            }
+            return out
+        }
 
         /** events.md 第 3 节：写入日志的 message_update 类型。 */
         val PERSISTED_UPDATES = setOf(
