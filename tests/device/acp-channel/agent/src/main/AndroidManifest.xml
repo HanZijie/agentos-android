@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="ACP test agent">
+
+        <!-- 与 AgentOS 的 AcpService 同形：导出，运行在 :agent 进程。测试 App 不做 UID 准入 -->
+        <service
+            android:name=".AcpService"
+            android:exported="true"
+            android:process=":agent" />
+
+        <!-- 探针：统计、调通道参数、自杀 -->
+        <service
+            android:name=".ProbeService"
+            android:exported="true"
+            android:process=":agent" />
+    </application>
+</manifest>
