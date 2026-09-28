@@ -140,6 +140,9 @@ class FakeHostPort(
 ) : HostPort {
     val activeModel = MutableStateFlow(model)
     val safeMode = MutableStateFlow(SafeModeState.OFF)
+
+    /** 模拟“上一个进程被用户主动停止”。 */
+    @Volatile var stoppedByUser: Boolean = false
     private val secretsByPrefix = credentials
 
     override val storage: StoragePort = object : StoragePort {
@@ -158,6 +161,7 @@ class FakeHostPort(
 
     override val environment: EnvironmentPort = object : EnvironmentPort {
         override val safeMode: StateFlow<SafeModeState> = this@FakeHostPort.safeMode
+        override val previousExitStoppedByUser: Boolean get() = this@FakeHostPort.stoppedByUser
     }
 
     fun deleteDatabase() {

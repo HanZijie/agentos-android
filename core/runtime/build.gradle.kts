@@ -49,3 +49,26 @@ tasks.named<Test>("test") {
         .withPropertyName("piBundle")
     mustRunAfter(":app:bundlePiAgent")
 }
+
+// lane A（W4）：ACP SDK 0.30.1 依赖 kotlin-logging，它在 JVM 上默认走 slf4j，而 slf4j 不在类路径上，
+// 第一次记日志就会 NoClassDefFoundError（S3 问题 2 的 JVM 版本）。电脑上的测试一律改走 java.util.logging。
+tasks.withType<Test>().configureEach {
+    systemProperty("kotlin-logging-to-jul", "true")
+}
+
+// lane A（W4）：tests/acp-conformance 启动电脑端 ACP Agent 进程（org.agentos.runtime.testing.AcpStdioAgent）要用的类路径。
+// 输出 build/acp-conformance/classpath.txt；npm test 在没有这个文件时会先调用本任务。
+val acpConformanceClasspath by tasks.registering {
+    group = "agentos"
+    description = "写出 ACP 一致性测试的电脑端 Agent 进程的类路径"
+    val classpath = sourceSets["testFixtures"].runtimeClasspath
+    val output = layout.buildDirectory.file("acp-conformance/classpath.txt")
+    inputs.files(classpath).withPropertyName("classpath")
+    outputs.file(output)
+    doLast {
+        output.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(classpath.files.joinToString(File.pathSeparator))
+        }
+    }
+}
