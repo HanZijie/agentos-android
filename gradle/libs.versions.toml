@@ -7,9 +7,12 @@
 #   - SQLite 驱动：W2 选定
 
 [versions]
-# Android 工具链：S3 第一部分验证过的组合（docs/spikes/S3.md）
+# Android 工具链。Kotlin 由 2.2.20 升到 2.3.20（整合人决定，2026-09-29）：
+# quickjs-kt 1.0.15 用 Kotlin 2.4.10 构建，2.2 编译器读不了它的元数据；1.0.5 遇到中文 + emoji 会挂住（docs/spikes/S8.md d）。
+# 2.3.20 + AGP 8.10.1 已由 S8（JVM、Android debug / R8 release）和整合时重跑的 S3 场景验证。
+# 最终版本随 S5（MCP Kotlin SDK 用 Kotlin 2.4 构建）一起定；升到 2.4 时一并评估 AGP。
 agp = "8.10.1"
-kotlin = "2.2.20"
+kotlin = "2.3.20"
 # 运行 Gradle 和编译用的 JDK；根 build.gradle.kts 会检查
 jdk = "21"
 # 产出的字节码版本（Java 与 Kotlin 一致）。ACP SDK 本身是 Java 8 字节码，D8 / R8 都能处理 17
