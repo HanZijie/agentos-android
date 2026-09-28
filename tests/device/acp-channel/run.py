@@ -3,8 +3,10 @@
 
 两套用例：
   sdk  W5 回归：测试 Agent App（:agent 进程）↔ 第三方身份的测试客户端，覆盖 sdk:binder-channel 和 sdk:acp-android。
-  app  W6 用例：AgentOS App 的 :agent（AcpService、AgentService、AgentControl）。通道用例由注入 debug 包的
+  app  W6 用例：AgentOS App 的 :agent（AcpService、AgentService、AgentControl）。宿主层是真正的 RuntimeEngine，
+       Agent core 在 B2 之前是 ScriptedAgentCore。通道用例由注入 debug 包的
        in-app 执行器以 AgentOS 自己的 UID 跑；"非本 App 的 UID 被拒"由测试客户端以第三方 UID 跑。
+       BYOK 用例的 key 是本脚本每次随机生成的测试 key，用例结束后在整个 logcat（-b all）和结果里搜它。
 
 用法（仓库根目录）：
   ./gradlew :tests:device:acp-channel:agent:assembleDebug :tests:device:acp-channel:client:assembleDebug
@@ -17,6 +19,7 @@
 import argparse
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -71,7 +74,8 @@ def app_cases():
         ("foreign-uid-rejected", c, "foreign-open", {}, 60, "check"),
         ("foreign-no-leak", a, "server-stats-clean", {}, 60, "check"),
         ("oversize", a, "oversize", {}, 120, "check"),
-        ("client-kill", a, "client-kill", {"killAfterChunks": 50}, 120, "check"),
+        # 连接断开不取消任务（F7）：用有限长的 prompt，客户端死后等任务自己结束
+        ("client-kill", a, "client-kill", {"killAfterChunks": 20, "chunks": 400, "intervalMs": 5}, 120, "check"),
         ("agent-kill-rebind", a, "server-kill", {"killAfterChunks": 50}, 120, "check"),
         # 其余通道行为
         ("stream-realtime", a, "stream", {"chunks": 300, "chunkChars": 16, "intervalMs": 10}, 120, "check"),
@@ -84,7 +88,31 @@ def app_cases():
         ("supervisor-start-idle", a, "supervisor-start", {"reason": "boot"}, 120, "check"),
         ("restart-exit-info", a, "restart-exit-info", {}, 120, "check"),
         ("control-foreign-rejected", c, "control-foreign", {}, 60, "check"),
+        # C3：用户主动停止后的恢复（previousExitStoppedByUser）、Store、BYOK
+        ("user-stop-recovery", a, "user-stop", {}, 180, "userstop"),
+        ("store-restart", a, "store-restart", {"fresh": True}, 180, "check"),
+        ("byok-roundtrip", a, "byok-roundtrip", {"apiKey": TEST_KEY}, 120, "byok"),
+        ("byok-restart", a, "byok-restart", {"apiKey": TEST_KEY}, 120, "byok"),
+        ("byok-clear", a, "byok-clear", {"apiKey": TEST_KEY}, 120, "byok"),
     ]
+
+
+# BYOK 用例的测试 key：每次运行随机生成，不是任何真实 key。args 里的占位符在运行时替换。
+TEST_KEY = "$TEST_KEY"
+
+
+def make_test_key():
+    return "agtest-" + secrets.token_urlsafe(36)
+
+
+def leak_scan(adb, key, result):
+    """在整个 logcat（所有缓冲区）和结果 JSON 里找 key 的全文或中段（中段不含掩码用的首尾 4 位）。"""
+    middle = key[4:-4]
+    out = adb.run("logcat", "-d", "-b", "all", "-v", "raw", check=False, timeout=120)
+    lines = [l for l in out.splitlines() if key in l or middle in l]
+    dumped = json.dumps(result, ensure_ascii=False)
+    return {"logcatLines": len(out.splitlines()), "logcatHits": len(lines),
+            "resultHits": int(key in dumped or middle in dumped)}
 
 
 class Adb:
@@ -164,22 +192,47 @@ def run_client_kill(adb, name, activity, args, timeout):
     dying = collect_result(adb, run_id, timeout, want_phase="dying")
     if dying is None:
         return {"ok": False, "error": "client did not reach dying phase"}
-    time.sleep(3)
-    stats = run_one(adb, name + "-check", activity, "server-stats", {}, 60)
-    if stats is None:
-        return {"ok": False, "error": "server-stats timed out", "dying": dying}
-    server = stats["server"]
-    closes = [c for c in server.get("recentCloses", []) if c.get("closedAtNs", 0) >= dying["dyingAtNs"]]
-    peer_died = [c for c in closes if c.get("cause", "").startswith("peer_died")]
-    detect_ms = (peer_died[0]["closedAtNs"] - dying["dyingAtNs"]) / 1e6 if peer_died else None
-    ok = bool(peer_died) and server.get("promptsActive") == 0 and server.get("liveChannels") == 0 \
-        and server.get("connectionsOpen") == 0
+    # 通道要很快关掉；任务不随连接取消（F7），要等它自己跑完，所以轮询到 promptsActive=0（最多 30 秒）
+    deadline = time.time() + 30
+    polls = 0
+    while True:
+        time.sleep(2 if polls == 0 else 1)
+        polls += 1
+        stats = run_one(adb, name + "-check", activity, "server-stats", {}, 60)
+        if stats is None:
+            return {"ok": False, "error": "server-stats timed out", "dying": dying}
+        server = stats["server"]
+        closes = [c for c in server.get("recentCloses", []) if c.get("closedAtNs", 0) >= dying["dyingAtNs"]]
+        peer_died = [c for c in closes if c.get("cause", "").startswith("peer_died")]
+        detect_ms = (peer_died[0]["closedAtNs"] - dying["dyingAtNs"]) / 1e6 if peer_died else None
+        ok = bool(peer_died) and server.get("promptsActive") == 0 and server.get("liveChannels") == 0 \
+            and server.get("connectionsOpen") == 0
+        if ok or time.time() > deadline:
+            break
     return {
         "ok": ok, "detectMs": detect_ms, "closes": closes, "dying": dying,
         "server": {k: server.get(k) for k in ("pid", "connectionsOpen", "liveChannels", "hostJobChildren",
                                               "promptsActive", "promptOutcomes", "threads", "pssKb")},
         "clientPidBefore": dying.get("pid"), "clientPidAfter": stats.get("client", {}).get("pid"),
+        "statsPolls": polls,
     }
+
+
+def run_user_stop(adb, name, activity, timeout):
+    """previousExitStoppedByUser：执行器布好两个运行中 + 一个排队的任务 → am force-stop → 新进程检查恢复结果。"""
+    run_id = f"{name}-{uuid.uuid4().hex[:6]}"
+    adb.run("logcat", "-c", check=False)
+    start(adb, activity, "user-stop-arm", {}, run_id)
+    armed = collect_result(adb, run_id, timeout, want_phase="armed")
+    if armed is None or not armed.get("armed"):
+        return {"ok": False, "error": "tasks were not armed", "armed": armed}
+    adb.sh(f"am force-stop {APP_PKG}", check=False)
+    time.sleep(2)
+    check = run_one(adb, name + "-check", activity, "user-stop-check", {"sessions": armed.get("sessions", [])}, timeout)
+    if check is None:
+        return {"ok": False, "error": "user-stop-check timed out", "armed": armed}
+    check["armed"] = armed
+    return check
 
 
 def summarize(name, r):
@@ -239,18 +292,28 @@ def main():
     print(json.dumps(device, ensure_ascii=False))
     only = set(a.only.split(",")) if a.only else None
     cases = sdk_cases() if a.suite == "sdk" else app_cases()
+    test_key = make_test_key()
     results, failed = {}, []
     for name, activity, scenario, args, timeout, kind in cases:
         if only and name not in only:
             continue
+        args = {k: (test_key if v == TEST_KEY else v) for k, v in args.items()}
         t0 = time.time()
         try:
             if scenario == "client-kill":
                 r = run_client_kill(adb, name, activity, args, timeout)
+            elif kind == "userstop":
+                r = run_user_stop(adb, name, activity, timeout)
             else:
                 r = run_one(adb, name, activity, scenario, args, timeout)
         except Exception as e:  # noqa: BLE001
             r = {"ok": False, "error": f"driver: {e}"}
+        if r is not None and kind == "byok":
+            leak = leak_scan(adb, test_key, r)
+            r["leakScan"] = leak
+            r["summary"] = f"{r.get('summary', '')} logcatHits={leak['logcatHits']}/{leak['logcatLines']} resultHits={leak['resultHits']}"
+            if leak["logcatHits"] or leak["resultHits"]:
+                r["ok"] = False
         if r is not None:
             r["driverSec"] = round(time.time() - t0, 1)
             if kind == "negative":
