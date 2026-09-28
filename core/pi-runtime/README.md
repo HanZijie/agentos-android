@@ -57,10 +57,11 @@ npm run test:quickjs      # 同一个 bundle 在 QuickJS（quickjs-kt-jvm）上�
 |---|---|---|
 | `ping` | — | `{protocol, apis}` |
 | `create` | `sid, model, systemPrompt?, tools?, messages?, thinkingLevel?` | `{sid, messages}`。传入保存的 `messages` 即恢复会话 |
-| `prompt` | `sid, text, images?` | Pi 的 `agent_end` 之后回复 `{stopReason, errorMessage?, text, messageCount, appended}`；`appended` 是本轮新增的消息，按顺序追加保存即可 |
-| `abort` | `sid` | `{}`；进行中的 `prompt` 随后以 `stopReason: "aborted"` 回复 |
+| `prompt` | `sid, text, images?` | Pi 的 `agent_end` 之后回复 `{stopReason, errorMessage?, text, usage?, messageCount, appended}`；`usage` 是最后一条 assistant 消息的 `usage`；`appended` 是本轮新增的消息，按顺序追加保存即可 |
+| `abort` | `sid` | `{}`；进行中的 `prompt` 随后以 `stopReason: "aborted"`（或工具执行中被打断时的 `"toolUse"`，见下文）回复 |
 | `setTools` | `sid, tools` | `{tools}`，下一次模型请求生效 |
 | `setModel` | `sid, model, thinkingLevel?` | `{}` |
+| `setSystemPrompt` | `sid, systemPrompt` | `{messageCount}`；追加一条 system 消息，替换 `agentos` 段。进行中的 `prompt` 期间调用会失败 |
 | `history` | `sid` | 完整消息数组，第一条是 `role: "system"` |
 | `dispose` | `sid` | `{disposed}` |
 | `stats` | — | `{sessions, inflightFetches, activeTimers}` |
@@ -68,6 +69,19 @@ npm run test:quickjs      # 同一个 bundle 在 QuickJS（quickjs-kt-jvm）上�
 `stopReason` 取 Pi 的值：`stop`、`toolUse`、`length`、`aborted`、`error`。
 
 `tools` 的每一项：`{name, description, parameters: <JSON Schema>, label?, executionMode?}`，默认顺序执行。
+
+### system prompt
+
+新会话的第一条消息是 `{role: "system", content: "", sections: {agentos: <systemPrompt>}, toolsAdded?}`：宿主的 prompt 放在名为 `agentos` 的段里，不放在 `content`。`setSystemPrompt` 追加一条只含 `agentos` 段的 system 消息；`pi-ai` 按段合并、后出现的值覆盖前面的，所以效果是替换而历史保持只追加。恢复会话时原样传回全部消息即可。
+
+### abort
+
+`abort` 触发 Pi 的 `AbortSignal`，并给正在执行的工具发 `tool_cancel`。会话用 `shouldStopAfterTurn: signal.aborted` 在下一个轮次边界结束，abort 之后不会再发模型请求：
+
+- 模型流式输出中 abort：最后一条 assistant 消息 `stopReason: "aborted"`；
+- 工具执行中 abort：最后一条 assistant 消息仍是 `stopReason: "toolUse"`，其后每个工具调用都有一条 `toolResult`（被打断的为 `isError: true`），不再有新的 assistant 消息。宿主据“abort 已请求”判定本轮为中止。
+
+Pi 0.86.1 在 abort 后仍会对已完成的工具调用 `afterToolCall`；`beforeToolCall` 拦截的调用不会再 `afterToolCall`。
 
 ### 事件
 
@@ -77,7 +91,7 @@ npm run test:quickjs      # 同一个 bundle 在 QuickJS（quickjs-kt-jvm）上�
 |---|---|
 | `agent_start`、`turn_start` | — |
 | `message_start` | `role` |
-| `message_update` | `role`，`update: {type, contentIndex, delta?, toolCall?, reason?}`；`type` 为 `text_delta`、`thinking_delta`、`toolcall_delta`、`toolcall_end` 等 |
+| `message_update` | `role`，`update: {type, contentIndex, delta?, toolCall?, reason?}`；`type` 为 `text_delta`、`thinking_delta`、`toolcall_end`、`done`、`error` |
 | `message_end` | `message`（完整消息） |
 | `tool_execution_start` | `toolCallId, toolName, args` |
 | `tool_execution_update` | `toolCallId, toolName, partialResult` |
@@ -85,7 +99,7 @@ npm run test:quickjs      # 同一个 bundle 在 QuickJS（quickjs-kt-jvm）上�
 | `turn_end` | `stopReason, errorMessage?, toolResults`（条数） |
 | `agent_end` | `messages`（条数） |
 
-`message_update` 只带增量，不带整条 partial message。
+`message_update` 只带增量，不带整条 partial message。不过桥的增量类型（信息已被 `message_start` / `message_end` / `toolcall_end` 覆盖，见 `core/contracts/events.md` 第 3 节）：`start`、`text_start`、`text_end`、`thinking_start`、`thinking_end`、`toolcall_start`、`toolcall_delta`。Kotlin 侧由 `org.agentos.runtime.pi.PiEventMapper` 映射为 `AgentEvent`。
 
 ### 宿主调用
 

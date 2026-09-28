@@ -4,6 +4,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.agentos.runtime.ports.Credential
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
@@ -17,8 +18,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class HostFetchTest {
+    private val NO_SECRETS = BaseUrlCredentials(emptyList())
     private lateinit var server: MockWebServer
-    private val key = ApiKey("sk-real-key-for-test")
+    private val key = Credential("sk-real-key-for-test")
     private val sleeps = mutableListOf<Long>()
 
     @BeforeTest
@@ -36,7 +38,7 @@ class HostFetchTest {
     private fun base(): String = "http://127.0.0.1:${server.port}/api"
 
     private fun fetch(retry: RetryPolicy = RetryPolicy.NONE, clock: () -> Long = System::currentTimeMillis) = HostFetch(
-        credentials = BaseUrlCredentials(listOf(BaseUrlCredentials.Entry(base(), key))),
+        secrets = BaseUrlCredentials(listOf(BaseUrlCredentials.Entry(base(), key))),
         retry = retry,
         clock = clock,
         sleep = { sleeps += it },
@@ -52,20 +54,20 @@ class HostFetchTest {
         val f = fetch()
         f.open(post("x-api-key" to PLACEHOLDER_API_KEY)).use { assertEquals(200, it.status) }
         f.open(post("Authorization" to "Bearer $PLACEHOLDER_API_KEY")).use { assertEquals(200, it.status) }
-        assertEquals(key.secret, server.takeRequest().getHeader("x-api-key"))
+        assertEquals(key.reveal(), server.takeRequest().getHeader("x-api-key"))
         val second = server.takeRequest()
-        assertEquals("Bearer ${key.secret}", second.getHeader("Authorization"))
+        assertEquals("Bearer ${key.reveal()}", second.getHeader("Authorization"))
         assertEquals("""{"x":1}""", second.body.readUtf8())
     }
 
     @Test
     fun `no request is sent when no key is configured for the endpoint`() = runBlocking<Unit> {
-        val f = HostFetch(credentials = { null })
+        val f = HostFetch(NO_SECRETS)
         val e = assertFailsWith<HostFetchException> { f.open(post("x-api-key" to PLACEHOLDER_API_KEY)) }
         assertEquals(NetErrorKind.NO_CREDENTIAL, e.kind)
         assertEquals(false, e.retryable)
         assertEquals(0, server.requestCount)
-        assertTrue(key.secret !in e.message.orEmpty())
+        assertTrue(key.reveal() !in e.message.orEmpty())
     }
 
     @Test
@@ -78,7 +80,7 @@ class HostFetchTest {
     @Test
     fun `requests without the placeholder need no key`() = runBlocking<Unit> {
         server.enqueue(MockResponse().setBody("ok"))
-        HostFetch(credentials = { null }).open(post()).use { assertEquals(200, it.status) }
+        HostFetch(NO_SECRETS).open(post()).use { assertEquals(200, it.status) }
         assertNull(server.takeRequest().getHeader("x-api-key"))
     }
 
@@ -107,7 +109,7 @@ class HostFetchTest {
 
     @Test
     fun `cleartext http is refused except to loopback`() = runBlocking<Unit> {
-        val e = assertFailsWith<HostFetchException> { HostFetch(credentials = { null }).open(FetchRequest("http://example.com/v1")) }
+        val e = assertFailsWith<HostFetchException> { HostFetch(NO_SECRETS).open(FetchRequest("http://example.com/v1")) }
         assertEquals(NetErrorKind.REJECTED, e.kind)
         assertTrue(HostFetch.isLoopback("127.0.0.1") && HostFetch.isLoopback("localhost") && !HostFetch.isLoopback("10.0.2.2"))
     }
@@ -159,7 +161,7 @@ class HostFetchTest {
         val port = server.port
         server.shutdown()
         val e = assertFailsWith<HostFetchException> {
-            HostFetch(credentials = { null }).open(FetchRequest("http://127.0.0.1:$port/v1", "POST", body = "{}"))
+            HostFetch(NO_SECRETS).open(FetchRequest("http://127.0.0.1:$port/v1", "POST", body = "{}"))
         }
         assertEquals(NetErrorKind.CONNECT, e.kind)
         assertTrue(e.retryable)

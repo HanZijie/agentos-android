@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import org.agentos.runtime.ports.Credential
+import org.agentos.runtime.ports.SecretPort
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -171,7 +173,8 @@ class FetchResponse internal constructor(
  * The network egress for Pi (architecture 4.1: "JS 里不做 I/O"): a streaming fetch backed by
  * OkHttp. It
  * - replaces the placeholder key in `x-api-key` / `Authorization: Bearer` with the key from
- *   [credentials] for the request's endpoint, and refuses to send when none is configured;
+ *   [secrets] (HostPort.secrets; [BaseUrlCredentials] for safe endpoint matching) for the
+ *   request's endpoint, and refuses to send when none is configured;
  * - drops `accept-encoding` and hop-by-hop headers set by JS (OkHttp handles gzip itself);
  * - never follows redirects (a redirect could carry the key header to another host) and never
  *   retries at the transport level (`retryOnConnectionFailure(false)`);
@@ -185,7 +188,7 @@ class FetchResponse internal constructor(
  * therefore use `maxAttempts >= 2`.
  */
 class HostFetch(
-    private val credentials: CredentialProvider,
+    private val secrets: SecretPort,
     client: OkHttpClient = defaultClient(),
     private val retry: RetryPolicy = RetryPolicy.NONE,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -219,7 +222,7 @@ class HostFetch(
         }
         val builder = Request.Builder().url(url)
         var contentType: String? = null
-        var key: ApiKey? = null
+        var key: Credential? = null
         for ((rawName, rawValue) in request.headers) {
             val name = rawName.trim()
             when (name.lowercase()) {
@@ -227,8 +230,8 @@ class HostFetch(
                 "content-type" -> contentType = rawValue
             }
             val value = when (rawValue.trim()) {
-                PLACEHOLDER_API_KEY -> (key ?: lookupKey(url.toUri()).also { key = it }).secret
-                "Bearer $PLACEHOLDER_API_KEY" -> "Bearer " + (key ?: lookupKey(url.toUri()).also { key = it }).secret
+                PLACEHOLDER_API_KEY -> (key ?: lookupKey(url.toString()).also { key = it }).reveal()
+                "Bearer $PLACEHOLDER_API_KEY" -> "Bearer " + (key ?: lookupKey(url.toString()).also { key = it }).reveal()
                 else -> {
                     if (rawValue.contains(PLACEHOLDER_API_KEY)) {
                         throw HostFetchException(NetErrorKind.REJECTED, "Placeholder key in an unsupported form in header $name")
@@ -275,9 +278,12 @@ class HostFetch(
         }
     }
 
-    private fun lookupKey(target: java.net.URI): ApiKey =
-        credentials.apiKeyFor(target)
-            ?: throw HostFetchException(NetErrorKind.NO_CREDENTIAL, "No API key configured for ${target.scheme}://${target.host}")
+    private suspend fun lookupKey(url: String): Credential {
+        val credential = secrets.credentialFor(url)
+        if (credential != null) return credential
+        val host = url.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}" } ?: "this endpoint"
+        throw HostFetchException(NetErrorKind.NO_CREDENTIAL, "No API key configured for $host")
+    }
 
     private fun canRetry(request: FetchRequest, attempt: Int, waitMs: Long): Boolean {
         if (attempt >= retry.maxAttempts) return false
