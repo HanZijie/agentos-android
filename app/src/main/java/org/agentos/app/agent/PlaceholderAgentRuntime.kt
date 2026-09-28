@@ -34,7 +34,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
@@ -42,6 +42,7 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.AcpConnection
 import org.agentos.runtime.AgentRuntime
 import org.agentos.runtime.RunState
+import org.agentos.runtime.RuntimeEngine
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.OutboundGate
 import org.json.JSONObject
@@ -50,20 +51,30 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * **占位的宿主层（W6 骨架）**：实现 A1 定下的 `org.agentos.runtime.AgentRuntime` 接口，但 Agent 端是不调模型的
- * 假 Agent。A 的 W4（检查点 A3）进 main 后，[AgentProcess] 里换成 `AgentRuntimes.create(HostPortImpl, …)`，
- * 本文件删除；W6 的接线（serveAcp、runState、start）不变。
+ * **过渡期的宿主层（W6）**：实现 A1 定下的 `org.agentos.runtime.AgentRuntime` 接口，由两部分组成：
+ *
+ * - 真的 [RuntimeEngine]（A2）：[start] 里打开 Store（HostPortImpl → AndroidStore）、迁移、执行恢复流程、启动调度器；
+ *   ACP 会话在它的 Store 里新建（`session/new`）和查找（`session/load`），所以会话跨进程重启保留。
+ * - 占位的 ACP Agent 端：A 的 W4（检查点 A3）进 main 之前 `RuntimeEngine.serveAcp` 还没接上，prompt 由不调模型的
+ *   假 Agent 回答（Pi Agent core 在 Android 上也还没有，见 [UnwiredAgentCore]）。
+ *
+ * A3 进 main 后 [AgentProcess] 里 `runtime = engine`，本文件删除；W6 的接线（serveAcp、runState、start）不变。
  *
  * 它按正式宿主层的约定工作：每轮 prompt 是一个任务，**先登记**（runState.activeTasks + 1）**再等 [start] 结束**，
- * 结束时减 1；流式输出前调 [OutboundGate.awaitWritable] 做背压。
+ * 结束时减 1；流式输出前调 [OutboundGate.awaitWritable] 做背压。[runState] = 引擎的状态 + 假 Agent 的任务数，
+ * 假 Agent 登记任务时**同步**更新，所以 RuntimeLifecycle 现读到的任务数不会落后。
  *
  * 假 Agent 的指令（tests/device/acp-channel 的 agentCommand）：chunks、chunkChars、intervalMs、burst、cjk、bp、
  * bigChunkChars。不是 JSON 时回显 20 条。
  *
- * @param beforeStart 在 [start] 里执行（恢复流程的占位；debug 包的设备用例用它拉长恢复）。
+ * @param beforeStart 在 [start] 里、引擎启动之前执行（debug 包的设备用例用它拉长恢复）。
  */
-class PlaceholderAgentRuntime(private val beforeStart: suspend () -> Unit = {}) : AgentRuntime {
+class PlaceholderAgentRuntime(
+    val engine: RuntimeEngine,
+    private val beforeStart: suspend () -> Unit = {},
+) : AgentRuntime {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("placeholder-runtime"))
+    private val placeholderTasks = AtomicInteger()
     private val state = MutableStateFlow(RunState())
     override val runState: StateFlow<RunState> = state.asStateFlow()
 
@@ -71,10 +82,29 @@ class PlaceholderAgentRuntime(private val beforeStart: suspend () -> Unit = {}) 
     private val nextConn = AtomicInteger()
     private val live = ConcurrentHashMap<Int, CallerIdentity>()
     private val outcomes = ConcurrentHashMap<String, AtomicLong>()
+    private val sessionsCreated = AtomicLong()
+    private val sessionsLoaded = AtomicLong()
+    private val sessionLoadsRejected = AtomicLong()
+
+    /** 引擎是否已启动（Store 已打开、恢复已完成）。 */
+    @Volatile var engineStarted = false
+        private set
+
+    init {
+        scope.launch(CoroutineName("engine-run-state")) { engine.runState.collect { publish() } }
+    }
+
+    @Synchronized
+    private fun publish() {
+        val e = engine.runState.value
+        state.value = e.copy(activeTasks = e.activeTasks + placeholderTasks.get())
+    }
 
     override suspend fun start() {
         try {
             beforeStart()
+            engine.start()
+            engineStarted = true
         } finally {
             started.complete(Unit)
         }
@@ -85,7 +115,7 @@ class PlaceholderAgentRuntime(private val beforeStart: suspend () -> Unit = {}) 
         val name = "acp-$id(${caller.ownerKey})"
         val connScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]) + CoroutineName(name))
         val protocol = Protocol(connScope, transport, ProtocolOptions(protocolDebugName = name))
-        Agent(protocol, FakeAgentSupport(id, gate))
+        Agent(protocol, FakeAgentSupport(caller, gate))
         val closed = CompletableDeferred<Unit>()
         live[id] = caller
         // 传输关闭 → 连接结束、挂起的请求一并结束（S3 问题 4，BinderAcpTransport.bindTo 的做法）
@@ -104,6 +134,7 @@ class PlaceholderAgentRuntime(private val beforeStart: suspend () -> Unit = {}) 
     }
 
     override suspend fun shutdown() {
+        runCatching { engine.shutdown() }
         scope.cancel()
     }
 
@@ -112,22 +143,44 @@ class PlaceholderAgentRuntime(private val beforeStart: suspend () -> Unit = {}) 
 
     fun promptOutcomes(): JSONObject = JSONObject().also { o -> outcomes.forEach { (k, v) -> o.put(k, v.get()) } }
 
-    private inner class FakeAgentSupport(private val connId: Int, private val gate: OutboundGate) : AgentSupport {
-        private val sessions = AtomicInteger()
+    /** 诊断：这个进程里经 ACP 新建、载入（成功 / 被拒）的会话数。 */
+    fun sessionCounters(): JSONObject = JSONObject()
+        .put("created", sessionsCreated.get()).put("loaded", sessionsLoaded.get()).put("loadRejected", sessionLoadsRejected.get())
+
+    private inner class FakeAgentSupport(private val caller: CallerIdentity, private val gate: OutboundGate) : AgentSupport {
 
         override suspend fun initialize(clientInfo: ClientInfo): AgentInfo = AgentInfo(
-            capabilities = AgentCapabilities(),
-            implementation = Implementation(name = IMPLEMENTATION_NAME, version = "0.1"),
+            capabilities = AgentCapabilities(loadSession = true),
+            implementation = Implementation(name = IMPLEMENTATION_NAME, version = "0.2"),
         )
 
-        override suspend fun createSession(sessionParameters: SessionCreationParameters): AgentSession =
-            FakeSession(SessionId("fake-$connId-${sessions.incrementAndGet()}"), gate)
+        /** 会话记录在 Store 里（与正式宿主层一样按调用方隔离）。恢复流程结束之前先等。 */
+        override suspend fun createSession(sessionParameters: SessionCreationParameters): AgentSession {
+            started.await()
+            val s = engine.createSession(caller, sessionParameters.cwd)
+            sessionsCreated.incrementAndGet()
+            return FakeSession(SessionId(s.id), gate)
+        }
+
+        /** 只查 Store 里有没有这个会话（调用方自己的）；假 Agent 没有历史可回放。 */
+        override suspend fun loadSession(sessionId: SessionId, sessionParameters: SessionCreationParameters): AgentSession {
+            started.await()
+            try {
+                engine.session(caller, sessionId.value)
+            } catch (e: Exception) {
+                sessionLoadsRejected.incrementAndGet()
+                throw e
+            }
+            sessionsLoaded.incrementAndGet()
+            return FakeSession(sessionId, gate)
+        }
     }
 
     private inner class FakeSession(override val sessionId: SessionId, private val gate: OutboundGate) : AgentSession {
         override suspend fun prompt(content: List<ContentBlock>, _meta: JsonElement?): Flow<Event> = flow {
             // 先登记任务，再等恢复流程结束（与正式宿主层相同）
-            state.update { it.copy(activeTasks = it.activeTasks + 1) }
+            placeholderTasks.incrementAndGet()
+            publish()
             var outcome = "error"
             try {
                 started.await()
@@ -159,7 +212,8 @@ class PlaceholderAgentRuntime(private val beforeStart: suspend () -> Unit = {}) 
                 throw e
             } finally {
                 outcomes.getOrPut(outcome) { AtomicLong() }.incrementAndGet()
-                state.update { it.copy(activeTasks = it.activeTasks - 1) }
+                placeholderTasks.decrementAndGet()
+                publish()
             }
         }
 

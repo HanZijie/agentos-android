@@ -20,8 +20,18 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import org.agentos.acp.AcpAndroid
+import org.agentos.app.agent.supervisor.SupervisorStatus
+import org.agentos.app.agent.supervisor.SupervisorStatusReceiver
 import org.agentos.runtime.AgentRuntime
+import org.agentos.runtime.AgentRuntimes
+import org.agentos.runtime.RuntimeEngine
+import org.agentos.runtime.events.EventTypes
+import org.agentos.runtime.pi.ModelCatalog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -32,8 +42,8 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * [RuntimeLifecycle]（前台服务、心跳、wake lock），执行每个进程一次的恢复流程（`runtime.start()`），持有 ACP 连接。
  * 由 `:agent` 里任何一个服务第一次创建时初始化（AgentService、AcpService、AgentControlService，谁先谁后都一样）。
  *
- * W6 骨架：宿主层是 [PlaceholderAgentRuntime]（假 Agent，没有 Store）；A3 进 main 后换成
- * `AgentRuntimes.create(RuntimeDependencies(HostPortImpl(…), agentCoreFactory))`，其余接线不变。
+ * 宿主层：[engine] 是 A2 的 RuntimeEngine（HostPortImpl：Store、BYOK 模型来源与 key）；ACP 在 A3 之前由
+ * [PlaceholderAgentRuntime] 的假 Agent 回答。A3 进 main 后 `runtime = engine`，其余接线不变。
  */
 class AgentProcess private constructor(val app: Context) {
 
@@ -42,8 +52,25 @@ class AgentProcess private constructor(val app: Context) {
     val debuggable = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     private val startedAtElapsed = SystemClock.elapsedRealtime()
 
-    /** 宿主层。A3 之后换成真实现（见类注释）。 */
-    val runtime: AgentRuntime = PlaceholderAgentRuntime(beforeStart = { testRecoveryDelay() })
+    // ------------------------------------------------------------------ HostPort（W6）
+
+    val store = AndroidStore(app)
+
+    /** 运行时空闲时换下来的 key 立即丢弃；有任务时留到任务数归零（见 setBusy）。 */
+    val secrets = KeystoreSecrets(AndroidKeystoreCipher()) { runtime.runState.value.busy.not() }
+    private val runtimeLog = AndroidRuntimeLog(secrets::redact)
+    val models = ModelSources(
+        dir = File(app.filesDir, BYOK_DIR),
+        secrets = secrets,
+        catalogSource = { app.assets.open(MODEL_CATALOG_ASSET).bufferedReader().use { ModelCatalog.parse(it.readText()) } },
+        log = runtimeLog,
+    )
+    val hostPort = HostPortImpl(store, models, secrets, runtimeLog)
+    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, UnwiredAgentCore)
+    private val interim = PlaceholderAgentRuntime(engine, beforeStart = { testRecoveryDelay() })
+
+    /** 宿主层。A3 之后换成 [engine]（见类注释）。 */
+    val runtime: AgentRuntime = interim
 
     @Volatile private var service: AgentService? = null
     private val startCommands = ConcurrentLinkedDeque<JSONObject>()
@@ -124,6 +151,12 @@ class AgentProcess private constructor(val app: Context) {
                 val exit = readLastAgentExit()
                 userStopped = RecoveryPolicy.userStopped(exit?.optInt("reason"))
                 if (userStopped) Log.i(TAG, "previous :agent was stopped by the user")
+                // BYOK 模型来源和 key（Keystore 解密）。失败只影响模型可用性，不挡住恢复
+                try {
+                    models.ensureLoaded()
+                } catch (e: Exception) {
+                    Log.w(TAG, "model source not loaded: ${e.javaClass.simpleName}")
+                }
                 // 打开 Store、迁移、恢复（F8）。“用户主动停止过就不继续任务”还没有入口交给宿主层，见 RecoveryPolicy。
                 runtime.start()
             } catch (e: Exception) {
@@ -176,6 +209,8 @@ class AgentProcess private constructor(val app: Context) {
             ticker?.cancel()
             ticker = null
             if (wakeLock.isHeld) wakeLock.release()
+            // 进行中的任务都结束了：设置里换下来的旧 key 不再需要（KeystoreSecrets.activate）
+            secrets.retire()
         }
     }
 
@@ -219,6 +254,8 @@ class AgentProcess private constructor(val app: Context) {
                 .put("wakeLockHeld", wakeLock.isHeld)
                 .put("debuggable", debuggable)
                 .put("implementation", runtime.javaClass.simpleName)
+                .put("engine", engine.javaClass.simpleName)
+                .put("engineStarted", interim.engineStarted)
                 .put("runState", JSONObject().put("activeTasks", rs.activeTasks).put("queuedTasks", rs.queuedTasks)
                     .put("recoveryPending", rs.recoveryPending).put("core", rs.core.toString())
                     .put("lastError", rs.lastError?.code?.wire ?: JSONObject.NULL)))
@@ -229,13 +266,60 @@ class AgentProcess private constructor(val app: Context) {
                 .put("fields", hbText?.let { JSONObject(HeartbeatFormat.parse(it) as Map<*, *>) } ?: JSONObject.NULL)
                 .put("writes", heartbeat.writes)
                 .put("lastError", heartbeat.lastError ?: JSONObject.NULL))
+            .put("store", runBlocking(Dispatchers.IO) { withTimeoutOrNull(3_000) { storeStats() } }
+                ?: JSONObject().put("error", "timeout"))
+            .put("byok", runCatching { JSONObject(models.status().toString()).put("keystore", JSONObject(secrets.keystoreStatus())) }
+                .getOrElse { JSONObject().put("error", it.javaClass.simpleName) })
+            .put("supervisorMissing", SupervisorStatus.supervisorMissing(
+                supervisorStatus(), heartbeat.bootCount, SystemClock.elapsedRealtime() - startedAtElapsed))
             .put("acp", acp.stats())
+    }
+
+    /** 监督进程最近一次状态（D 的 W7：主进程的 SupervisorStatusReceiver 写在 DE 的 files/supervisor/status）。 */
+    fun supervisorStatus(): SupervisorStatus? = SupervisorStatusReceiver.store(app).read()
+
+    private val storeStatsLock = Mutex()
+    private var systemCursor = 0L
+    private var systemEvents = 0
+    private val systemCounts = HashMap<String, Int>()
+
+    /** Store 的摘要：位置（CE）、是否本次新建、系统流里的事件（增量读取）、本进程经 ACP 新建 / 载入的会话数。 */
+    private suspend fun storeStats(): JSONObject = storeStatsLock.withLock {
+        val path = store.databasePath
+        val out = JSONObject()
+            .put("path", path)
+            .put("storage", if (path.startsWith(app.dataDir.absolutePath + "/")) "ce" else "other")
+            .put("existedAtStart", store.existedAtStart)
+            .put("sizeBytes", store.sizeBytes())
+            .put("opened", interim.engineStarted)
+            .put("sessions", interim.sessionCounters())
+        if (!interim.engineStarted) return@withLock out.put("error", recoveryError ?: "not_started")
+        while (true) {
+            val batch = engine.readEvents(EventTypes.SYSTEM_STREAM, systemCursor, 500)
+            for (e in batch) {
+                systemCounts.merge(e.eventType, 1, Int::plus)
+                systemEvents++
+                systemCursor = e.sequence
+            }
+            if (batch.size < 500) break
+        }
+        out.put("system", JSONObject()
+            .put("lastSequence", systemCursor)
+            .put("events", systemEvents)
+            .put("runtimeStarted", systemCounts[EventTypes.RUNTIME_STARTED] ?: 0)
+            .put("runtimeRecovered", systemCounts[EventTypes.RUNTIME_RECOVERED] ?: 0))
     }
 
     companion object {
         private const val TAG = "AgentProcess"
         const val HEARTBEAT_REFRESH_MS = 30_000L
         private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60_000L
+
+        /** BYOK 模型来源（明文部分 + key 的密文），CE 存储 files/ 下。 */
+        const val BYOK_DIR = "byok"
+
+        /** B 的 core/pi-runtime/build.mjs 生成的厂商预设。 */
+        const val MODEL_CATALOG_ASSET = "model-catalog.json"
 
         /** debug 包专用：DE 存储 files/ 下这个文件里的毫秒数，会在下一次恢复时作为额外延迟（读后删除）。 */
         const val TEST_RECOVERY_DELAY_FILE = "test/recovery_delay_ms"
