@@ -94,6 +94,8 @@ const versions = Object.fromEntries(
 // 2. model-catalog.json (vendor presets) from pi-ai's catalog, two families only
 // ---------------------------------------------------------------------------
 const PRESET_ORDER = ["minimax", "minimax-cn"]; // MiniMax international / China first (F9)
+// Subscription-account providers: their "key" is a login token, and v1 has no subscription login (F9).
+const EXCLUDED_PROVIDERS = { "github-copilot": "subscription account (GitHub Copilot token / OAuth), not supported in v1" };
 const providersDir = path.join(PI_AI_DIR, "providers");
 const providerFiles = fs
   .readdirSync(providersDir)
@@ -107,6 +109,7 @@ for (const file of providerFiles) {
     let p;
     try { p = factory(); } catch { continue; }
     if (!p || typeof p.getModels !== "function" || !p.id) continue;
+    if (EXCLUDED_PROVIDERS[p.id]) { skipped.push(`${p.id}: ${EXCLUDED_PROVIDERS[p.id]}`); continue; }
     const models = p.getModels().filter((m) => SUPPORTED_APIS.includes(m.api));
     if (models.length === 0) continue;
     if (!p.auth?.apiKey) { skipped.push(`${p.id}: no API-key auth`); continue; }
