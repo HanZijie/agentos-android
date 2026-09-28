@@ -65,17 +65,15 @@ def matrix():
 def sweep():
     """速率扫描与窗口比较：找出不产生延迟堆积的速率上限，给窗口参数定值。"""
     m = []
-    for wm, wc in [(64, 65536), (16, 32768)]:
-        for rate in (200, 500, 1000, 2000, 4000):
-            m.append((f"rate-{rate}-w{wm}x{wc}", "stream",
-                      {"chunks": rate * 4, "chunkChars": 16, "intervalMs": 10, "burst": rate // 100, "bp": True,
-                       "cfg": {"windowMessages": wm, "windowChars": wc}}, 120))
+    for rate in (100, 200, 500, 1000, 2000, 4000):
+        m.append((f"rate-{rate}", "stream",
+                  {"chunks": rate * 4, "chunkChars": 16, "intervalMs": 10, "burst": max(1, rate // 100), "bp": True}, 120))
     for rep in (1, 2):
-        for wm, wc in [(8, 16384), (16, 32768), (32, 32768), (32, 65536), (64, 65536)]:
+        for wm, wc in [(8, 16384), (16, 32768), (32, 32768), (64, 65536)]:
             m.append((f"peak-w{wm}x{wc}-r{rep}", "stream",
                       {"chunks": 20000, "chunkChars": 64, "intervalMs": 0, "bp": True,
                        "cfg": {"windowMessages": wm, "windowChars": wc}}, 180))
-    for wm, wc in [(16, 32768), (64, 65536)]:
+    for wm, wc in [(32, 32768), (64, 65536)]:
         m.append((f"big-w{wm}x{wc}", "stream",
                   {"chunks": 500, "chunkChars": 16000, "intervalMs": 0, "bp": True, "bpChars": 65536,
                    "cfg": {"windowMessages": wm, "windowChars": wc}}, 180))

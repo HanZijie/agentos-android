@@ -1,0 +1,3447 @@
+{
+ "device": {
+  "serial": "emulator-5584",
+  "model": "sdk_gphone64_arm64",
+  "sdk": "37",
+  "release": "17",
+  "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys",
+  "buildType": "userdebug",
+  "kernel": "6.12.58-android16-6-gccafb60de224-ab14828483-4k",
+  "isEmulator": true
+ },
+ "build": "debug",
+ "time": "2026-09-29T03:30:20+0800",
+ "results": {
+  "handshake": {
+   "ok": true,
+   "agent": "agentos-s3-spike-agent",
+   "protocolVersion": "1",
+   "timingsMs": {
+    "bound": 30.104292,
+    "opened": 841.425625,
+    "initialized": 967.194125,
+    "session": 1020.159751
+   },
+   "prompt": {
+    "chunks": 20,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 48.716625,
+    "totalMs": 174.555334,
+    "chunksPerSec": 114.57684816437634,
+    "charsPerSec": 973.9032093971989,
+    "latency": {
+     "n": 20,
+     "p50ms": 9.617792,
+     "p90ms": 26.820375,
+     "p99ms": 51.693584,
+     "maxms": 51.693584,
+     "meanms": 12.5530604,
+     "first10pctMeanMs": 6.9736875,
+     "last10pctMeanMs": 8.3445835
+    }
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "handshake",
+   "run": "handshake-3ca1e7",
+   "args": {},
+   "wallMs": 2826.133418,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:28:10.377  1868  2783 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 21, took 6127ms. Data bytes: 1672 Reply bytes: 116 Flags: 18",
+    "09-29 03:28:10.659   505   591 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce27130) with descriptor: '(not cached)'",
+    "09-29 03:28:11.615  1615  3352 W libbinder.Binder: Binder transaction to com.google.android.gms.common.internal.IGmsServiceBroker, function: UNKNOWN_FUNCTION_NAME, code: 46, took 1119ms. Data bytes: 440 Reply bytes: 4 Flags: 16",
+    "09-29 03:28:11.688  2196  2860 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 1, took 1504ms. Data bytes: 1500 Reply bytes: 604 Flags: 16",
+    "09-29 03:28:11.761  2196  2901 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 1, took 1004ms. Data bytes: 1492 Reply bytes: 604 Flags: 16",
+    "09-29 03:28:11.780  1615  2710 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 3, took 1695ms. Data bytes: 384 Reply bytes: 72 Flags: 18",
+    "09-29 03:28:11.942  1615  2170 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 1, took 2184ms. Data bytes: 572 Reply bytes: 176 Flags: 18",
+    "09-29 03:28:12.130  2406  2423 W libbinder.Binder: Binder transaction to com.google.android.gms.droidguard.internal.IDroidGuardHandle, function: UNKNOWN_FUNCTION_NAME, code: 5, took 12112ms. Data bytes: 348 Reply bytes: 16 Flags: 16",
+    "09-29 03:28:13.772  1496  1511 W libbinder.Binder: Binder transaction to com.google.android.auth.IAuthManagerService, function: UNKNOWN_FUNCTION_NAME, code: 6, took 1770ms. Data bytes: 320 Reply bytes: 60 Flags: 16",
+    "09-29 03:28:13.881  1288  1688 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 1, took 1278ms. Data bytes: 332 Reply bytes: 136 Flags: 16",
+    "09-29 03:28:14.225  2887  3625 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 51587466",
+    "09-29 03:28:14.227  2887  3625 I RkpdRegistrationBinder: Key successfully assigned to client",
+    "09-29 03:28:14.355   661  2299 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 4046ms. Data bytes: 444 Reply bytes: 4 Flags: 16",
+    "09-29 03:28:15.722  1868  2783 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 21, took 5334ms. Data bytes: 496 Reply bytes: 116 Flags: 18"
+   ],
+   "driverSec": 7.9
+  },
+  "stream-realtime": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 500,
+    "chunkChars": 16,
+    "intervalMs": 10,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 500,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 129.033,
+    "totalMs": 8434.871962,
+    "chunksPerSec": 59.27772256088218,
+    "charsPerSec": 948.4435609741149,
+    "latency": {
+     "n": 500,
+     "p50ms": 4.031625,
+     "p90ms": 24.81225,
+     "p99ms": 69.162625,
+     "maxms": 153.943,
+     "meanms": 9.716129684,
+     "first10pctMeanMs": 19.83725748,
+     "last10pctMeanMs": 8.62700666
+    }
+   },
+   "mainThread": {
+    "ticks": 704,
+    "maxLateMs": 59.02725,
+    "lateOver16ms": 17,
+    "lateOver50ms": 2,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 503,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 503,
+      "consumed": 503,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 474,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 228,
+     "maxQueuedChars": 228,
+     "maxUnackedMessages": 6,
+     "maxUnackedChars": 1272,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 391.25,
+     "binderSendUsMax": 812.834
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 2,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-2(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 503,
+        "acked": 503,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 503,
+       "acksSent": 3,
+       "acksReceived": 474,
+       "windowWaits": 0,
+       "windowWaitMsTotal": 0,
+       "windowWaitMsMax": 0,
+       "maxInFlightMessages": 6,
+       "maxInFlightChars": 1272,
+       "maxQueuedChars": 424,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 228,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 1970.522,
+       "binderSendUsMax": 73664.084
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 3967,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 30
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-realtime-426eb2",
+   "args": {
+    "chunks": 500,
+    "chunkChars": 16,
+    "intervalMs": 10
+   },
+   "wallMs": 9907.114629,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:28:18.412   285   285 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000074e9a12ad0) with descriptor: '(not cached)'",
+    "09-29 03:28:18.554   505  1120 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce30920) with descriptor: '(not cached)'",
+    "09-29 03:28:19.142  1868  2783 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 21, took 3419ms. Data bytes: 496 Reply bytes: 448 Flags: 18",
+    "09-29 03:28:20.086  1496  2192 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 10, took 3532ms. Data bytes: 106328 Reply bytes: 8 Flags: 18",
+    "09-29 03:28:20.286   285   285 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000074e9a1e940) with descriptor: '(not cached)'",
+    "09-29 03:28:20.769   661  2300 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 2586ms. Data bytes: 540 Reply bytes: 4 Flags: 16",
+    "09-29 03:28:23.418  1868  2783 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 21, took 4208ms. Data bytes: 1672 Reply bytes: 1520 Flags: 18",
+    "09-29 03:28:23.906  1615  4004 W libbinder.BpBinder: Large outgoing transaction of 1056768 bytes, interface descriptor '(not cached)', code 1, flags 2 was sent",
+    "09-29 03:28:23.906  1615  4004 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 1056768)",
+    "09-29 03:28:25.121  1868  2783 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 21, took 1691ms. Data bytes: 1672 Reply bytes: 1520 Flags: 18",
+    "09-29 03:28:25.770  2887  4373 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 178848439",
+    "09-29 03:28:25.773  2887  4373 I RkpdRegistrationBinder: Key successfully assigned to client",
+    "09-29 03:28:26.658  2406  2908 W libbinder.Binder: Binder transaction to com.google.android.gms.droidguard.internal.IDroidGuardHandle, function: UNKNOWN_FUNCTION_NAME, code: 5, took 2468ms. Data bytes: 332 Reply bytes: 16 Flags: 18",
+    "09-29 03:28:26.782  2887  4410 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 213829006",
+    "09-29 03:28:26.785  2887  4410 I RkpdRegistrationBinder: Key successfully assigned to client",
+    "09-29 03:28:27.879  2887  4441 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 148523201",
+    "09-29 03:28:27.880  2887  4441 I RkpdRegistrationBinder: Key successfully assigned to client",
+    "09-29 03:28:28.734  2887  4535 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 192700864",
+    "09-29 03:28:28.735  2887  4535 I RkpdRegistrationBinder: Key successfully assigned to client",
+    "09-29 03:28:29.387  2406  2908 W libbinder.Binder: Binder transaction to com.google.android.gms.droidguard.internal.IDroidGuardHandle, function: UNKNOWN_FUNCTION_NAME, code: 5, took 1403ms. Data bytes: 336 Reply bytes: 16 Flags: 18",
+    "09-29 03:28:29.437  2887  4574 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 143428539",
+    "09-29 03:28:29.439  2887  4574 I RkpdRegistrationBinder: Key successfully assigned to client",
+    "09-29 03:28:29.725  1496  1509 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:28:29.725  1496  1509 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:28:29.938   505   715 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce33100) with descriptor: '(not cached)'",
+    "09-29 03:28:29.945   505   715 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce33100) with descriptor: '(not cached)'",
+    "09-29 03:28:29.956   505  1120 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce33100) with descriptor: '(not cached)'",
+    "09-29 03:28:30.150  2887  4608 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 24166050",
+    "09-29 03:28:30.151  2887  4608 I RkpdRegistrationBinder: Key successfully assigned to client"
+   ],
+   "driverSec": 12.7
+  },
+  "stream-peak": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 5000,
+    "chunkChars": 32,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 5000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 18.979625,
+    "totalMs": 2994.17171,
+    "chunksPerSec": 1669.9109083493413,
+    "charsPerSec": 53437.14906717892,
+    "latency": {
+     "n": 5000,
+     "p50ms": 445.586459,
+     "p90ms": 686.67125,
+     "p99ms": 702.598417,
+     "maxms": 725.836334,
+     "meanms": 423.5421234584,
+     "first10pctMeanMs": 183.08037537200002,
+     "last10pctMeanMs": 685.616227096
+    }
+   },
+   "mainThread": {
+    "ticks": 256,
+    "maxLateMs": 88.230917,
+    "lateOver16ms": 5,
+    "lateOver50ms": 2,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 5003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 5003,
+      "consumed": 5003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 948,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 228,
+     "maxQueuedChars": 228,
+     "maxUnackedMessages": 32,
+     "maxUnackedChars": 7328,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 145.18,
+     "binderSendUsMax": 319.333
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 3,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-3(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 5003,
+        "acked": 5003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 5003,
+       "acksSent": 3,
+       "acksReceived": 948,
+       "windowWaits": 148,
+       "windowWaitMsTotal": 1008.729499,
+       "windowWaitMsMax": 98.666417,
+       "maxInFlightMessages": 32,
+       "maxInFlightChars": 7328,
+       "maxQueuedChars": 386323,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 228,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 163.284,
+       "binderSendUsMax": 76204.75
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 4725,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 40
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-peak-e2fd3f",
+   "args": {
+    "chunks": 5000,
+    "chunkChars": 32,
+    "intervalMs": 0
+   },
+   "wallMs": 4453.852669,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:28:30.818   505   715 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce33100) with descriptor: '(not cached)'",
+    "09-29 03:28:31.036   505   715 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce30c90) with descriptor: '(not cached)'",
+    "09-29 03:28:32.974  1496  1945 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:28:32.974  1496  1945 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:28:33.454   661  1226 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 2471ms. Data bytes: 532 Reply bytes: 4 Flags: 16",
+    "09-29 03:28:37.815   661   672 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000078158b6ba0) with descriptor: '(not cached)'",
+    "09-29 03:28:37.815   661   672 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000078158d1cc0) with descriptor: '(not cached)'",
+    "09-29 03:28:37.818   661   672 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000078159b6dd0) with descriptor: '(not cached)'",
+    "09-29 03:28:37.821   661   672 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000078158dca00) with descriptor: '(not cached)'"
+   ],
+   "driverSec": 7.2
+  },
+  "stream-peak-bp": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 20000,
+    "chunkChars": 32,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 20000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 29.645292,
+    "totalMs": 5795.497961,
+    "chunksPerSec": 3450.9545399872845,
+    "charsPerSec": 110430.5452795931,
+    "latency": {
+     "n": 20000,
+     "p50ms": 272.470667,
+     "p90ms": 567.364667,
+     "p99ms": 656.751,
+     "maxms": 693.85525,
+     "meanms": 325.92877573335,
+     "first10pctMeanMs": 550.2969432755001,
+     "last10pctMeanMs": 517.0105046455
+    }
+   },
+   "mainThread": {
+    "ticks": 449,
+    "maxLateMs": 129.011959,
+    "lateOver16ms": 17,
+    "lateOver50ms": 2,
+    "lateOver100ms": 1
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 20003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 20003,
+      "consumed": 20003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 3650,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 228,
+     "maxQueuedChars": 228,
+     "maxUnackedMessages": 32,
+     "maxUnackedChars": 7360,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 40.166,
+     "binderSendUsMax": 49.75
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 4,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-4(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 20003,
+        "acked": 20003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 20003,
+       "acksSent": 3,
+       "acksReceived": 3650,
+       "windowWaits": 564,
+       "windowWaitMsTotal": 3481.721844,
+       "windowWaitMsMax": 145.248459,
+       "maxInFlightMessages": 32,
+       "maxInFlightChars": 7360,
+       "maxQueuedChars": 16610,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 228,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 50.706,
+       "binderSendUsMax": 33401.458
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 4948,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 40
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-peak-bp-3cc3a2",
+   "args": {
+    "chunks": 20000,
+    "chunkChars": 32,
+    "intervalMs": 0,
+    "bp": true
+   },
+   "wallMs": 6110.202878,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:28:38.396   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce2f950) with descriptor: '(not cached)'",
+    "09-29 03:28:38.400   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce2e1f0) with descriptor: '(not cached)'",
+    "09-29 03:28:38.460   505  1120 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce2e1f0) with descriptor: '(not cached)'",
+    "09-29 03:28:40.284   285   285 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000074e9a1dc30) with descriptor: '(not cached)'",
+    "09-29 03:28:41.139  1496  2731 W libbinder.Binder: Binder transaction to com.google.android.gms.auth.appcert.IAppCertService, function: UNKNOWN_FUNCTION_NAME, code: 2, took 1070ms. Data bytes: 172 Reply bytes: 188 Flags: 18",
+    "09-29 03:28:41.915  2887  5034 I RkpdRegistrationBinder: Key requested for : android.hardware.security.keymint.IRemotelyProvisionedComponent/default, clientUid: 1017, keyId: 10230, callback: 20554277",
+    "09-29 03:28:41.916  2887  5034 I RkpdRegistrationBinder: Key successfully assigned to client",
+    "09-29 03:28:44.798  1496  1944 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:28:44.798  1496  1944 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 7.3
+  },
+  "stream-bigchunks-bp": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 500,
+    "chunkChars": 16000,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 65536,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 500,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 56.313125,
+    "totalMs": 3063.313084,
+    "chunksPerSec": 163.22197120873852,
+    "charsPerSec": 2611551.5393398167,
+    "latency": {
+     "n": 500,
+     "p50ms": 13.443667,
+     "p90ms": 149.647417,
+     "p99ms": 347.55975,
+     "maxms": 386.987625,
+     "meanms": 49.056173523999995,
+     "first10pctMeanMs": 198.59620086,
+     "last10pctMeanMs": 8.62296322
+    }
+   },
+   "mainThread": {
+    "ticks": 213,
+    "maxLateMs": 79.157,
+    "lateOver16ms": 14,
+    "lateOver50ms": 3,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 503,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 503,
+      "consumed": 503,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 503,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 229,
+     "maxQueuedChars": 229,
+     "maxUnackedMessages": 2,
+     "maxUnackedChars": 32392,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 4063.722,
+     "binderSendUsMax": 11819.292
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 5,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-5(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 503,
+        "acked": 503,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 503,
+       "acksSent": 3,
+       "acksReceived": 503,
+       "windowWaits": 389,
+       "windowWaitMsTotal": 2722.968463,
+       "windowWaitMsMax": 123.885042,
+       "maxInFlightMessages": 2,
+       "maxInFlightChars": 32392,
+       "maxQueuedChars": 81039,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 229,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 275.104,
+       "binderSendUsMax": 81774.25
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5086,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 29
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-bigchunks-bp-4a7a52",
+   "args": {
+    "chunks": 500,
+    "chunkChars": 16000,
+    "intervalMs": 0,
+    "bp": true,
+    "bpChars": 65536
+   },
+   "wallMs": 3242.09521,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:28:45.915   505  1120 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce2fd70) with descriptor: '(not cached)'",
+    "09-29 03:28:47.768  1496  2712 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:28:47.768  1496  2712 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 4.5
+  },
+  "stream-cjk-bp": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": true
+   },
+   "prompt": {
+    "chunks": 5000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 130.031875,
+    "totalMs": 3645.969669,
+    "chunksPerSec": 1371.3772888767278,
+    "charsPerSec": 87768.14648811058,
+    "latency": {
+     "n": 5000,
+     "p50ms": 651.527875,
+     "p90ms": 1074.947625,
+     "p99ms": 1251.857209,
+     "maxms": 1265.591667,
+     "meanms": 650.2365584224,
+     "first10pctMeanMs": 351.34684306,
+     "last10pctMeanMs": 338.787015764
+    }
+   },
+   "mainThread": {
+    "ticks": 283,
+    "maxLateMs": 52.357,
+    "lateOver16ms": 6,
+    "lateOver50ms": 1,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 5003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 5003,
+      "consumed": 5003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 742,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 226,
+     "maxQueuedChars": 226,
+     "maxUnackedMessages": 32,
+     "maxUnackedChars": 8352,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 9766.833,
+     "binderSendUsMax": 28805.25
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 6,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-6(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 5003,
+        "acked": 5003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 5003,
+       "acksSent": 3,
+       "acksReceived": 742,
+       "windowWaits": 400,
+       "windowWaitMsTotal": 2610.748326,
+       "windowWaitMsMax": 61.67925,
+       "maxInFlightMessages": 32,
+       "maxInFlightChars": 8352,
+       "maxQueuedChars": 16644,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 226,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 47.184,
+       "binderSendUsMax": 15748.459
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5172,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 41
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-cjk-bp-da07ce",
+   "args": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true,
+    "cjk": true
+   },
+   "wallMs": 3901.192043,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:28:50.218   505  1546 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce37ca0) with descriptor: '(not cached)'",
+    "09-29 03:28:51.341   661  1238 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 1215ms. Data bytes: 576 Reply bytes: 4 Flags: 16"
+   ],
+   "driverSec": 5.7
+  },
+  "stream-window-8x16384": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 8,
+    "windowChars": 16384,
+    "ackEveryMessages": 2,
+    "ackEveryChars": 4096,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 20000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 24.73675,
+    "totalMs": 9596.206712,
+    "chunksPerSec": 2084.1568549154026,
+    "charsPerSec": 133386.03871458577,
+    "latency": {
+     "n": 20000,
+     "p50ms": 29.614167,
+     "p90ms": 148.253167,
+     "p99ms": 357.744625,
+     "maxms": 520.225208,
+     "meanms": 60.1278583248,
+     "first10pctMeanMs": 237.73446899750002,
+     "last10pctMeanMs": 25.546884702
+    }
+   },
+   "mainThread": {
+    "ticks": 737,
+    "maxLateMs": 76.968625,
+    "lateOver16ms": 33,
+    "lateOver50ms": 3,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 20003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 20003,
+      "consumed": 20003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 10972,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 228,
+     "maxQueuedChars": 228,
+     "maxUnackedMessages": 8,
+     "maxUnackedChars": 2096,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 4546.958,
+     "binderSendUsMax": 13008.542
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 7,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-7(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 20003,
+        "acked": 20003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 20003,
+       "acksSent": 3,
+       "acksReceived": 10972,
+       "windowWaits": 3960,
+       "windowWaitMsTotal": 7087.910464,
+       "windowWaitMsMax": 128.571334,
+       "maxInFlightMessages": 8,
+       "maxInFlightChars": 2096,
+       "maxQueuedChars": 16645,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 228,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 58.959,
+       "binderSendUsMax": 43515.75
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5251,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 40
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-window-8x16384-62139c",
+   "args": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true,
+    "cfg": {
+     "windowMessages": 8,
+     "windowChars": 16384
+    }
+   },
+   "wallMs": 10472.842588,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:28:56.042   505   591 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce326b0) with descriptor: '(not cached)'",
+    "09-29 03:28:57.878   661  1240 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 2004ms. Data bytes: 668 Reply bytes: 4 Flags: 16"
+   ],
+   "driverSec": 13.2
+  },
+  "stream-window-16x32768": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 16,
+    "windowChars": 32768,
+    "ackEveryMessages": 4,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 20000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 29.823708,
+    "totalMs": 6083.155336,
+    "chunksPerSec": 3287.76743241133,
+    "charsPerSec": 210417.11567432512,
+    "latency": {
+     "n": 20000,
+     "p50ms": 181.231667,
+     "p90ms": 437.404542,
+     "p99ms": 1276.489376,
+     "maxms": 1383.958834,
+     "meanms": 244.67818431995002,
+     "first10pctMeanMs": 820.7643072275,
+     "last10pctMeanMs": 25.669195954
+    }
+   },
+   "mainThread": {
+    "ticks": 478,
+    "maxLateMs": 44.570167,
+    "lateOver16ms": 16,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 20003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 20003,
+      "consumed": 20003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 5697,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 228,
+     "maxQueuedChars": 228,
+     "maxUnackedMessages": 16,
+     "maxUnackedChars": 4208,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 942.583,
+     "binderSendUsMax": 1343.125
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 8,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-8(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 20003,
+        "acked": 20003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 20003,
+       "acksSent": 3,
+       "acksReceived": 5697,
+       "windowWaits": 2123,
+       "windowWaitMsTotal": 4706.391781,
+       "windowWaitMsMax": 125.006375,
+       "maxInFlightMessages": 16,
+       "maxInFlightChars": 4208,
+       "maxQueuedChars": 16645,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 228,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 27.17,
+       "binderSendUsMax": 15602.792
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5359,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 40
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-window-16x32768-073774",
+   "args": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true,
+    "cfg": {
+     "windowMessages": 16,
+     "windowChars": 32768
+    }
+   },
+   "wallMs": 6356.712295,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:09.616   505  1546 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce3bc90) with descriptor: '(not cached)'",
+    "09-29 03:29:14.976  1496  2192 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:14.976  1496  2192 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 7.7
+  },
+  "stream-window-32x32768": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 20000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 117.819001,
+    "totalMs": 5052.924503,
+    "chunksPerSec": 3958.103864034717,
+    "charsPerSec": 253318.64729822188,
+    "latency": {
+     "n": 20000,
+     "p50ms": 514.536417,
+     "p90ms": 702.782834,
+     "p99ms": 958.422208,
+     "maxms": 988.528542,
+     "meanms": 517.4190142512999,
+     "first10pctMeanMs": 644.0356849240001,
+     "last10pctMeanMs": 330.2050988135
+    }
+   },
+   "mainThread": {
+    "ticks": 405,
+    "maxLateMs": 130.726,
+    "lateOver16ms": 9,
+    "lateOver50ms": 1,
+    "lateOver100ms": 1
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 20003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 20003,
+      "consumed": 20003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 3189,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 228,
+     "maxQueuedChars": 228,
+     "maxUnackedMessages": 32,
+     "maxUnackedChars": 8416,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 356.069,
+     "binderSendUsMax": 706.541
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 9,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-9(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 20003,
+        "acked": 20003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 20003,
+       "acksSent": 3,
+       "acksReceived": 3189,
+       "windowWaits": 1084,
+       "windowWaitMsTotal": 3536.985658,
+       "windowWaitMsMax": 102.68125,
+       "maxInFlightMessages": 32,
+       "maxInFlightChars": 8416,
+       "maxQueuedChars": 16645,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 228,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 29.449,
+       "binderSendUsMax": 22378.334
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5442,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 40
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-window-32x32768-f6b826",
+   "args": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true,
+    "cfg": {
+     "windowMessages": 32,
+     "windowChars": 32768
+    }
+   },
+   "wallMs": 5494.646711,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:16.980   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce36120) with descriptor: '(not cached)'",
+    "09-29 03:29:17.115   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce3e940) with descriptor: '(not cached)'",
+    "09-29 03:29:18.025  1496  2672 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:18.025  1496  2672 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:29:18.159   661  2287 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 1069ms. Data bytes: 668 Reply bytes: 4 Flags: 16",
+    "09-29 03:29:24.047  1496  1944 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:24.047  1496  1944 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 7.7
+  },
+  "stream-window-64x65536": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 64,
+    "windowChars": 65536,
+    "ackEveryMessages": 16,
+    "ackEveryChars": 16384,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": true,
+    "enforceInboundLimits": true
+   },
+   "cmd": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 20000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 38.271208,
+    "totalMs": 5390.544627,
+    "chunksPerSec": 3710.200245783069,
+    "charsPerSec": 237452.81573011642,
+    "latency": {
+     "n": 20000,
+     "p50ms": 705.927917,
+     "p90ms": 824.819751,
+     "p99ms": 1037.820584,
+     "maxms": 1263.097167,
+     "meanms": 718.06398544515,
+     "first10pctMeanMs": 884.8546463435,
+     "last10pctMeanMs": 806.9312846519999
+    }
+   },
+   "mainThread": {
+    "ticks": 417,
+    "maxLateMs": 43.143333,
+    "lateOver16ms": 18,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 20003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 20003,
+      "consumed": 20003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 1739,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 229,
+     "maxQueuedChars": 229,
+     "maxUnackedMessages": 64,
+     "maxUnackedChars": 16896,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 1349.305,
+     "binderSendUsMax": 2037.542
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 10,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-10(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 20003,
+        "acked": 20003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 20003,
+       "acksSent": 3,
+       "acksReceived": 1739,
+       "windowWaits": 524,
+       "windowWaitMsTotal": 3246.581923,
+       "windowWaitMsMax": 124.609458,
+       "maxInFlightMessages": 64,
+       "maxInFlightChars": 16896,
+       "maxQueuedChars": 16632,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 229,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 20.198,
+       "binderSendUsMax": 15162.625
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5529,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 40
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-window-64x65536-0f36fd",
+   "args": {
+    "chunks": 20000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "bp": true,
+    "cfg": {
+     "windowMessages": 64,
+     "windowChars": 65536
+    }
+   },
+   "wallMs": 5689.035503,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:25.429   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce34bd0) with descriptor: '(not cached)'",
+    "09-29 03:29:26.535   661  2299 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 1536ms. Data bytes: 668 Reply bytes: 4 Flags: 16",
+    "09-29 03:29:27.251  1496  2711 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:27.251  1496  2711 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:29:27.915  1406  1418 W libbinder.Binder: Binder transaction to android.content.IContentProvider, function: UNKNOWN_FUNCTION_NAME, code: 21, took 2594ms. Data bytes: 492 Reply bytes: 1736 Flags: 18",
+    "09-29 03:29:30.271  1496  2711 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:30.271  1496  2711 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 8.1
+  },
+  "stream-noflow": {
+   "ok": true,
+   "cfg": {
+    "maxMessageChars": 65536,
+    "windowMessages": 32,
+    "windowChars": 32768,
+    "ackEveryMessages": 8,
+    "ackEveryChars": 8192,
+    "maxQueuedChars": 4194304,
+    "ackTimeoutMs": 30000,
+    "closeFlushTimeoutMs": 2000,
+    "flowControl": false,
+    "enforceInboundLimits": false
+   },
+   "cmd": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "prompt": {
+    "chunks": 5000,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 47.673834,
+    "totalMs": 2806.40096,
+    "chunksPerSec": 1781.6413517760484,
+    "charsPerSec": 114025.0465136671,
+    "latency": {
+     "n": 5000,
+     "p50ms": 2124.986376,
+     "p90ms": 2266.593043,
+     "p99ms": 2297.406127,
+     "maxms": 2309.401626,
+     "meanms": 1946.6789165618,
+     "first10pctMeanMs": 646.126575148,
+     "last10pctMeanMs": 2273.481335816
+    }
+   },
+   "mainThread": {
+    "ticks": 235,
+    "maxLateMs": 20.073292,
+    "lateOver16ms": 2,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "clientTransport": {
+    "state": "STARTED",
+    "decoded": 5003,
+    "decodeErrors": 0,
+    "droppedTooLarge": 0,
+    "syntheticErrors": 0,
+    "droppedClosed": 0,
+    "channel": {
+     "name": "stream-channel",
+     "state": "OPEN",
+     "closeCause": null,
+     "out": {
+      "sent": 3,
+      "acked": 3,
+      "inFlightMessages": 0,
+      "inFlightChars": 0
+     },
+     "in": {
+      "received": 5003,
+      "consumed": 5003,
+      "unackedMessages": 0,
+      "unackedChars": 0
+     },
+     "enqueued": 3,
+     "acksSent": 628,
+     "acksReceived": 3,
+     "windowWaits": 0,
+     "windowWaitMsTotal": 0,
+     "windowWaitMsMax": 0,
+     "maxInFlightMessages": 1,
+     "maxInFlightChars": 229,
+     "maxQueuedChars": 229,
+     "maxUnackedMessages": 4633,
+     "maxUnackedChars": 1217643,
+     "rejectedTooLarge": 0,
+     "uidRejects": 0,
+     "binderSendUsAvg": 590.347,
+     "binderSendUsMax": 1424.833
+    }
+   },
+   "serverConnections": [
+    {
+     "id": 11,
+     "kind": "binder",
+     "peerUid": 10232,
+     "transport": {
+      "state": "STARTED",
+      "decoded": 3,
+      "decodeErrors": 0,
+      "droppedTooLarge": 0,
+      "syntheticErrors": 0,
+      "droppedClosed": 0,
+      "channel": {
+       "name": "agent-conn-11(uid=10232)",
+       "state": "OPEN",
+       "closeCause": null,
+       "out": {
+        "sent": 5003,
+        "acked": 5003,
+        "inFlightMessages": 0,
+        "inFlightChars": 0
+       },
+       "in": {
+        "received": 3,
+        "consumed": 3,
+        "unackedMessages": 0,
+        "unackedChars": 0
+       },
+       "enqueued": 5003,
+       "acksSent": 3,
+       "acksReceived": 628,
+       "windowWaits": 0,
+       "windowWaitMsTotal": 0,
+       "windowWaitMsMax": 0,
+       "maxInFlightMessages": 4633,
+       "maxInFlightChars": 1217643,
+       "maxQueuedChars": 140968,
+       "maxUnackedMessages": 1,
+       "maxUnackedChars": 229,
+       "rejectedTooLarge": 0,
+       "uidRejects": 0,
+       "binderSendUsAvg": 11.289,
+       "binderSendUsMax": 9130.25
+      }
+     }
+    }
+   ],
+   "serverMainThreadBinderCalls": 0,
+   "client": {
+    "pid": 5639,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 40
+   },
+   "closeCause": "local(transport closed)",
+   "scenario": "stream",
+   "run": "stream-noflow-f53a47",
+   "args": {
+    "chunks": 5000,
+    "chunkChars": 64,
+    "intervalMs": 0,
+    "cfg": {
+     "flowControl": false,
+     "enforceInboundLimits": false
+    }
+   },
+   "wallMs": 2956.06396,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:33.476   505   715 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce363e0) with descriptor: '(not cached)'"
+   ],
+   "driverSec": 4.2,
+   "deliveredAll": true
+  },
+  "cancel-realtime": {
+   "ok": true,
+   "cmd": {
+    "chunks": 1000000,
+    "chunkChars": 32,
+    "intervalMs": 5,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "cancelled": {
+    "chunks": 100,
+    "outOfOrder": 0,
+    "stopReason": "CANCELLED",
+    "error": null,
+    "firstChunkMs": 56.068583,
+    "totalMs": 971.247417,
+    "chunksPerSec": 102.96037677905095,
+    "charsPerSec": 3294.7320569296303,
+    "latency": {
+     "n": 100,
+     "p50ms": 5.55475,
+     "p90ms": 33.003625,
+     "p99ms": 53.05975,
+     "maxms": 53.05975,
+     "meanms": 11.537231310000001,
+     "first10pctMeanMs": 10.9785374,
+     "last10pctMeanMs": 4.2520625999999995
+    }
+   },
+   "cancelCallMs": 0.387709,
+   "cancelToStopMs": 17.284042,
+   "chunksAfterCancel": 0,
+   "followUp": {
+    "chunks": 5,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 10.308584,
+    "totalMs": 16.109209,
+    "chunksPerSec": 310.3814718649438,
+    "charsPerSec": 2483.0517749195506,
+    "latency": {
+     "n": 5,
+     "p50ms": 11.798042,
+     "p90ms": 12.7645,
+     "p99ms": 12.7645,
+     "maxms": 12.7645,
+     "meanms": 11.2690252,
+     "first10pctMeanMs": 8.204709,
+     "last10pctMeanMs": 12.7645
+    }
+   },
+   "mainThread": {
+    "ticks": 68,
+    "maxLateMs": 59.190667,
+    "lateOver16ms": 4,
+    "lateOver50ms": 1,
+    "lateOver100ms": 0
+   },
+   "serverPromptOutcomes": {
+    "cancelled": 1,
+    "end_turn": 12
+   },
+   "serverPromptsActive": 0,
+   "closeCause": "local(transport closed)",
+   "scenario": "cancel",
+   "run": "cancel-realtime-25add5",
+   "args": {
+    "intervalMs": 5,
+    "cancelAfterChunks": 100
+   },
+   "wallMs": 1418.486126,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:37.528   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce3f4f0) with descriptor: '(not cached)'"
+   ],
+   "driverSec": 2.0
+  },
+  "cancel-peak": {
+   "ok": true,
+   "cmd": {
+    "chunks": 1000000,
+    "chunkChars": 32,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": false,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "cancelled": {
+    "chunks": 5376,
+    "outOfOrder": 0,
+    "stopReason": "CANCELLED",
+    "error": null,
+    "firstChunkMs": 45.727291,
+    "totalMs": 1475.493417,
+    "chunksPerSec": 3643.526930083213,
+    "charsPerSec": 116592.86176266281,
+    "latency": {
+     "n": 5376,
+     "p50ms": 1003.515876,
+     "p90ms": 1026.564584,
+     "p99ms": 1034.921125,
+     "maxms": 1036.019126,
+     "meanms": 939.9017850050222,
+     "first10pctMeanMs": 459.22780847858473,
+     "last10pctMeanMs": 1020.5840862420857
+    }
+   },
+   "cancelCallMs": 0.34975,
+   "cancelToStopMs": 1028.062709,
+   "chunksAfterCancel": 5176,
+   "followUp": {
+    "chunks": 5,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 1.88075,
+    "totalMs": 2.396667,
+    "chunksPerSec": 2086.230586059724,
+    "charsPerSec": 16689.84468847779,
+    "latency": {
+     "n": 5,
+     "p50ms": 0.943708,
+     "p90ms": 1.019208,
+     "p99ms": 1.019208,
+     "maxms": 1.019208,
+     "meanms": 0.9081246,
+     "first10pctMeanMs": 0.779666,
+     "last10pctMeanMs": 1.019208
+    }
+   },
+   "mainThread": {
+    "ticks": 127,
+    "maxLateMs": 26.3735,
+    "lateOver16ms": 2,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "serverPromptOutcomes": {
+    "cancelled": 2,
+    "end_turn": 13
+   },
+   "serverPromptsActive": 0,
+   "closeCause": "local(transport closed)",
+   "scenario": "cancel",
+   "run": "cancel-peak-21c9f7",
+   "args": {
+    "intervalMs": 0,
+    "chunkChars": 32,
+    "cancelAfterChunks": 200
+   },
+   "wallMs": 1658.312792,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:39.754   505  1546 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce3f2e0) with descriptor: '(not cached)'"
+   ],
+   "driverSec": 3.0
+  },
+  "cancel-peak-bp": {
+   "ok": true,
+   "cmd": {
+    "chunks": 1000000,
+    "chunkChars": 32,
+    "intervalMs": 0,
+    "burst": 1,
+    "bp": true,
+    "bpChars": 16384,
+    "cjk": false
+   },
+   "cancelled": {
+    "chunks": 538,
+    "outOfOrder": 0,
+    "stopReason": "CANCELLED",
+    "error": null,
+    "firstChunkMs": 11.108458,
+    "totalMs": 763.800792,
+    "chunksPerSec": 704.3721421016804,
+    "charsPerSec": 22539.908547253774,
+    "latency": {
+     "n": 538,
+     "p50ms": 354.55725,
+     "p90ms": 408.238083,
+     "p99ms": 440.914709,
+     "maxms": 446.707209,
+     "meanms": 321.7237946988848,
+     "first10pctMeanMs": 73.88748186792452,
+     "last10pctMeanMs": 343.4393981886792
+    }
+   },
+   "cancelCallMs": 0.606917,
+   "cancelToStopMs": 342.463542,
+   "chunksAfterCancel": 338,
+   "followUp": {
+    "chunks": 5,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 3.972917,
+    "totalMs": 8.456542,
+    "chunksPerSec": 591.2582235150018,
+    "charsPerSec": 4730.065788120014,
+    "latency": {
+     "n": 5,
+     "p50ms": 4.222792,
+     "p90ms": 5.957791,
+     "p99ms": 5.957791,
+     "maxms": 5.957791,
+     "meanms": 4.1709166,
+     "first10pctMeanMs": 2.202959,
+     "last10pctMeanMs": 5.957791
+    }
+   },
+   "mainThread": {
+    "ticks": 67,
+    "maxLateMs": 28.457917,
+    "lateOver16ms": 1,
+    "lateOver50ms": 0,
+    "lateOver100ms": 0
+   },
+   "serverPromptOutcomes": {
+    "cancelled": 3,
+    "end_turn": 14
+   },
+   "serverPromptsActive": 0,
+   "closeCause": "local(transport closed)",
+   "scenario": "cancel",
+   "run": "cancel-peak-bp-b6e6d6",
+   "args": {
+    "intervalMs": 0,
+    "chunkChars": 32,
+    "bp": true,
+    "cancelAfterChunks": 200
+   },
+   "wallMs": 999.961917,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:42.689   505   715 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce3e1b0) with descriptor: '(not cached)'"
+   ],
+   "driverSec": 1.8
+  },
+  "reconnect": {
+   "ok": true,
+   "noLeak": true,
+   "iterations": 20,
+   "okCount": 20,
+   "closeFirst": true,
+   "iters": [
+    {
+     "i": 0,
+     "ok": true,
+     "ms": 243.754834,
+     "timings": {
+      "bound": 3.035875,
+      "opened": 44.040209,
+      "initialized": 163.193375
+     }
+    },
+    {
+     "i": 1,
+     "ok": true,
+     "ms": 128.495208,
+     "timings": {
+      "bound": 6.825875,
+      "opened": 11.522708,
+      "initialized": 18.578083
+     }
+    },
+    {
+     "i": 2,
+     "ok": true,
+     "ms": 147.023292,
+     "timings": {
+      "bound": 56.088792,
+      "opened": 63.522625,
+      "initialized": 67.93475
+     }
+    },
+    {
+     "i": 3,
+     "ok": true,
+     "ms": 87.71125,
+     "timings": {
+      "bound": 20.093791,
+      "opened": 27.522916,
+      "initialized": 55.766625
+     }
+    },
+    {
+     "i": 4,
+     "ok": true,
+     "ms": 78.531917,
+     "timings": {
+      "bound": 1.390875,
+      "opened": 5.521959,
+      "initialized": 34.642125
+     }
+    },
+    {
+     "i": 5,
+     "ok": true,
+     "ms": 123.923834,
+     "timings": {
+      "bound": 4.376083,
+      "opened": 28.236625,
+      "initialized": 44.392541
+     }
+    },
+    {
+     "i": 6,
+     "ok": true,
+     "ms": 123.04975,
+     "timings": {
+      "bound": 33.39275,
+      "opened": 43.934875,
+      "initialized": 64.875375
+     }
+    },
+    {
+     "i": 7,
+     "ok": true,
+     "ms": 111.586375,
+     "timings": {
+      "bound": 24.147208,
+      "opened": 29.689542,
+      "initialized": 45.85825
+     }
+    },
+    {
+     "i": 8,
+     "ok": true,
+     "ms": 34.133833,
+     "timings": {
+      "bound": 2.34125,
+      "opened": 6.193167,
+      "initialized": 13.249292
+     }
+    },
+    {
+     "i": 9,
+     "ok": true,
+     "ms": 107.798209,
+     "timings": {
+      "bound": 30.51375,
+      "opened": 33.034084,
+      "initialized": 67.273
+     }
+    },
+    {
+     "i": 10,
+     "ok": true,
+     "ms": 145.058583,
+     "timings": {
+      "bound": 20.439833,
+      "opened": 24.416291,
+      "initialized": 52.058958
+     }
+    },
+    {
+     "i": 11,
+     "ok": true,
+     "ms": 73.200625,
+     "timings": {
+      "bound": 8.665834,
+      "opened": 25.802917,
+      "initialized": 38.879709
+     }
+    },
+    {
+     "i": 12,
+     "ok": true,
+     "ms": 73.333042,
+     "timings": {
+      "bound": 2.997625,
+      "opened": 7.471,
+      "initialized": 14.708709
+     }
+    },
+    {
+     "i": 13,
+     "ok": true,
+     "ms": 70.580458,
+     "timings": {
+      "bound": 9.68525,
+      "opened": 18.154541,
+      "initialized": 41.87775
+     }
+    },
+    {
+     "i": 14,
+     "ok": true,
+     "ms": 129.192291,
+     "timings": {
+      "bound": 15.092667,
+      "opened": 68.753667,
+      "initialized": 97.043292
+     }
+    },
+    {
+     "i": 15,
+     "ok": true,
+     "ms": 87.828167,
+     "timings": {
+      "bound": 9.827708,
+      "opened": 29.510791,
+      "initialized": 50.513416
+     }
+    },
+    {
+     "i": 16,
+     "ok": true,
+     "ms": 107.244292,
+     "timings": {
+      "bound": 6.05075,
+      "opened": 30.522542,
+      "initialized": 50.208417
+     }
+    },
+    {
+     "i": 17,
+     "ok": true,
+     "ms": 114.425417,
+     "timings": {
+      "bound": 47.585375,
+      "opened": 51.312708,
+      "initialized": 61.132792
+     }
+    },
+    {
+     "i": 18,
+     "ok": true,
+     "ms": 67.399583,
+     "timings": {
+      "bound": 6.099208,
+      "opened": 9.574542,
+      "initialized": 27.955375
+     }
+    },
+    {
+     "i": 19,
+     "ok": true,
+     "ms": 76.774,
+     "timings": {
+      "bound": 3.281291,
+      "opened": 13.467333,
+      "initialized": 21.462041
+     }
+    }
+   ],
+   "serverBefore": {
+    "pid": 3628,
+    "connectionsOpen": 0,
+    "connectionsOpened": 14,
+    "connectionsClosed": 14,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 3,
+     "end_turn": 14
+    },
+    "threads": 32,
+    "pssKb": 30580,
+    "mainThreadBinderCalls": 0
+   },
+   "serverAfter": {
+    "pid": 3628,
+    "connectionsOpen": 0,
+    "connectionsOpened": 34,
+    "connectionsClosed": 34,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 3,
+     "end_turn": 34
+    },
+    "threads": 32,
+    "pssKb": 30187,
+    "mainThreadBinderCalls": 0
+   },
+   "clientBefore": {
+    "pid": 5908,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 25
+   },
+   "clientAfter": {
+    "pid": 5908,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 35
+   },
+   "scenario": "reconnect",
+   "run": "reconnect-3ea52b",
+   "args": {
+    "iterations": 20
+   },
+   "wallMs": 3858.732502,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:44.494   505   591 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce42040) with descriptor: '(not cached)'",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: *** Uncaught remote exception! Exceptions are not yet supported across processes. Client PID 4312 UID 10158.",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: java.lang.RuntimeException: android.os.DeadObjectException",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat android.os.Parcel.writeException(Parcel.java:3159)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat android.os.Binder.execTransactInternal(Binder.java:1393)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat android.os.Binder.execTransact(Binder.java:1323)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: Caused by: android.os.DeadObjectException",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat android.os.BinderProxy.transactNative(Native Method)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat android.os.BinderProxy.transact(BinderProxy.java:626)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat zqx.fC(:com.google.android.gms@261136035@26.11.36 (260400-892401869):5)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat fqaf.a(:com.google.android.gms@261136035@26.11.36 (260400-892401869):12)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat fqam.d(:com.google.android.gms@261136035@26.11.36 (260400-892401869):309)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat fqam.dispatchTransaction(:com.google.android.gms@261136035@26.11.36 (260400-892401869):929)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat bziy.a(:com.google.android.gms@261136035@26.11.36 (260400-892401869):72)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat zqy.onTransact(:com.google.android.gms@261136035@26.11.36 (260400-892401869):23)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat android.os.Binder.transact(Binder.java:1230)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat bzjm.onTransact(:com.google.android.gms@261136035@26.11.36 (260400-892401869):161)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \tat android.os.Binder.execTransactInternal(Binder.java:1364)",
+    "09-29 03:29:45.262  1496  2672 E JavaBinder: \t... 1 more",
+    "09-29 03:29:48.332  1496  2711 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:48.332  1496  2711 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 5.0
+  },
+  "reconnect-noclose": {
+   "ok": true,
+   "noLeak": true,
+   "iterations": 5,
+   "okCount": 5,
+   "closeFirst": false,
+   "iters": [
+    {
+     "i": 0,
+     "ok": true,
+     "ms": 460.197042,
+     "timings": {
+      "bound": 2.348625,
+      "opened": 123.122417,
+      "initialized": 238.129375
+     }
+    },
+    {
+     "i": 1,
+     "ok": true,
+     "ms": 163.26925,
+     "timings": {
+      "bound": 34.200375,
+      "opened": 113.480709,
+      "initialized": 127.912292
+     }
+    },
+    {
+     "i": 2,
+     "ok": true,
+     "ms": 224.876084,
+     "timings": {
+      "bound": 77.216625,
+      "opened": 94.898792,
+      "initialized": 171.039292
+     }
+    },
+    {
+     "i": 3,
+     "ok": true,
+     "ms": 158.788875,
+     "timings": {
+      "bound": 29.625458,
+      "opened": 77.492041,
+      "initialized": 82.622125
+     }
+    },
+    {
+     "i": 4,
+     "ok": true,
+     "ms": 80.546208,
+     "timings": {
+      "bound": 24.005958,
+      "opened": 36.112375,
+      "initialized": 39.931125
+     }
+    }
+   ],
+   "serverBefore": {
+    "pid": 3628,
+    "connectionsOpen": 0,
+    "connectionsOpened": 34,
+    "connectionsClosed": 34,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 3,
+     "end_turn": 34
+    },
+    "threads": 32,
+    "pssKb": 30311,
+    "mainThreadBinderCalls": 0
+   },
+   "serverAfter": {
+    "pid": 3628,
+    "connectionsOpen": 0,
+    "connectionsOpened": 39,
+    "connectionsClosed": 39,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 3,
+     "end_turn": 39
+    },
+    "threads": 32,
+    "pssKb": 30794,
+    "mainThreadBinderCalls": 0
+   },
+   "clientBefore": {
+    "pid": 6034,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 25
+   },
+   "clientAfter": {
+    "pid": 6034,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 32
+   },
+   "scenario": "reconnect",
+   "run": "reconnect-noclose-da0377",
+   "args": {
+    "iterations": 5,
+    "closeFirst": false
+   },
+   "wallMs": 2780.881376,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:49.711   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce41120) with descriptor: '(not cached)'",
+    "09-29 03:29:50.051  2933  6027 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 84)",
+    "09-29 03:29:50.594   661  1693 W libbinder.Binder: Binder transaction to android.app.IActivityManager, function: UNKNOWN_FUNCTION_NAME, code: 1598246212, took 1036ms. Data bytes: 524 Reply bytes: 4 Flags: 16",
+    "09-29 03:29:51.364  1496  2712 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:51.364  1496  2712 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 4.6
+  },
+  "server-kill": {
+   "ok": true,
+   "killedAfterChunks": 51,
+   "closeCause": "peer_died(peer died)",
+   "detectMs": 46.581917,
+   "promptError": {
+    "class": "java.util.concurrent.CancellationException",
+    "message": "Protocol closed"
+   },
+   "promptEndMs": 73.464417,
+   "promptHung": false,
+   "serviceDisconnectedMs": 45.614584,
+   "serviceRestartMs": 1168.672043,
+   "recoveredMs": 1300.643709,
+   "afterRestartPrompt": {
+    "chunks": 5,
+    "outOfOrder": 0,
+    "stopReason": "END_TURN",
+    "error": null,
+    "firstChunkMs": 20.287959,
+    "totalMs": 25.572334,
+    "chunksPerSec": 195.52380318511405,
+    "charsPerSec": 1564.1904254809124,
+    "latency": {
+     "n": 5,
+     "p50ms": 2.724958,
+     "p90ms": 5.850375,
+     "p99ms": 5.850375,
+     "maxms": 5.850375,
+     "meanms": 3.3997834,
+     "first10pctMeanMs": 5.850375,
+     "last10pctMeanMs": 3.157625
+    }
+   },
+   "clientLiveChannelsAfterDeath": 0,
+   "serverBefore": {
+    "pid": 3628,
+    "connectionsOpen": 0,
+    "connectionsOpened": 39,
+    "connectionsClosed": 39,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 3,
+     "end_turn": 39
+    },
+    "threads": 32,
+    "pssKb": 30863,
+    "mainThreadBinderCalls": 0
+   },
+   "serverAfter": {
+    "pid": 6136,
+    "connectionsOpen": 0,
+    "connectionsOpened": 1,
+    "connectionsClosed": 1,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "end_turn": 1
+    },
+    "threads": 18,
+    "pssKb": 27045,
+    "mainThreadBinderCalls": 0
+   },
+   "clientAfter": {
+    "pid": 6099,
+    "liveChannels": 0,
+    "mainThreadBinderCalls": 0,
+    "closeNotifyRetries": 0,
+    "ackRetries": 0,
+    "threads": 29
+   },
+   "scenario": "server-kill",
+   "run": "server-kill-668ff5",
+   "args": {
+    "killAfterChunks": 50
+   },
+   "wallMs": 2814.291335,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:29:54.151   505  1120 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce45950) with descriptor: '(not cached)'",
+    "09-29 03:29:54.490  1496  2192 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:54.491  1496  2192 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:29:57.459  1496  2192 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:29:57.459  1496  2192 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 4.4
+  },
+  "client-kill": {
+   "ok": true,
+   "dying": {
+    "scenario": "client-kill",
+    "phase": "dying",
+    "pid": 6179,
+    "dyingAtNs": 151317209947,
+    "chunks": 50
+   },
+   "detectMs": 14.757666,
+   "closes": [
+    {
+     "id": 2,
+     "kind": "binder",
+     "peerUid": 10232,
+     "cause": "peer_died(peer died)",
+     "aliveMs": 755,
+     "closedAtNs": 151331967613
+    }
+   ],
+   "server": {
+    "pid": 6136,
+    "connectionsOpen": 0,
+    "liveChannels": 0,
+    "hostJobChildren": 0,
+    "promptsActive": 0,
+    "promptOutcomes": {
+     "cancelled": 1,
+     "end_turn": 1
+    },
+    "threads": 20,
+    "pssKb": 27691
+   },
+   "clientPidBefore": 6179,
+   "clientPidAfter": 6235,
+   "driverSec": 7.1
+  },
+  "oversize": {
+   "maxMessageChars": 65536,
+   "A_clientOversizePrompt": {
+    "ok": true,
+    "error": {
+     "class": "com.agentclientprotocol.protocol.JsonRpcException",
+     "message": "binder-channel-v1: message of 66655 chars exceeds 65536"
+    },
+    "ms": 60.218875
+   },
+   "B_nearLimitPrompt": {
+    "ok": true,
+    "prompt": {
+     "chunks": 20,
+     "outOfOrder": 0,
+     "stopReason": "END_TURN",
+     "error": null,
+     "firstChunkMs": 38.370291,
+     "totalMs": 582.157667,
+     "chunksPerSec": 34.35495422239281,
+     "charsPerSec": 2559.4440895682646,
+     "latency": {
+      "n": 20,
+      "p50ms": 9.997083,
+      "p90ms": 20.544792,
+      "p99ms": 45.058291,
+      "maxms": 45.058291,
+      "meanms": 10.888606300000001,
+      "first10pctMeanMs": 8.156229,
+      "last10pctMeanMs": 3.649813
+     }
+    }
+   },
+   "C_agentOversizeNotification": {
+    "ok": true,
+    "prompt": {
+     "chunks": 3,
+     "outOfOrder": 0,
+     "stopReason": "END_TURN",
+     "error": null,
+     "firstChunkMs": 7.980375,
+     "totalMs": 31.365375,
+     "chunksPerSec": 95.64687174950085,
+     "charsPerSec": 765.1749739960068,
+     "latency": {
+      "n": 3,
+      "p50ms": 5.146333,
+      "p90ms": 5.337875,
+      "p99ms": 5.337875,
+      "maxms": 5.337875,
+      "meanms": 5.147111,
+      "first10pctMeanMs": 4.957125,
+      "last10pctMeanMs": 5.337875
+     }
+    },
+    "serverDroppedTooLarge": 1
+   },
+   "D_rawOversizeInjection": {
+    "ok": true,
+    "closeCause": "remote(message of 65537 chars exceeds 65536)",
+    "ms": 9.857292
+   },
+   "ok": true,
+   "scenario": "oversize",
+   "run": "oversize-0c69f9",
+   "args": {},
+   "wallMs": 904.868959,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:30:05.732   505  1546 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce46870) with descriptor: '(not cached)'",
+    "09-29 03:30:06.140   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce42300) with descriptor: '(not cached)'",
+    "09-29 03:30:06.473  1496  2711 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:30:06.473  1496  2711 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 2.0
+  },
+  "window-violation": {
+   "ok": true,
+   "injected": 2,
+   "units": 30000,
+   "sendError": null,
+   "closeCause": "remote(window exceeded: 2 messages / 60000 chars unacked)",
+   "serverLastClose": {
+    "id": 4,
+    "kind": "binder",
+    "peerUid": 10232,
+    "cause": "violation(window exceeded: 2 messages / 60000 chars unacked)",
+    "aliveMs": 203,
+    "closedAtNs": 159597210201
+   },
+   "scenario": "window-violation",
+   "run": "window-violation-75f7e6",
+   "args": {
+    "units": 30000,
+    "n": 200
+   },
+   "wallMs": 474.850792,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:30:07.918   661   672 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000781585edb0) with descriptor: '(not cached)'",
+    "09-29 03:30:07.918   661   672 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb4000078158c7190) with descriptor: '(not cached)'",
+    "09-29 03:30:08.080   505  1546 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce479a0) with descriptor: '(not cached)'",
+    "09-29 03:30:09.506  1496  2672 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:30:09.507  1496  2672 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 2.2
+  },
+  "bench-single": {
+   "STRING": {
+    "kind": "STRING",
+    "maxOkUnits": 259072,
+    "maxOkParcelBytes": 518152,
+    "minFailUnits": 260096,
+    "minFailParcelBytes": 520200,
+    "firstFailure": {
+     "class": "android.os.TransactionTooLargeException",
+     "message": "data parcel size 524384 bytes",
+     "units": 262144,
+     "ok": false,
+     "aliveAfter": true
+    },
+    "attempts": [
+     {
+      "units": 16384,
+      "ok": true,
+      "delivered": true,
+      "ms": 19.546125
+     },
+     {
+      "units": 32768,
+      "ok": true,
+      "delivered": true,
+      "ms": 1.070625
+     },
+     {
+      "units": 65536,
+      "ok": true,
+      "delivered": true,
+      "ms": 70.727375
+     },
+     {
+      "units": 98304,
+      "ok": true,
+      "delivered": true,
+      "ms": 16.763834
+     },
+     {
+      "units": 131072,
+      "ok": true,
+      "delivered": true,
+      "ms": 1.241333
+     },
+     {
+      "units": 163840,
+      "ok": true,
+      "delivered": true,
+      "ms": 12.424208
+     },
+     {
+      "units": 196608,
+      "ok": true,
+      "delivered": true,
+      "ms": 29.609542
+     },
+     {
+      "units": 229376,
+      "ok": true,
+      "delivered": true,
+      "ms": 6.398417
+     },
+     {
+      "class": "android.os.TransactionTooLargeException",
+      "message": "data parcel size 524384 bytes",
+      "units": 262144,
+      "ok": false,
+      "aliveAfter": true
+     },
+     {
+      "units": 245760,
+      "ok": true,
+      "delivered": true,
+      "ms": 19.110834
+     },
+     {
+      "units": 253952,
+      "ok": true,
+      "delivered": true,
+      "ms": 4.705667
+     },
+     {
+      "units": 258048,
+      "ok": true,
+      "delivered": true,
+      "ms": 14.247458
+     },
+     {
+      "class": "android.os.TransactionTooLargeException",
+      "message": "data parcel size 520288 bytes",
+      "units": 260096,
+      "ok": false,
+      "aliveAfter": true
+     },
+     {
+      "units": 259072,
+      "ok": true,
+      "delivered": true,
+      "ms": 13.19925
+     }
+    ]
+   },
+   "BYTES": {
+    "kind": "BYTES",
+    "maxOkUnits": 519168,
+    "maxOkParcelBytes": 519172,
+    "minFailUnits": 520192,
+    "minFailParcelBytes": 520196,
+    "firstFailure": {
+     "class": "android.os.TransactionTooLargeException",
+     "message": "data parcel size 524380 bytes",
+     "units": 524288,
+     "ok": false,
+     "aliveAfter": true
+    },
+    "attempts": [
+     {
+      "units": 16384,
+      "ok": true,
+      "delivered": true,
+      "ms": 6.470959
+     },
+     {
+      "units": 32768,
+      "ok": true,
+      "delivered": true,
+      "ms": 0.186542
+     },
+     {
+      "units": 65536,
+      "ok": true,
+      "delivered": true,
+      "ms": 0.700917
+     },
+     {
+      "units": 98304,
+      "ok": true,
+      "delivered": true,
+      "ms": 0.579708
+     },
+     {
+      "units": 131072,
+      "ok": true,
+      "delivered": true,
+      "ms": 10.43625
+     },
+     {
+      "units": 163840,
+      "ok": true,
+      "delivered": true,
+      "ms": 4.680584
+     },
+     {
+      "units": 196608,
+      "ok": true,
+      "delivered": true,
+      "ms": 4.645458
+     },
+     {
+      "units": 229376,
+      "ok": true,
+      "delivered": true,
+      "ms": 8.975334
+     },
+     {
+      "units": 262144,
+      "ok": true,
+      "delivered": true,
+      "ms": 3.357042
+     },
+     {
+      "units": 327680,
+      "ok": true,
+      "delivered": true,
+      "ms": 1.588958
+     },
+     {
+      "units": 393216,
+      "ok": true,
+      "delivered": true,
+      "ms": 27.027333
+     },
+     {
+      "units": 458752,
+      "ok": true,
+      "delivered": true,
+      "ms": 14.133709
+     },
+     {
+      "class": "android.os.TransactionTooLargeException",
+      "message": "data parcel size 524380 bytes",
+      "units": 524288,
+      "ok": false,
+      "aliveAfter": true
+     },
+     {
+      "units": 491520,
+      "ok": true,
+      "delivered": true,
+      "ms": 2.177625
+     },
+     {
+      "units": 507904,
+      "ok": true,
+      "delivered": true,
+      "ms": 14.684167
+     },
+     {
+      "units": 516096,
+      "ok": true,
+      "delivered": true,
+      "ms": 7.433375
+     },
+     {
+      "class": "android.os.TransactionTooLargeException",
+      "message": "data parcel size 520284 bytes",
+      "units": 520192,
+      "ok": false,
+      "aliveAfter": true
+     },
+     {
+      "units": 518144,
+      "ok": true,
+      "delivered": true,
+      "ms": 7.251208
+     },
+     {
+      "units": 519168,
+      "ok": true,
+      "delivered": true,
+      "ms": 6.144625
+     }
+    ]
+   },
+   "STRING_CJK": {
+    "kind": "STRING_CJK",
+    "maxOkUnits": 259072,
+    "maxOkParcelBytes": 518152,
+    "minFailUnits": 260096,
+    "minFailParcelBytes": 520200,
+    "firstFailure": {
+     "class": "android.os.TransactionTooLargeException",
+     "message": "data parcel size 524384 bytes",
+     "units": 262144,
+     "ok": false,
+     "aliveAfter": true
+    },
+    "attempts": [
+     {
+      "units": 16384,
+      "ok": true,
+      "delivered": true,
+      "ms": 0.406375
+     },
+     {
+      "units": 32768,
+      "ok": true,
+      "delivered": true,
+      "ms": 5.559917
+     },
+     {
+      "units": 65536,
+      "ok": true,
+      "delivered": true,
+      "ms": 6.244792
+     },
+     {
+      "units": 98304,
+      "ok": true,
+      "delivered": true,
+      "ms": 4.735291
+     },
+     {
+      "units": 131072,
+      "ok": true,
+      "delivered": true,
+      "ms": 0.839417
+     },
+     {
+      "units": 163840,
+      "ok": true,
+      "delivered": true,
+      "ms": 1.15375
+     },
+     {
+      "units": 196608,
+      "ok": true,
+      "delivered": true,
+      "ms": 8.126041
+     },
+     {
+      "units": 229376,
+      "ok": true,
+      "delivered": true,
+      "ms": 6.031209
+     },
+     {
+      "class": "android.os.TransactionTooLargeException",
+      "message": "data parcel size 524384 bytes",
+      "units": 262144,
+      "ok": false,
+      "aliveAfter": true
+     },
+     {
+      "units": 245760,
+      "ok": true,
+      "delivered": true,
+      "ms": 0.937208
+     },
+     {
+      "units": 253952,
+      "ok": true,
+      "delivered": true,
+      "ms": 1.137708
+     },
+     {
+      "units": 258048,
+      "ok": true,
+      "delivered": true,
+      "ms": 7.099542
+     },
+     {
+      "class": "android.os.TransactionTooLargeException",
+      "message": "data parcel size 520288 bytes",
+      "units": 260096,
+      "ok": false,
+      "aliveAfter": true
+     },
+     {
+      "units": 259072,
+      "ok": true,
+      "delivered": true,
+      "ms": 7.106
+     }
+    ]
+   },
+   "scenario": "bench-single",
+   "run": "bench-single-2973b7",
+   "args": {},
+   "wallMs": 1539.611918,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:30:12.126  6419  6445 W libbinder.BpBinder: Large outgoing transaction of 520284 bytes, interface descriptor '(not cached)', code 2, flags 1 was sent",
+    "09-29 03:30:12.126  6419  6445 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 520284)",
+    "09-29 03:30:12.148  6419  6445 W libbinder.BpBinder: Large outgoing transaction of 518236 bytes, interface descriptor '(not cached)', code 2, flags 1 was sent",
+    "09-29 03:30:12.150  6136  6145 W libbinder.Binder: Large data transaction of 518236 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 2, flags: 17",
+    "09-29 03:30:12.189  6419  6445 W libbinder.BpBinder: Large outgoing transaction of 519260 bytes, interface descriptor '(not cached)', code 2, flags 1 was sent",
+    "09-29 03:30:12.189  6136  6145 W libbinder.Binder: Large data transaction of 519260 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 2, flags: 17",
+    "09-29 03:30:12.224  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 327776 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.224  6136  6154 W libbinder.Binder: Large data transaction of 327776 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:30:12.228  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 393312 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.228  6136  6221 W libbinder.Binder: Large data transaction of 393312 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:30:12.239  6136  6154 W libbinder.Binder: Large data transaction of 458848 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:30:12.239  6419  6439 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:12.239  6419  6439 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:12.239  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 458848 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.247  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 524384 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.247  6419  6439 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 524384)",
+    "09-29 03:30:12.248  6136  6221 W libbinder.Binder: Large data transaction of 491616 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:30:12.248  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 491616 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.255  6136  6154 W libbinder.Binder: Large data transaction of 508000 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:30:12.255  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 508000 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.257  6136  6221 W libbinder.Binder: Large data transaction of 516192 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:30:12.257  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 516192 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.266  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 520288 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.266  6419  6439 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 520288)",
+    "09-29 03:30:12.269  6136  6154 W libbinder.Binder: Large data transaction of 518240 bytes, interface descriptor org.agentos.spike.s3.api.IBenchSink, function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17",
+    "09-29 03:30:12.269  6419  6439 W libbinder.BpBinder: Large outgoing transaction of 518240 bytes, interface descriptor '(not cached)', code 1, flags 1 was sent",
+    "09-29 03:30:12.278  6419  6419 I S3RESULT: bench-single-2973b7 1/2 {\"STRING\":{\"kind\":\"STRING\",\"maxOkUnits\":259072,\"maxOkParcelBytes\":518152,\"minFailUnits\":260096,\"minFailParcelBytes\":520200,\"firstFailure\":{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 524384 bytes\",\"units\":262144,\"ok\":false,\"aliveAfter\":true},\"attempts\":[{\"units\":16384,\"ok\":true,\"delivered\":true,\"ms\":19.546125},{\"units\":32768,\"ok\":true,\"delivered\":true,\"ms\":1.070625},{\"units\":65536,\"ok\":true,\"delivered\":true,\"ms\":70.727375},{\"units\":98304,\"ok\":true,\"delivered\":true,\"ms\":16.763834},{\"units\":131072,\"ok\":true,\"delivered\":true,\"ms\":1.241333},{\"units\":163840,\"ok\":true,\"delivered\":true,\"ms\":12.424208},{\"units\":196608,\"ok\":true,\"delivered\":true,\"ms\":29.609542},{\"units\":229376,\"ok\":true,\"delivered\":true,\"ms\":6.398417},{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 524384 bytes\",\"units\":262144,\"ok\":false,\"aliveAfter\":true},{\"units\":245760,\"ok\":true,\"delivered\":true,\"ms\":19.110834},{\"units\":253952,\"ok\":true,\"delivered\":true,\"ms\":4.705667},{\"units\":258048,\"ok\":true,\"delivered\":true,\"ms\":14.247458},{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 520288 bytes\",\"units\":260096,\"ok\":false,\"aliveAfter\":true},{\"units\":259072,\"ok\":true,\"delivered\":true,\"ms\":13.19925}]},\"BYTES\":{\"kind\":\"BYTES\",\"maxOkUnits\":519168,\"maxOkParcelBytes\":519172,\"minFailUnits\":520192,\"minFailParcelBytes\":520196,\"firstFailure\":{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 524380 bytes\",\"units\":524288,\"ok\":false,\"aliveAfter\":true},\"attempts\":[{\"units\":16384,\"ok\":true,\"delivered\":true,\"ms\":6.470959},{\"units\":32768,\"ok\":true,\"delivered\":true,\"ms\":0.186542},{\"units\":65536,\"ok\":true,\"delivered\":true,\"ms\":0.700917},{\"units\":98304,\"ok\":true,\"delivered\":true,\"ms\":0.579708},{\"units\":131072,\"ok\":true,\"delivered\":true,\"ms\":10.43625},{\"units\":163840,\"ok\":true,\"delivered\":true,\"ms\":4.680584},{\"units\":196608,\"ok\":true,\"delivered\":true,\"ms\":4.645458},{\"units\":229376,\"ok\":true,\"delivered\":true,\"ms\":8.975334},{\"units\":262144,\"ok\":true,\"delivered\":true,\"ms\":3.357042},{\"units\":327680,\"ok\":true,\"delivered\":true,\"ms\":1.588958},{\"units\":393216,\"ok\":true,\"delivered\":true,\"ms\":27.027333},{\"units\":458752,\"ok\":true,\"delivered\":true,\"ms\":14.133709},{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 524380 bytes\",\"units\":524288,\"ok\":false,\"aliveAfter\":true},{\"units\":491520,\"ok\":true,\"delivered\":true,\"ms\":2.177625},{\"units\":507904,\"ok\":true,\"delivered\":true,\"ms\":14.684167},{\"units\":516096,\"ok\":true,\"delivered\":true,\"ms\":7.433375},{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 520284 bytes\",\"units\":520192,\"ok\":false,\"aliveAfter\":true},{\"units\":518144,\"ok\":true,\"delivered\":true,\"ms\":7.251208},{\"units\":519168,\"ok\":true,\"delivered\":true,\"ms\":6.144625}]},\"STRING_CJK\":{\"kind\":\"STRING_CJK\",\"maxOkUnits\":259072,\"maxOkParcelBytes\":518152,\"minFailUnits\":260096,\"minFailParcelBytes\":520200,\"firstFailure\":{\"class\":\"android.os.TransactionTooLargeEx",
+    "09-29 03:30:12.278  6419  6419 I S3RESULT: bench-single-2973b7 2/2 ception\",\"message\":\"data parcel size 524384 bytes\",\"units\":262144,\"ok\":false,\"aliveAfter\":true},\"attempts\":[{\"units\":16384,\"ok\":true,\"delivered\":true,\"ms\":0.406375},{\"units\":32768,\"ok\":true,\"delivered\":true,\"ms\":5.559917},{\"units\":65536,\"ok\":true,\"delivered\":true,\"ms\":6.244792},{\"units\":98304,\"ok\":true,\"delivered\":true,\"ms\":4.735291},{\"units\":131072,\"ok\":true,\"delivered\":true,\"ms\":0.839417},{\"units\":163840,\"ok\":true,\"delivered\":true,\"ms\":1.15375},{\"units\":196608,\"ok\":true,\"delivered\":true,\"ms\":8.126041},{\"units\":229376,\"ok\":true,\"delivered\":true,\"ms\":6.031209},{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 524384 bytes\",\"units\":262144,\"ok\":false,\"aliveAfter\":true},{\"units\":245760,\"ok\":true,\"delivered\":true,\"ms\":0.937208},{\"units\":253952,\"ok\":true,\"delivered\":true,\"ms\":1.137708},{\"units\":258048,\"ok\":true,\"delivered\":true,\"ms\":7.099542},{\"class\":\"android.os.TransactionTooLargeException\",\"message\":\"data parcel size 520288 bytes\",\"units\":260096,\"ok\":false,\"aliveAfter\":true},{\"units\":259072,\"ok\":true,\"delivered\":true,\"ms\":7.106}]},\"scenario\":\"bench-single\",\"run\":\"bench-single-2973b7\",\"args\":{},\"wallMs\":1539.611918,\"device\":{\"model\":\"sdk_gphone64_arm64\",\"sdk\":37,\"release\":\"17\",\"fingerprint\":\"google\\/sdk_gphone64_arm64\\/emu64a:17\\/CE2A.260420.019\\/15611780:userdebug\\/dev-keys\"},\"debuggable\":true}",
+    "09-29 03:30:12.519  1496  2711 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:30:12.519  1496  2711 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 3.2
+  },
+  "bench-burst": {
+   "handlerDelayMicros": 2000,
+   "n": 5000,
+   "clientToAgent": [
+    {
+     "kind": "STRING",
+     "units": 1024,
+     "n": 5000,
+     "parcelBytesEach": 2056,
+     "failAt": 242,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "aliveAfter": true,
+     "sendMs": 1.170542,
+     "processedAtStop": 0,
+     "inFlightAtStop": 242,
+     "inFlightBytesAtStop": 497552,
+     "drainedMs": 868.016292,
+     "drained": true
+    },
+    {
+     "kind": "STRING",
+     "units": 8192,
+     "n": 5000,
+     "parcelBytesEach": 16392,
+     "failAt": 31,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "aliveAfter": true,
+     "sendMs": 0.743083,
+     "processedAtStop": 0,
+     "inFlightAtStop": 31,
+     "inFlightBytesAtStop": 508152,
+     "drainedMs": 105.519208,
+     "drained": true
+    },
+    {
+     "kind": "STRING",
+     "units": 32768,
+     "n": 5000,
+     "parcelBytesEach": 65544,
+     "failAt": 7,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "aliveAfter": true,
+     "sendMs": 0.491667,
+     "processedAtStop": 0,
+     "inFlightAtStop": 7,
+     "inFlightBytesAtStop": 458808,
+     "drainedMs": 22.799417,
+     "drained": true
+    },
+    {
+     "kind": "STRING",
+     "units": 65536,
+     "n": 5000,
+     "parcelBytesEach": 131080,
+     "failAt": 3,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "aliveAfter": true,
+     "sendMs": 0.447583,
+     "processedAtStop": 0,
+     "inFlightAtStop": 3,
+     "inFlightBytesAtStop": 393240,
+     "drainedMs": 24.122667,
+     "drained": true
+    }
+   ],
+   "agentToClient": [
+    {
+     "kind": "STRING",
+     "units": 8192,
+     "n": 5000,
+     "parcelBytesEach": 16392,
+     "failAt": 31,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "aliveAfter": true,
+     "sendMs": 3.035167,
+     "processedAtStop": -1,
+     "inFlightAtStop": -1,
+     "inFlightBytesAtStop": -1,
+     "processedAtReturn": 1,
+     "inFlightAtReturn": 30,
+     "inFlightBytesAtReturn": 491760,
+     "drained": true
+    },
+    {
+     "kind": "STRING",
+     "units": 32768,
+     "n": 5000,
+     "parcelBytesEach": 65544,
+     "failAt": 7,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "aliveAfter": true,
+     "sendMs": 0.931625,
+     "processedAtStop": -1,
+     "inFlightAtStop": -1,
+     "inFlightBytesAtStop": -1,
+     "processedAtReturn": 0,
+     "inFlightAtReturn": 7,
+     "inFlightBytesAtReturn": 458808,
+     "drained": true
+    }
+   ],
+   "scenario": "bench-burst",
+   "run": "bench-burst-46b205",
+   "args": {
+    "n": 5000,
+    "handlerDelayMicros": 2000
+   },
+   "wallMs": 1198.191334,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:30:13.371   505   590 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce41960) with descriptor: '(not cached)'",
+    "09-29 03:30:14.024  6477  6498 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:14.024  6477  6498 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:14.025  6477  6498 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2144)",
+    "09-29 03:30:14.897  6477  6499 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:14.897  6477  6499 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:14.897  6477  6499 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 16480)",
+    "09-29 03:30:15.005  6477  6499 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:15.005  6477  6499 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:15.005  6477  6499 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 65632)",
+    "09-29 03:30:15.031  6477  6499 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 131168)",
+    "09-29 03:30:15.059  6136  6145 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:15.059  6136  6145 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:15.060  6136  6145 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 16480)",
+    "09-29 03:30:15.168  6136  6145 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:15.168  6136  6145 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:15.168  6136  6145 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 65632)",
+    "09-29 03:30:15.531  1496  2672 I NullBinder: NullBinder for android.net.action.RECOMMEND_NETWORKS triggering remote TransactionTooLargeException due to Service without Chimera impl, calling uid: 1000, calling pid: 0",
+    "09-29 03:30:15.531  1496  2672 W libbinder.Binder: Large reply transaction of 1056768 bytes, interface descriptor , function: UNKNOWN_FUNCTION_NAME, code: 1, flags: 17"
+   ],
+   "driverSec": 3.1
+  },
+  "bench-throughput": {
+   "results": [
+    {
+     "kind": "STRING",
+     "units": 64,
+     "n": 20000,
+     "failAt": -1,
+     "error": null,
+     "sendMs": 496.617083,
+     "totalMs": 505.870708,
+     "msgsPerSec": 39535.79379812598,
+     "mbPerSec": 5.3768679565451345
+    },
+    {
+     "kind": "STRING",
+     "units": 1024,
+     "n": 20000,
+     "failAt": 3361,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "sendMs": 91.659708,
+     "totalMs": 101.598875,
+     "msgsPerSec": 33081.07496269028,
+     "mbPerSec": 68.01469012329123
+    },
+    {
+     "kind": "STRING",
+     "units": 8192,
+     "n": 4096,
+     "failAt": 74,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "sendMs": 2.734334,
+     "totalMs": 9.159334,
+     "msgsPerSec": 8079.190037179559,
+     "mbPerSec": 132.43408308944734
+    },
+    {
+     "kind": "STRING",
+     "units": 32768,
+     "n": 1024,
+     "failAt": 10,
+     "error": {
+      "class": "android.os.DeadObjectException",
+      "message": "Transaction failed on small parcel; remote process probably died, but this could also be caused by running out of binder buffer space"
+     },
+     "sendMs": 0.484333,
+     "totalMs": 10.849375,
+     "msgsPerSec": 921.7120801889511,
+     "mbPerSec": 60.412696583904605
+    }
+   ],
+   "scenario": "bench-throughput",
+   "run": "bench-throughput-688da0",
+   "args": {},
+   "wallMs": 694.692167,
+   "device": {
+    "model": "sdk_gphone64_arm64",
+    "sdk": 37,
+    "release": "17",
+    "fingerprint": "google/sdk_gphone64_arm64/emu64a:17/CE2A.260420.019/15611780:userdebug/dev-keys"
+   },
+   "debuggable": true,
+   "logcatWarnings": [
+    "09-29 03:30:16.422   505   715 I libbinder.BpBinder: onLastStrongRef automatically unlinking death recipients for binder (0xb40000730ce3d1e0) with descriptor: '(not cached)'",
+    "09-29 03:30:16.854  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:16.856  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.201  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.202  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.273  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.276  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.303  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.303  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.324  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.326  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.338  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.340  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.340  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.340  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.342  6533  6553 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 2144)",
+    "09-29 03:30:17.356  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.356  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.356  6533  6553 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.356  6533  6553 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.356  6533  6553 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 16480)",
+    "09-29 03:30:17.368  6533  6576 E libbinder.IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 03:30:17.368  6533  6576 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 03:30:17.369  6533  6576 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 65632)"
+   ],
+   "driverSec": 1.9
+  },
+  "desktop": {
+   "ok": true,
+   "port": 8765,
+   "steps": {
+    "initialize": {
+     "ms": 4.0929999351501465,
+     "protocolVersion": 1,
+     "agent": "agentos-s3-spike-agent"
+    },
+    "newSession": {
+     "ms": 1.3939999341964722,
+     "sessionId": "s3-6-1"
+    },
+    "prompt": {
+     "ms": 425.51399993896484,
+     "stopReason": "end_turn",
+     "chunks": 20
+    },
+    "cancel": {
+     "chunksBeforeCancel": 10,
+     "chunksTotal": 10,
+     "stopReason": "cancelled",
+     "cancelToStopMs": 6.683000087738037
+    },
+    "afterCancel": {
+     "ms": 8.9760000705719,
+     "stopReason": "end_turn",
+     "chunks": 5
+    }
+   },
+   "raw": {
+    "firstLine": "{\"type\":\"com.agentclientprotocol.rpc.JsonRpcResponse\",\"id\":1,\"result\":{\"protocolVersion\":1,\"agentCapabilities\":{\"loadSession\":false,\"promptCapabilities\":{\"audio\":false,\"image\":false,\"embeddedContext\":false},\"mcpCapabilities\":{\"http\":false,\"sse\":false},\"sessionCapabilities\":{},\"auth\":{}},\"authMethods",
+    "extraKeys": [
+     "type"
+    ]
+   },
+   "totalMs": 609.5479999780655,
+   "abstractSocket": "0000000000000000: 00000002 00000000 00010000 0001 01 30709 @agentos-acp",
+   "driverSec": 3.0
+  }
+ }
+}
