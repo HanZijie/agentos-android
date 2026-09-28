@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  只进 debug 包的组件（与 app/src/main/AndroidManifest.xml 合并）。release 包里没有它们。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!--
+          W9：电脑端接入的测试入口（tests/acp-conformance 的设备模式用它打开开关、生成配对码）。
+          要求 DUMP 权限，只有 adb shell 和系统能发；运行在 :agent。
+        -->
+        <receiver
+            android:name=".agent.DesktopGatewayDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":agent" />
+
+    </application>
+
+</manifest>
