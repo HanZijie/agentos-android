@@ -87,7 +87,7 @@ object FakeScripts {
      * ```json
      * {"fake": {"chunks": 20, "chunkChars": 16, "intervalMs": 20, "text": "x", "thinking": "…",
      *           "tools": [{"name": "add", "arguments": {"a": 1}}], "awaitAbort": true,
-     *           "fail": "model_rate_limited", "maxTokens": true, "crash": true}}
+     *           "fail": "model_rate_limited", "maxTokens": true, "crash": true, "toolLoop": 13}}
      * ```
      *
      * 不是这种 JSON 时回显。字段都可省略；`chunks` 条文字先发，然后 thinking 在前（若有），
@@ -130,6 +130,13 @@ object FakeScripts {
         }
         if (bool("maxTokens")) steps += FakeStep.MaxTokens
         if (bool("crash")) steps += FakeStep.CrashCore()
+        // toolLoop: N 次连续带工具调用的往返（测工具轮次上限）；工具取 tools 的第一个，没有就用 add(1, 1)
+        int("toolLoop")?.takeIf { it > 0 }?.let { n ->
+            val tool = steps.filterIsInstance<FakeStep.ToolUse>().firstOrNull()
+                ?: FakeStep.ToolUse("add", kotlinx.serialization.json.buildJsonObject { put("a", JsonPrimitive(1)); put("b", JsonPrimitive(1)) })
+            val first = steps.filterNot { it is FakeStep.ToolUse } + tool.copy(id = null)
+            return FakeTurnScript(listOf(first) + List(n - 1) { listOf(tool.copy(id = null)) })
+        }
         if (steps.isEmpty()) steps += FakeStep.Text("ok")
         return FakeTurnScript(listOf(steps))
     }
