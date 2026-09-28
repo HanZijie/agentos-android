@@ -1,0 +1,116 @@
+# 可以在电脑上跑的测试（docs/implementation-plan.md 第 2 节 CI）：
+# - Gradle：core/runtime、core/extensions 等模块的单元测试与 Android Lint
+# - core/pi-runtime：Pi Agent core 的打包与契约测试（W3 起）
+# - tests/acp-conformance：官方 TypeScript ACP 客户端经 stdio 的一致性测试（W4 起）
+# 后两项在对应工程出现之前自动跳过。
+name: portable-tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "21"
+  # 与 ../pi-acp-adapter 的 engines 一致（>=22.19.0）
+  NODE_VERSION: "22"
+
+jobs:
+  gradle:
+    name: Gradle 单元测试与 Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 单元测试与 Lint
+        # 单元测试不需要 pi-agent.js，跳过 Pi 打包；打包由下面的 pi-runtime 任务和 module-package.yml 负责
+        run: ./gradlew --stacktrace test lint -Pagentos.skipPiBundle=true
+
+      - name: 上传测试与 Lint 报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: |
+            **/build/reports/
+            **/build/test-results/
+          if-no-files-found: ignore
+
+  pi-runtime:
+    name: Pi Agent core 打包与契约测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: core/pi-runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        if: hashFiles('core/pi-runtime/package-lock.json') != ''
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: core/pi-runtime/package-lock.json
+
+      - name: 安装依赖
+        if: hashFiles('core/pi-runtime/package-lock.json') != ''
+        run: npm ci
+
+      - name: 打包 pi-agent.js 与 model-catalog.json
+        if: hashFiles('core/pi-runtime/build.mjs') != ''
+        run: node build.mjs
+
+      - name: 契约测试
+        if: hashFiles('core/pi-runtime/package-lock.json') != ''
+        run: npm run --if-present test
+
+  acp-conformance:
+    name: ACP 一致性测试（stdio）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+
+      - uses: actions/setup-node@v4
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: tests/acp-conformance/package-lock.json
+
+      - name: 安装依赖
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        working-directory: tests/acp-conformance
+        run: npm ci
+
+      - name: 一致性测试
+        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        working-directory: tests/acp-conformance
+        run: npm test

@@ -1,0 +1,49 @@
+# 所有依赖版本集中锁定在这里，依据 docs/implementation-plan.md 第 2 节“依赖与版本锁定”。
+# 升级任何一项都要单独评估：写进报告，由整合人决定；涉及 Kotlin / AGP / ACP SDK 的升级要重跑 S3 第一部分。
+#
+# 待定，出结论后再追加：
+#   - quickjs-kt（io.github.dokar3:quickjs-kt）：S8 固定
+#   - MCP Kotlin SDK（io.modelcontextprotocol:kotlin-sdk-client / kotlin-sdk-server）、Ktor 及其 OkHttp 引擎：S5 固定
+#   - SQLite 驱动：W2 选定
+
+[versions]
+# Android 工具链：S3 第一部分验证过的组合（docs/spikes/S3.md）
+agp = "8.10.1"
+kotlin = "2.2.20"
+# 运行 Gradle 和编译用的 JDK；根 build.gradle.kts 会检查
+jdk = "21"
+# 产出的字节码版本（Java 与 Kotlin 一致）。ACP SDK 本身是 Java 8 字节码，D8 / R8 都能处理 17
+jvmTarget = "17"
+compileSdk = "36"
+targetSdk = "36"
+minSdk = "35"
+
+# ACP Kotlin SDK：固定 0.30.1，Gradle 解析到 JVM 变体 acp-jvm。
+# 不用 master：master 的 Transport 已改成 TransportFrame / onFrame，与 0.30.x 的 JsonRpcMessage / onMessage 不兼容。
+acp = "0.30.1"
+# 与 acp 0.30.1 的传递依赖对齐（acp-jvm-0.30.1.pom），避免解析出两套版本
+kotlinx-coroutines = "1.9.0"
+kotlinx-serialization = "1.7.3"
+
+# 宿主层的网络出口（给 Pi 用的 fetch，core/runtime/net/HostFetch.kt）。
+# S5 固定 Ktor 的 OkHttp 引擎时如需升级到 5.x，一并评估。
+okhttp = "4.12.0"
+
+junit4 = "4.13.2"
+
+[libraries]
+acp = { module = "com.agentclientprotocol:acp", version.ref = "acp" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

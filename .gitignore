@@ -1,2 +1,45 @@
+# ---- 系统与 IDE ----
 .DS_Store
+.idea/
+*.iml
+.vscode/
+.fleet/
+
+# ---- Gradle / Kotlin / Android 构建产物 ----
+.gradle/
+.kotlin/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# 本机 SDK 路径等，不进仓库
+local.properties
+
+# ---- Node ----
 node_modules/
+npm-debug.log*
+
+# ---- 签名与密钥：项目发布证书的私钥放在仓库外，见 README「开发」一节 ----
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pk8
+*.pepk
+keystore.properties
+signing.properties
+.env
+.env.*
+
+# ---- 生成物：由 core/pi-runtime/build.mjs 生成（W3），不手改，不进仓库 ----
+app/src/main/assets/pi-agent.js
+app/src/main/assets/model-catalog.json
+
+# ---- 打包产物（tools/package-module.py，W7） ----
+agentos-*.zip
