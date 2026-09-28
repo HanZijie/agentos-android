@@ -1,0 +1,22 @@
+{
+  "name": "agentos-pi-runtime",
+  "private": true,
+  "type": "module",
+  "description": "Pi Agent core bundled for the AgentOS :agent process (QuickJS). Output: app/src/main/assets/{pi-agent.js,model-catalog.json}",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test/contract.mjs",
+    "test:quickjs": "cd ../.. && ./gradlew :core:runtime:test --tests 'org.agentos.runtime.pi.*'",
+    "fake-llm": "node test/fake-llm.mjs --port 8787"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.86.1",
+    "@earendil-works/pi-ai": "0.86.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

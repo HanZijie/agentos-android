@@ -40,3 +40,10 @@ rootDir.resolve("plugins/samples")
     .listFiles { file -> file.isDirectory && file.resolve("build.gradle.kts").isFile }
     ?.sortedBy { it.name }
     ?.forEach { include(":plugins:samples:${it.name}") }
+
+// ACP 通道的设备测试（W5 回归、W6 用例）：adb 驱动，只用于测试，不进 zip。说明见 tests/device/acp-channel/README.md。
+include(
+    ":tests:device:acp-channel:common",
+    ":tests:device:acp-channel:agent",
+    ":tests:device:acp-channel:client",
+)
