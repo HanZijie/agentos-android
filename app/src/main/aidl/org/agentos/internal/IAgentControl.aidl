@@ -3,7 +3,7 @@
 package org.agentos.internal;
 
 interface IAgentControl {
-    /** 本接口的版本；v1 = 前四个方法，v2 = 加上 BYOK 的四个方法。 */
+    /** 本接口的版本；v1 = 前四个方法，v2 = 加上 BYOK 的四个方法，v3 = 加上电脑端接入的四个方法。 */
     int getVersion();
 
     /**
@@ -87,4 +87,37 @@ interface IAgentControl {
 
     /** 清除模型来源和 key，并删除 Keystore 主密钥。之后任务以 model_not_configured 失败。 */
     void clearModelSource();
+
+    // ---------------------------------------------------------------- v3：电脑端接入（F11，W9）
+    //
+    // 设置页（W8）的“电脑端接入”调用。电脑经 adb forward 连到 :agent 的抽象 socket agentos-acp，第一次用一次性配对码配对，
+    // 之后用配对时拿到的令牌（core/protocol/acp-mapping.md 第 10 节；电脑上的 tools/acp-bridge 自动完成）。
+    // 这些方法读写文件、开关 socket：服务端在 Binder 线程上执行，调用方不要在主线程等。
+    // 配对码只出现在 newDesktopPairingCode 的返回值里；令牌任何返回值里都没有。
+
+    /**
+     * 电脑端接入的状态：
+     * {"enabled":bool（开关，默认 false）, "listening":bool, "socket":"agentos-acp",
+     *  "listenError":null|"…"（打不开监听，例如抽象 socket 名被别的 App 占用；设置页应提示）,
+     *  "code":null|{"expiresAtMs","attemptsLeft"}（当前有效的配对码，不含配对码本身）,
+     *  "pairings":[{"id":"dp_…","label"（电脑端自报的名字，只作区分）,"pairedAtMs","lastSeenMs"}],
+     *  "connections":[{"id","pairingId","label","peerUid","openedAtMs","transport":{…统计}}]}
+     */
+    String getDesktopAccess();
+
+    /**
+     * 打开或关闭电脑端接入，返回 getDesktopAccess()。关闭时停止监听、断开所有电脑端连接，并清掉配对码和全部配对
+     * （电脑要重新配对）。
+     */
+    String setDesktopAccessEnabled(boolean enabled);
+
+    /**
+     * 生成一次性配对码（替换旧的），给设置页显示：{"code":"482913","expiresAtMs":epoch 毫秒,"ttlMs":300000}。
+     * 6 位数字，5 分钟有效，配对成功即作废，输错 5 次作废。
+     * 开关关闭时抛 IllegalStateException("agentos.desktop.disabled: …")。
+     */
+    String newDesktopPairingCode();
+
+    /** 撤销一个已配对的电脑并断开它的连接；pairingId 为 null 或 "" 时撤销全部。返回 getDesktopAccess()。 */
+    String revokeDesktopPairing(String pairingId);
 }

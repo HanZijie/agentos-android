@@ -22,7 +22,7 @@ class AgentControlService : Service() {
 }
 
 /**
- * IAgentControl v2（字段说明见 IAgentControl.aidl）。每个方法都校验调用方 UID 等于本 App（服务不导出之外的
+ * IAgentControl v3（字段说明见 IAgentControl.aidl；v3 的电脑端接入由 A lane 追加）。每个方法都校验调用方 UID 等于本 App（服务不导出之外的
  * 第二道检查：root 和 system 也能绑定不导出的服务）。
  *
  * BYOK 方法只让 `agentos.byok.*` 的 IllegalArgumentException / IllegalStateException 回到调用方；其他异常换成
@@ -76,6 +76,29 @@ class AgentControl(private val process: AgentProcess) : IAgentControl.Stub() {
         byok { process.models.clear() }
     }
 
+    // ------------------------------------------------------------------ v3：电脑端接入（A lane，DesktopGateway.kt）
+
+    override fun getDesktopAccess(): String {
+        enforceSelf()
+        return process.desktop.status().toString()
+    }
+
+    override fun setDesktopAccessEnabled(enabled: Boolean): String {
+        enforceSelf()
+        return process.desktop.setEnabled(enabled).let { process.desktop.status().toString() }
+    }
+
+    override fun newDesktopPairingCode(): String {
+        enforceSelf()
+        return process.desktop.newPairingCodeJson().toString()
+    }
+
+    override fun revokeDesktopPairing(pairingId: String?): String {
+        enforceSelf()
+        if (pairingId.isNullOrEmpty()) process.desktop.revokeAll() else process.desktop.revoke(pairingId)
+        return process.desktop.status().toString()
+    }
+
     private inline fun <T> byok(block: () -> T): T = try {
         block()
     } catch (e: ByokException) {
@@ -94,6 +117,6 @@ class AgentControl(private val process: AgentProcess) : IAgentControl.Stub() {
 
     companion object {
         private const val TAG = "AgentControl"
-        const val VERSION = 2
+        const val VERSION = 3
     }
 }

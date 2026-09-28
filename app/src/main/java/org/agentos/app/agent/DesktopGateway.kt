@@ -7,11 +7,12 @@ import android.net.LocalServerSocket
 import android.net.LocalSocket
 import android.system.Os
 import android.system.OsConstants
-import android.util.Log
 import com.agentclientprotocol.rpc.JsonRpcMessage
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import org.agentos.acp.JsonRpcCodec
 import org.agentos.runtime.acp.LineCodec
 import org.agentos.runtime.acp.LineTransportStats
@@ -24,7 +25,6 @@ import org.agentos.runtime.desktop.DesktopPairing
 import org.agentos.runtime.desktop.DesktopPairingInfo
 import org.agentos.runtime.desktop.FilePairingStore
 import org.agentos.runtime.desktop.PairingCode
-import org.agentos.runtime.ports.RuntimeLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -43,9 +43,10 @@ import java.io.OutputStream
  * - 编码：sdk:acp-android 的 [JsonRpcCodec]（与 Binder 通道相同，没有 SDK StdioTransport 多出的 `"type"` 字段）。
  * - 每条连接以 `CallerKind.DESKTOP`（ownerKey `desktop`）交给 `AgentRuntime.serveAcp`；确认照常在手机上弹出。
  *
- * 设置页（D，W8）经 IAgentControl v3（C3 进 main 之后由 A 追加）调用 [setEnabled]、[newPairingCode]、[pairings]、
- * [revoke]、[connections]、[status]。这些方法会读写文件、开关 socket，**不要在主线程调用**。
- * 在那之前，debug 包用 [DesktopGatewayDebugReceiver] 做测试入口。
+ * 设置页（D，W8）经 IAgentControl v3（`getDesktopAccess`、`setDesktopAccessEnabled`、`newDesktopPairingCode`、
+ * `revokeDesktopPairing`，服务端在 AgentControl.kt）调用这里的方法。它们会读写文件、开关 socket，**不要在主线程调用**。
+ * 自动化测试（tests/acp-conformance 的设备模式）以 shell 身份运行，绑不了 IAgentControl，用 debug 包的
+ * [DesktopGatewayDebugReceiver]。
  */
 class DesktopGateway(private val process: AgentProcess) {
 
@@ -58,7 +59,8 @@ class DesktopGateway(private val process: AgentProcess) {
         listenerFactory = { LocalSocketListener(SOCKET_NAME) },
         parentScope = process.scope,
         peerAllowed = DesktopPeerPolicy::allowed,
-        log = AndroidRuntimeLog,
+        // C 的 AndroidRuntimeLog（经 KeystoreSecrets 脱敏）
+        log = process.hostPort.log,
     )
 
     init {
@@ -75,6 +77,13 @@ class DesktopGateway(private val process: AgentProcess) {
     fun newPairingCode(): PairingCode = core.newPairingCode()
 
     fun activePairingCode(): PairingCode? = core.pairing.activeCode()
+
+    /** IAgentControl v3 的 newDesktopPairingCode：`{"code","expiresAtMs","ttlMs"}`；开关关闭时抛 `agentos.desktop.disabled`。 */
+    fun newPairingCodeJson(ttlMillis: Long = 0): JSONObject {
+        if (!core.enabled) throw IllegalStateException("agentos.desktop.disabled: turn on desktop access first")
+        val code = if (ttlMillis > 0) core.newPairingCode(ttlMillis) else core.newPairingCode()
+        return JSONObject().put("code", code.code).put("expiresAtMs", code.expiresAtMillis).put("ttlMs", code.ttlMillis)
+    }
 
     fun pairings(): List<DesktopPairingInfo> = core.pairing.pairings()
 
@@ -150,20 +159,6 @@ private object AndroidLineCodec : LineCodec {
     override fun decode(line: String): JsonRpcMessage = JsonRpcCodec.decode(line)
 }
 
-private object AndroidRuntimeLog : RuntimeLog {
-    override fun log(level: RuntimeLog.Level, tag: String, message: String, error: Throwable?) {
-        val t = "AgentOS.$tag"
-        // 不带异常堆栈：可能含有消息片段
-        val m = if (error != null) "$message (${error.javaClass.simpleName})" else message
-        when (level) {
-            RuntimeLog.Level.DEBUG -> Log.d(t, m)
-            RuntimeLog.Level.INFO -> Log.i(t, m)
-            RuntimeLog.Level.WARN -> Log.w(t, m)
-            RuntimeLog.Level.ERROR -> Log.e(t, m)
-        }
-    }
-}
-
 /** 抽象 socket 的监听端。开关打开时创建；抽象名被别的进程占用时构造失败（IOException，进 listenError）。 */
 private class LocalSocketListener(name: String) : DesktopListener {
     private val server = LocalServerSocket(name)
@@ -190,7 +185,7 @@ private class LocalSocketEndpoint(private val socket: LocalSocket) : DesktopEndp
 }
 
 /**
- * **debug 包专用的测试入口**（IAgentControl v3 之前；tests/acp-conformance 的设备模式用它）：
+ * **debug 包专用的测试入口**（tests/acp-conformance 的设备模式用它；adb shell 绑不了只接受本 App 的 IAgentControl）：
  *
  * ```
  * adb shell am broadcast -f 32 -n org.agentos.app/.agent.DesktopGatewayDebugReceiver --es op <op> [--el ttlMs <毫秒>]
@@ -212,13 +207,10 @@ class DesktopGatewayDebugReceiver : BroadcastReceiver() {
                 when (op) {
                     "enable" -> gw.setEnabled(true).let { gw.status().put("ok", true) }
                     "disable" -> gw.setEnabled(false).let { gw.status().put("ok", true) }
-                    "status" -> gw.stats().put("ok", true)
+                    // modelUsable：设备用例据此判断要不要先配测试模型（C 的 ensureTestModel）
+                    "status" -> gw.stats().put("ok", true).put("modelUsable", (process.models.get()["usable"] as? JsonPrimitive)?.booleanOrNull == true)
                     "revoke_all" -> JSONObject().put("ok", true).put("revoked", gw.revokeAll())
-                    "pair" -> {
-                        val ttl = intent.getLongExtra("ttlMs", 0L)
-                        val code = if (ttl > 0) gw.core.newPairingCode(ttl) else gw.newPairingCode()
-                        JSONObject().put("ok", true).put("code", code.code).put("expiresAtMs", code.expiresAtMillis).put("ttlMs", code.ttlMillis)
-                    }
+                    "pair" -> gw.newPairingCodeJson(intent.getLongExtra("ttlMs", 0L)).put("ok", true)
                     else -> JSONObject().put("ok", false).put("error", "unknown op: $op")
                 }
             }
