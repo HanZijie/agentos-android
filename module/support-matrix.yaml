@@ -1,0 +1,34 @@
+# AgentOS support matrix (docs/architecture.md F1, docs/implementation-plan.md W7 / W27).
+#
+# customize.sh and service.sh read this file with a tiny shell parser (module/common.sh), so keep
+# it to the flat subset below: "key: value" scalars at the top level, and lists written as
+# "key:" followed by "  - item" lines. No nested maps, no multi-line strings, no anchors.
+#
+# Decisions it drives:
+#   - API outside [api_min, api_max]            -> flashing is refused; after an OTA, safe mode
+#   - root manager below its minimum            -> flashing is refused
+#   - fingerprint not in verified_fingerprints  -> allowed, reported as "unverified device"
+#   - a listed conflicting module is enabled    -> flashing is refused
+schema: 1
+matrix_version: 2026.09.29-1
+
+# Android 15-17 (architecture section 1).
+api_min: 35
+api_max: 37
+
+# Root managers. Magisk 20400 (v20.4) is the floor of the module installer API the module uses
+# (install_module, ui_print, abort, set_perm*, $BOOTMODE; META-INF/update-binary checks the same).
+# KernelSU has no floor yet (0 = not checked). Neither is a support claim: W27 raises both to the
+# lowest versions actually verified on API 35-37 devices.
+magisk_min_version_code: 20400
+kernelsu_min_version_code: 0
+
+# Free space needed on /data to install / upgrade the Apps and keep their data (MB).
+min_free_mb: 300
+
+# Devices verified end to end (flash, reboot, first conversation, disable, uninstall).
+# Nothing yet: real-device verification is the gate before M1 acceptance. Emulators are never listed.
+verified_fingerprints:
+
+# Modules that must be disabled before AgentOS can be flashed (module ids).
+conflicting_modules:
