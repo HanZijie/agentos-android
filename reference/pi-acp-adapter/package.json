@@ -1,0 +1,29 @@
+{
+  "name": "@agentos/pi-acp-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin ACP v1 adapter for the Pi coding agent used by AgentOS.",
+  "type": "module",
+  "bin": {
+    "agentos-pi-acp": "dist/src/index.js"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
+    "@earendil-works/pi-coding-agent": "0.86.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "tsx": "4.19.3",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
