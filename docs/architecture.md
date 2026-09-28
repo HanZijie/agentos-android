@@ -33,7 +33,8 @@
 | 模型接入 | BYOK，采用混合方案：协议适配用 `pi-ai`，只打包 `anthropic-messages` 和 `openai-completions` 两个协议族；网络、key、重试和取消都留在 Kotlin 宿主层。设置页提供两种来源：厂商预设（来自 `pi-ai` 的模型目录，MiniMax 国际 / 国内排第一）和自定义兼容端点。首版不做订阅账号登录（OAuth） | `pi-ai` 已经维护好流式工具调用、thinking、图片、prompt cache、用量计算和几十家厂商的模型目录，自己重写代价大；但它依赖的官方 SDK 不保证能在 QuickJS 里运行，所以只取协议适配，I/O 不交给 JS。两个协议族已覆盖 MiniMax 和主要的国内外厂商。订阅登录依赖 Node 的本地回调服务，还需要逐家确认条款 |
 | root 的用途 | 开机后安装或升级 App 和 Runner；开机拉起运行时；运行时在有任务时被杀，按退避拉起；崩溃循环时进入 safe mode | 普通 App 做不到，又直接影响“刷完就能用”的，只有这几件事 |
 | 对外协议 | ACP，按 [AgentOS ACP Profile v1](../../agentos-acp-profile-v1.md) 执行 | Profile 已经确定：ACP 是前端与 Agent 服务之间唯一的对外协议，不另维护 `agent-bus/1`；有现成的各语言 SDK 和客户端生态 |
-| ACP 的实现 | 客户端和 Agent 端都用官方 Kotlin SDK，固定为 `com.agentclientprotocol:acp:0.30.1`；Android 上只用基于 Binder 的自定义 Transport | 已验证在 `compileSdk` 35 / 36 下编译、D8、R8 都能通过（[spikes/S3.md](spikes/S3.md)）。SDK 没有声明 Android target，属于 JVM 兼容性落地；master 分支的 Transport API 已经变了，所以固定版本 |
+| ACP 的实现 | 客户端和 Agent 端都用官方 Kotlin SDK，固定为 `com.agentclientprotocol:acp:0.30.1`；Android 上只用基于 Binder 的自定义 Transport | 已验证在 `compileSdk` 35 / 36 下编译、D8、R8 都能通过；R8 需要一条 `-dontwarn org.slf4j.**`（由 `acp-android` 的 consumer 规则带入），运行时要在 SDK 第一次记日志之前设置 `kotlin-logging-to-android-native=true`，否则第一次 prompt 就因缺 slf4j 崩溃。S3 第二部分已在 API 35 / 36 / 37 模拟器上跑通 ACP over Binder，真机待做（[spikes/S3.md](spikes/S3.md)）。SDK 没有声明 Android target，属于 JVM 兼容性落地；master 分支的 Transport API 已经变了，所以固定版本 |
+| QuickJS 运行时与会话 | 一个 QuickJS 运行时承载全部会话，由“常驻泵”驱动：宿主只求值一次入口，JS 在 `__host_next()` 上取命令、异步分发，结果和事件经 `__host_emit()` 回到 Kotlin。绑定 `quickjs-kt` 固定 1.0.15，因此 Kotlin 不低于 2.3 | quickjs-kt 把同一实例上的顶层求值串行化，“每轮一次 evaluate”会让其他会话和 `abort` 排队；每多一个运行时 native 堆约 +5 MB，每多一个会话只 +18 KB。未处理的 Promise rejection 会终止泵，按运行时崩溃处理（F8），重建约 70 ms（[spikes/S8.md](spikes/S8.md)） |
 | App 之间的连接 | 统一用 Binder 消息通道 `binder-channel-v1`：ACP（第三方 App → AgentOS）和 MCP（AgentOS → 插件 App）共用同一种 AIDL 形状 | Binder 自带内核认证的调用方 UID；ACP 和 MCP 都是 JSON-RPC 消息流，不需要两套传输 |
 | App 内部各进程之间 | 不导出的 AIDL 服务，只接受本 App 的 UID | 同一个 App 内部的接口，随 App 一起升级，不作为对外契约 |
 | 电脑端接入 | `adb forward` 到 `:agent` 进程的抽象 socket，按行分隔的 ACP JSON，与 stdio 语义相同；一次性配对码 | 电脑上的 ACP 客户端大多只支持 stdio，桥接命令只需要转发字节 |
@@ -100,7 +101,7 @@
   - 退路：如果 S8 证明官方 SDK 在 QuickJS 里跑不通，就由宿主层实现这两个协议族，经自定义的 `streamFn` 推给 Pi；Agent 循环仍然是 Pi 的，模型目录仍然直接读 `pi-ai` 的数据文件，不自己维护。
 - **ACP v1 生命周期**：一轮 `session/prompt` 要等 Pi 的 `agent_end` 之后才返回 `stopReason`。
 - **工具轮次上限**：12 轮，由适配层计数；超过就 `abort`，并返回 `stopReason: max_turn_requests`。
-- **会话与 Agent 实例**：每个活跃会话对应一个 Pi `Agent` 实例。一个 QuickJS 运行时承载多个实例，还是每个会话一个运行时，由 S8 测完内存和并发后决定。
+- **会话与 Agent 实例**：每个活跃会话对应一个 Pi `Agent` 实例，全部由同一个 QuickJS 运行时承载，由常驻泵驱动（S8 结论，见决策记录）。以后需要隔离时，把会话分片到少数几个运行时，不做一会话一个。
 - **版本**：Pi 还在 0.x，API 变化快。固定版本和 lockfile，升级要单独评估，并重跑 S8 和契约测试。
 
 ---
@@ -129,13 +130,13 @@
 | Extension Host ↔ Runner | Binder | Runner 的 Service 要求 `RUN_COMMANDS`，并校验调用方 UID | S6 |
 | 电脑 → 运行时 | `adb forward` 到 `:agent` 的抽象 socket `agentos-acp`，按行分隔的 ACP JSON | 一次性配对码 | S3 |
 | 运行时 → 云端模型 | HTTPS：Pi Agent core 发起，经宿主层的网络出口（OkHttp）发出，key 由宿主层注入 | TLS 证书校验 | S8 |
-| root 监督进程 → App | 用 `am start-foreground-service` 拉起运行时；读取运行时写在 App 私有目录里的心跳；用显式广播报告监督状态 | 广播接收器要求 signature 级权限，其他 App 发不进来（root 不受权限检查限制） | S2 |
+| root 监督进程 → App | 用 `am start-foreground-service` 拉起运行时；判活看进程（`pidof` + UID 校验），心跳文件（App 的 DE 存储）只提供“死的时候有没有任务”；用显式广播报告监督状态 | 广播接收器不导出，并要求 signature 级权限，其他 App 发不进来（root 不受权限检查限制） | S2 |
 
 凡是和其他 Android App 打交道的连接都走 Binder；凡是要执行命令的地方都交给 Runner；root 监督进程只做进程管理，不和运行时交换业务数据。
 
 ### 5.2 Binder 消息通道（binder-channel-v1）
 
-ACP 和 MCP 都是 JSON-RPC 消息流，所以两种协议共用同一种 Binder 通道。通道的完整说明（含 AIDL）在 M1 前冻结为 `core/protocol/binder-channel-v1.md`。
+ACP 和 MCP 都是 JSON-RPC 消息流，所以两种协议共用同一种 Binder 通道。通道的完整说明（含 AIDL、流控、关闭规则）在 [`core/protocol/binder-channel-v1.md`](../core/protocol/binder-channel-v1.md)，目前是 S3 定参后的草案，W5 在真机结果补齐后冻结。
 
 ```aidl
 package org.agentos.channel;
@@ -143,6 +144,7 @@ package org.agentos.channel;
 oneway interface IChannel {               // 每一端各实现一个，用来接收对方的消息
     void send(String message);            // 一条完整的 JSON-RPC 消息
     void close(String reason);
+    void ack(long consumed);              // 流控回执：已处理完对方发来的前 consumed 条（累计值）
 }
 
 interface IAcpService {                   // AgentOS App 导出，运行在 :agent 进程
@@ -154,11 +156,12 @@ interface IMcpService {                   // 提供插件的 App 导出，要求
 }
 ```
 
-规则：
+规则（参数由 S3 在 API 35 / 36 / 37 模拟器上测定）：
 
-- 每次 `send` 就是一条完整的 JSON-RPC 消息，语义等同 stdio 下的一行。同一个 `IChannel` 上的 oneway 调用按发送顺序到达。
-- 单条消息的上限初定为 128 KiB，由 S3 在流式压力下测定后冻结。图片等大内容用 `resource_link` 传 `content://` URI，并临时授予读权限。
-- 发送方限制在途消息的数量和字节数，超过就等待，避免把接收进程的 Binder 异步缓冲耗尽。
+- 每次 `send` 就是一条完整的 JSON-RPC 消息，语义等同 stdio 下的一行。同一个 `IChannel` 上的 oneway 调用按发送顺序到达。方法顺序决定事务号，冻结后只能在末尾追加。
+- 单条消息上限 65,536 字符（按 `String.length` 即 UTF-16 计，约 128 KiB）。图片等大内容用 `resource_link` 传 `content://` URI，并临时授予读权限。
+- 背压：发送方的在途消息不超过 32 条且 32,768 字符，接收方处理后回累计 `ack`，超过就等待，避免把接收进程的 Binder 异步缓冲（约 508 KiB，所有调用方共享）耗尽。
+- 对端缓冲满时，oneway 调用同样抛 `DeadObjectException`，但对端其实还活着；所以 `close` 和 `ack` 失败时要退避重试，判断死亡只看 `linkToDeath` 或 `isBinderAlive()`。
 - 接收方在 `send` 里用 `Binder.getCallingUid()` 校验对方 UID 与 `open` 时一致，不一致就关闭通道。
 - 双方对对方的 Binder 调用 `linkToDeath`；任何一端进程死亡，另一端关闭通道并释放协程。
 - 通道只承载消息，不解析内容。ACP 和 MCP 的语义完全由各自的 SDK 处理。
@@ -181,9 +184,9 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 |---|---|
 | 客户端（`acp-android`、自带界面） | 官方 Kotlin SDK 的 Client + `BinderAcpTransport` |
 | Agent 端（`:agent`） | 官方 Kotlin SDK 的 Agent 端 + 同一个 `BinderAcpTransport`；每条通道绑定一个可信 UID，交给运行时 |
-| 电脑端网关（`:agent`） | 同一个 Agent 端，Transport 按行收发 socket 上的 JSON |
+| 电脑端网关（`:agent`） | 同一个 Agent 端，Transport 按行收发 socket 上的 JSON；基于 `JsonRpcCodec` 编码，不直接用 SDK 的 `StdioTransport`（它输出的每条消息多一个 `"type"` 字段），并限制单行长度 |
 
-`BinderAcpTransport` 实现 SDK 0.30.x 的 Transport 接口：Binder 入站的字符串 → `JsonRpcMessage` → `onMessage`；`send(JsonRpcMessage)` → JSON 编码 → `IChannel.send(String)`；负责 start、close、error 和背压；不在主线程阻塞；对端进程死亡时关闭协程和通道。SDK 自带的 `StdioTransport` 只用于电脑上的测试。
+`BinderAcpTransport` 实现 SDK 0.30.x 的 Transport 接口：Binder 入站的字符串 → `JsonRpcMessage` → `onMessage`；`send(JsonRpcMessage)` → 按具体类型做 JSON 编码（`JsonRpcCodec`）→ `IChannel.send(String)`；负责 start、close、error 和背压（`awaitWritable`，流式 `session/update` 的生产者每发一条前等待）；不在主线程阻塞；对端进程死亡时关闭协程和通道。SDK 的 `Protocol` 要随 Transport 一起关闭（`BinderAcpTransport.bindTo`），否则通道断开后挂起的请求不会结束。SDK 自带的 `StdioTransport` 只用于电脑上的测试。
 
 **方法启用范围**
 
@@ -279,13 +282,14 @@ zip 里没有原生二进制，所以不按 ABI 区分；支持矩阵只列出�
 1. **`service.sh`**（root 监督进程）：
    - 等待 `sys.boot_completed=1`；
    - 如果存在 safe mode 标记，或上次开机后运行时连续崩溃被判为崩溃循环，就进入 safe mode：不拉起运行时，只报告状态；
-   - AgentOS App 或 Runner 没装，或版本低于 zip 里的版本，就执行 `pm install` 安装或升级；签名不符则停止，并在 root 管理器里显示原因；
+   - AgentOS App 或 Runner 没装，或版本低于 zip 里的版本，就执行 `pm install` 安装或升级；签名不符则停止，并在 root 管理器里显示原因（安装不必等用户解锁，规则见 [spikes/S1.md](spikes/S1.md)）；
    - 再检查一次 API 和 fingerprint，OTA 后版本超出支持范围就进入 safe mode；
+   - 等用户 0 解锁（`sys.user.0.ce_available=true`，并兜底查询 `am get-started-user-state 0`）：App 不是 directBootAware，解锁前系统不会启动它的组件；
    - 用 `am start-foreground-service` 拉起 `:agent` 的 `AgentService` 一次，让运行时执行恢复流程（F8），然后进入判活循环；
    - 向 App 发一条显式广播，报告监督状态（正常、safe mode 及原因）。
 2. **`:agent` 运行时**：
    - 打开 Store，执行恢复流程（F8）；有未完成的任务时进入前台，没有就退出前台，进程交给系统管理；
-   - 把运行状态（是否有进行中的任务、上次错误）写入 App 私有目录里的心跳文件，供监督进程判活。
+   - 把运行状态（是否有进行中的任务、是否在前台、上次错误）写入 App DE 存储里的心跳文件。监督进程判活看进程是否存在，心跳只用来判断“死的时候有没有任务”（契约见 [spikes/S2.md](spikes/S2.md)）。
 3. **用户首次打开 App**：查看安全等级和监督状态 → 配置模型和 key（F9）→ 允许通知（前台服务和确认通知需要）→ 跳转系统设置选择默认助理 → 通过系统弹窗请求忽略电池优化 → 查看已发现的插件。
 
 ### F3 扩展的发现、导入与启用
@@ -354,7 +358,7 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 
 | 故障 | 处理 |
 |---|---|
-| 运行时（`:agent`）崩溃或被杀 | 有未完成的任务时，监督进程按 1s → 2s → 4s … 最长 60s 退避拉起；10 分钟内崩溃 5 次就进入 safe mode 并记录原因。没有任务时不主动拉起，下一个调用方 bind 时由系统拉起。重启后，已入队但未开始的任务重新排队；已开始但没有结束的任务标记为需要恢复，**不自动重放**；各会话的 Pi `Agent` 按 Store 里保存的 messages 重建 |
+| 运行时（`:agent`）崩溃或被杀 | 有未完成的任务时，监督进程按 1s → 2s → 4s … 最长 60s 退避拉起（运行时连续存活 60 秒后退避复位）；10 分钟内有任务时异常退出（崩溃、被杀或拉起失败）5 次，就进入 safe mode 并记录原因。没有任务时不主动拉起，下一个调用方 bind 时由系统拉起。重启后，已入队但未开始的任务重新排队；已开始但没有结束的任务标记为需要恢复，**不自动重放**；各会话的 Pi `Agent` 按 Store 里保存的 messages 重建 |
 | Extension Host（`:ext`）被杀 | 系统按绑定关系自动重建。已经发出、没有回执的工具调用标记为“结果未知”；需要工具的步骤先等待重连，最多等到任务的 deadline |
 | 本地 App 的 MCP 服务进程死亡 | Extension Host 经 `linkToDeath` 感知；进行中的调用标记为“结果未知”，下次用到时重新 bind |
 | 主进程被杀 | 不影响运行时；确认改走通知 |
@@ -396,6 +400,6 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 
 ### F13 禁用、卸载与 safe mode
 
-- **禁用模块**：在 root 管理器里关掉模块，下次开机监督进程不再运行。AgentOS App 仍是一个普通 App，可以按需被调用，但失去开机拉起和崩溃后拉起；App 显示“监督进程未运行”。
+- **禁用模块**：在 root 管理器里关掉模块后，监督进程 5 秒内退出，并广播 `stopped` / `module_disabled`，不用等到下次开机。AgentOS App 仍是一个普通 App，可以按需被调用，但失去开机拉起和崩溃后拉起；App 显示“监督进程未运行”。
 - **卸载模块**：`uninstall.sh` 停止监督进程，删除 `/data/adb/agentos/` 下的监督状态。AgentOS App 和 Runner 不会被自动卸载，用户可以像普通 App 一样删除它们，数据随 App 一起删除。
 - **safe mode**：可以在 root 管理器里用模块的“动作”按钮手动切换；出现崩溃循环或版本超出支持范围时会自动进入。safe mode 下监督进程不拉起运行时，运行时也不自动继续恢复出来的任务，App 显示原因和退出方式。模块本身只有脚本，不会导致开不了机。

@@ -14,6 +14,8 @@
 
 ## 1. 项目文件夹
 
+下面的 Kotlin 路径是简写：源码按 Gradle 标准布局，按包名展开，例如 `core/runtime/ports/AgentCore.kt` 就是 `core/runtime/src/main/kotlin/org/agentos/runtime/ports/AgentCore.kt`。各模块的包名见 README「开发」一节。
+
 ```text
 agentos-android/
 ├── README.md · LICENSE · .gitignore
@@ -30,7 +32,7 @@ agentos-android/
 │   │   ├── acp-profile-v1.md                        [W4] ← workspace 根目录的 agentos-acp-profile-v1.md，对外协议的权威文档
 │   │   ├── acp-mapping.md                           [W4] 新写：ACP 方法启用范围、内部事件到 session/update 的映射
 │   │   ├── acp-extensions.schema.json               [W4] 新写：自动选会话；[W10] 持久化提交、增量恢复
-│   │   ├── binder-channel-v1.md                     [W5] 新写：ACP 与 MCP 共用的 Binder 消息通道，附 AIDL
+│   │   ├── binder-channel-v1.md                     [W5] ACP 与 MCP 共用的 Binder 消息通道，附 AIDL；S3 定参的草案已在，W5 在真机结果补齐后冻结
 │   │   ├── hooks-v1.md                              [W22] 新写：首批支持的 Hook 事件、输入字段和输出格式
 │   │   └── agent-plugins-1.0/                       [W14] 固定副本：plugin.schema.json、mcp.schema.json（来自 agent-plugins.org）
 │   ├── runtime/                                     # 运行时的 Kotlin 宿主层与 Pi 适配层（Kotlin/JVM 库，由 :agent 进程加载）
@@ -117,6 +119,8 @@ agentos-android/
 │   ├── acp-android/                                 # 给后装 App 用
 │   │   ├── aidl/IAcpService.aidl                    [W5]
 │   │   ├── BinderAcpTransport.kt                    [W5] 实现 ACP SDK 0.30.x 的 Transport；客户端、Agent 端、自带界面共用
+│   │   ├── JsonRpcCodec.kt                          [W5] 按具体类型编码 JSON-RPC（不带 SDK 的 "type" 字段）；电脑端网关（W9）也用它
+│   │   ├── AcpAndroid.kt                            [W5] ensureInitialized()：SDK 记日志前打开 kotlin-logging 的 Android 原生输出
 │   │   ├── AgentOs.kt                               [W24] 检测是否安装、bind、打开通道、授权引导
 │   │   └── sample/                                  [W24] 最小示例 App
 │   └── plugin-sdk/                                  # 给 App 开发者：在 App 里内嵌标准 Agent Plugin
@@ -150,7 +154,7 @@ agentos-android/
 │   └── device/                                      [W6] 起：adb 驱动的真机测试，ACP 通道、MCP Binder、Runner、监督的用例分开；也可以在 root 过的模拟器上跑
 ├── docs/
 │   ├── architecture.md · extensions.md · implementation-plan.md · assets/
-│   ├── spikes/                                      # 验证项的结论；S3 第一部分已完成（S3.md）
+│   ├── spikes/                                      # 验证项的结论：S1、S2、S3、S8（真机部分待测）
 │   └── runbooks/                                    [W28] 安装、卸载、恢复、设备兼容性操作手册
 └── .github/workflows/
     ├── portable-tests.yml                           [W1]
@@ -188,13 +192,14 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 | 项目 | 决定 | 依据 |
 |---|---|---|
-| ACP Kotlin SDK | 固定为 `com.agentclientprotocol:acp:0.30.1`，Gradle 会解析到 JVM 变体 `acp-jvm`；客户端和 Agent 端都用它 | 已在 Android 上完成编译、D8、R8 验证，见 [spikes/S3.md](spikes/S3.md)。SDK 没有声明 Android target，属于 JVM 兼容性落地 |
+| ACP Kotlin SDK | 固定为 `com.agentclientprotocol:acp:0.30.1`，Gradle 会解析到 JVM 变体 `acp-jvm`；客户端和 Agent 端都用它。R8 需要 `-dontwarn org.slf4j.**`（`acp-android` 的 consumer 规则带入）；运行时在 SDK 第一次记日志前设置 `kotlin-logging-to-android-native=true`，电脑上的测试设置 `kotlin-logging-to-jul=true` | 已在 Android 上完成编译、D8、R8 验证，S3 第二部分已在 API 35 / 36 / 37 模拟器上跑通 Binder 往返，见 [spikes/S3.md](spikes/S3.md)。SDK 没有声明 Android target，属于 JVM 兼容性落地。注意：正式包里的版本常量是 `0.30.1-dev-67`，不能拿它判断版本（`AcpSdkVersionLockTest` 检查的是 jar 名和 Transport 签名） |
 | ACP SDK 的 master 分支 | 不使用 | master 的 Transport API 已经改成 `TransportFrame` / `onFrame`，与 0.30.x 的 `JsonRpcMessage` / `onMessage` 不兼容。升级 SDK 要单独评估，改 `BinderAcpTransport` 并在真机上重跑 S3 |
 | MCP Kotlin SDK | 官方 `io.modelcontextprotocol:kotlin-sdk-client` / `kotlin-sdk-server`，版本在 S5 固定；同时固定它所支持的 MCP 协议修订版 | 撰写时查到的最新版 0.15.0 用 Kotlin 2.4、Ktor 3.5 构建。Kotlin 编译器只能读取比自己高一个小版本的库元数据，所以 S5 要一并决定整个工程的 Kotlin 版本 |
-| Pi Agent core | `@earendil-works/pi-agent-core` 和 `@earendil-works/pi-ai` 固定 0.86.1；`pi-ai` 只打包 `anthropic-messages`、`openai-completions` 两个协议族，连同它们的官方 SDK（`@anthropic-ai/sdk`、`openai`）按 `package-lock.json` 锁定 | 与 Profile 核对过的 Pi 主线版本一致；原型 agenriod 用 0.85.1 在 QuickJS 里跑通了上游 `Agent` 循环。2026-09 在电脑上用 0.85.1 试打包：只含 Agent 核心约 587 KB，加上 MiniMax、Anthropic、OpenAI、DeepSeek 四个预设约 1.9 MB，其中两个官方 SDK 占约 1.2 MB。Pi 还在 0.x，升级要单独评估，并重跑 S8 和契约测试 |
-| JS 引擎 | QuickJS，Kotlin 绑定 `io.github.dokar3:quickjs-kt`，版本在 S8 固定（原型用 1.0.15） | 体积小，不需要 Node；电脑上的测试优先用同一个绑定的 JVM 版本，S8 确认是否可用 |
+| Pi Agent core | `@earendil-works/pi-agent-core` 和 `@earendil-works/pi-ai` 固定 0.86.1；`pi-ai` 只打包 `anthropic-messages`、`openai-completions` 两个协议族，连同它们的官方 SDK（S8 时为 `@anthropic-ai/sdk` 0.124.0、`openai` 6.40.0、`typebox` 1.3.27）按 `package-lock.json` 锁定。S8 实测 `pi-agent.js` 压缩后 573 KB（gzip 147 KB），`model-catalog.json` 419 KB（APK 内约 26 KB） | 与 Profile 核对过的 Pi 主线版本一致；原型 agenriod 用 0.85.1 在 QuickJS 里跑通了上游 `Agent` 循环。2026-09 在电脑上用 0.85.1 试打包：只含 Agent 核心约 587 KB，加上 MiniMax、Anthropic、OpenAI、DeepSeek 四个预设约 1.9 MB，其中两个官方 SDK 占约 1.2 MB。Pi 还在 0.x，升级要单独评估，并重跑 S8 和契约测试 |
+| JS 引擎 | QuickJS，Kotlin 绑定 `io.github.dokar3:quickjs-kt` 固定 **1.0.15**（S8）；电脑上用同一个绑定的 JVM 变体 `quickjs-kt-jvm`，另可用 Node 的裸 `vm` 上下文跑快速契约测试 | 体积小，不需要 Node。1.0.15 用 Kotlin 2.4.10 构建，要求 Kotlin 编译器 ≥ 2.3；最后一个能配 Kotlin 2.2 的 1.0.5 遇到中文 + emoji 会挂住，不可用。`quickjs-kt-jvm` 只在 macOS arm64 上验证过，Linux x64 待 CI 跑一次 |
 | JS 打包 | esbuild；Node 只在构建机上使用 | 原型的 `build.mjs` 已经能把 Pi 打成 QuickJS 可以执行的单文件 |
-| Android 工具链 | AGP 8.10.1、Kotlin 2.2.20、JDK 21；`compileSdk` / `targetSdk` 36，`minSdk` 35 | S3 第一部分验证时的组合。S5 如果要求更高的 Kotlin 版本，统一升级后重跑 S3 第一部分 |
+| Android 工具链 | AGP 8.10.1、**Kotlin 2.3.20**、JDK 21、Gradle wrapper 8.14.5；字节码目标 17；`compileSdk` / `targetSdk` 36，`minSdk` 35 | Kotlin 于 2026-09-29 整合时由 2.2.20 升到 2.3.20，因为 quickjs-kt 1.0.15 需要 ≥ 2.3（S8 结论 d）；升级后主工程全量构建通过，并在 Pixel_8a 模拟器上重跑了 S3 的 debug 和 R8 release 场景（S3.md）。最终版本随 S5 定：MCP SDK 用 Kotlin 2.4 构建，升到 2.4 时一并评估 AGP（AGP 8.10.1 的 R8 读 2.4 元数据有警告）。Android Studio 自带的 JBR 是 25，Gradle 8.14 跑不了，Gradle JDK 必须设成 21；AGP 8.10.1 会触发 Gradle 的 “null attribute key” 弃用警告，Gradle 10 会变成错误 |
+| 其他 Kotlin / Java 库 | kotlinx-coroutines 1.9.0、kotlinx-serialization-json 1.7.3（与 `acp-jvm-0.30.1.pom` 对齐）；OkHttp 4.12.0；JUnit 4.13.2 | 避免解析出两套版本。S8 的实验工程用的是 coroutines 1.10.2，W3 引入 quickjs-kt 时核对它带入的 coroutines 版本，需要升级就整体升级并重跑 S3 用例 |
 | 支持的系统 | Android 15–17（API 35–37） | Android 17 已正式发布；真机验证覆盖这三个版本 |
 | 传输 | Android 上的 ACP 和 MCP 都走 `binder-channel-v1`；SDK 的 `StdioTransport` 只用于电脑上的测试 | 两种协议都是 JSON-RPC 消息流，共用一套通道 |
 | HTTP | 宿主层的网络出口（给 Pi 用的 `fetch`）用 OkHttp；MCP 远端客户端用 Ktor 加 OkHttp 引擎，不用 Ktor 的 Android 引擎 | 共用一套连接池和证书配置；HTTP 引擎版本在 S5 与 MCP SDK 一起固定 |
@@ -219,12 +224,22 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 |---|---|---|---|---|
 | S1 | **模块安装 APK**：在 `service.sh` 里用 `pm install` 安装和升级 zip 里的 AgentOS App 和 Runner；Magisk 和 KernelSU 各跑一遍 | 开机后能安装、能覆盖升级；不被 Play Protect 拦截；签名不符时能正确停止，并在 root 管理器里显示原因 | 改为在 `customize.sh` 刷入阶段安装；仍然不行就让用户手动安装 APK，模块只负责检查版本 | W7 |
 | S2 | **运行时保活与 root 监督**：`service.sh` 以 root 用 `am start-foreground-service` 拉起 `:agent` 的前台服务（`specialUse`）；运行时写心跳文件，监督进程判活；分别在有任务时杀掉 `:agent`、锁屏灭屏 30 分钟后由测试 App bind ACP 服务、连续运行 24 小时；监督进程向 App 发显式广播，再用另一个 App 尝试发同样的广播。Android 15 / 16 / 17 和 Magisk / KernelSU 都要覆盖 | root 拉起前台服务不被后台启动限制拦截；有任务时进程被杀，能在退避时间内被拉起并执行恢复流程；灭屏 30 分钟后从 bind 到首个响应不超过 3 秒；24 小时内没有因 Android 17 的内存上限被回收，并记下内存占用；App 能收到监督进程的广播，其他 App 发不进来；判活方式（`pidof`、心跳文件）选定 | 前台服务启动被拦：依赖首次引导里请求的电池优化豁免；频繁被回收：经用户同意后由监督进程设置 standby bucket 和 deviceidle 白名单，并在设置页提示检查厂商的后台限制 | W6、W7 |
-| S3 | **ACP over Binder**。第一部分（**已完成**，见 [spikes/S3.md](spikes/S3.md)）：临时 Android 工程引入 `acp:0.30.1`，`compileSdk` / `targetSdk` 35 与 36、`minSdk` 35，编译、D8、R8 release 全部通过。第二部分（待做）：两个测试 App，客户端用 SDK + `BinderAcpTransport`，服务端把 SDK 的 Agent 端放在独立进程里并导出 `IAcpService`，通道按 `binder-channel-v1` 实现；在 API 35 / 36 / 37 真机上跑 `initialize` → `session/new` → `session/prompt` 流式输出 → `cancel` → close / 重新 bind；debug 和 R8 release 构建各跑一次，中途分别杀一次客户端和服务端进程；在流式高峰下测 Binder 异步缓冲；最后让服务端开一个抽象 socket，经 `adb forward` 用官方 TypeScript 客户端完成一轮对话 | 流式输出不阻塞主线程，没有明显的延迟堆积；cancel 后本轮返回 `cancelled`；close 后重新 bind 能继续；任何一端进程死亡，另一端经 `linkToDeath` 关闭协程和通道，没有泄漏；R8 release 与 debug 行为一致；确定单条消息上限和背压参数；电脑端经 `adb forward` 能完成对话 | 先修 `BinderAcpTransport`；如果是 SDK 在设备上的运行时问题，改为只用 SDK 的数据类型、自己写 JSON-RPC 层；官方 Java SDK 作为最后备选 | W5 |
+| S3 | **ACP over Binder**。第一部分（**已完成**，见 [spikes/S3.md](spikes/S3.md)）：临时 Android 工程引入 `acp:0.30.1`，`compileSdk` / `targetSdk` 35 与 36、`minSdk` 35，编译、D8、R8 release 全部通过。第二部分（**模拟器已完成，真机待做**；参数已定：单条 65,536 字符，在途 32 条且 32,768 字符，接收方累计 `ack`，见 `core/protocol/binder-channel-v1.md`）：两个测试 App，客户端用 SDK + `BinderAcpTransport`，服务端把 SDK 的 Agent 端放在独立进程里并导出 `IAcpService`，通道按 `binder-channel-v1` 实现；在 API 35 / 36 / 37 真机上跑 `initialize` → `session/new` → `session/prompt` 流式输出 → `cancel` → close / 重新 bind；debug 和 R8 release 构建各跑一次，中途分别杀一次客户端和服务端进程；在流式高峰下测 Binder 异步缓冲；最后让服务端开一个抽象 socket，经 `adb forward` 用官方 TypeScript 客户端完成一轮对话 | 流式输出不阻塞主线程，没有明显的延迟堆积；cancel 后本轮返回 `cancelled`；close 后重新 bind 能继续；任何一端进程死亡，另一端经 `linkToDeath` 关闭协程和通道，没有泄漏；R8 release 与 debug 行为一致；确定单条消息上限和背压参数；电脑端经 `adb forward` 能完成对话 | 先修 `BinderAcpTransport`；如果是 SDK 在设备上的运行时问题，改为只用 SDK 的数据类型、自己写 JSON-RPC 层；官方 Java SDK 作为最后备选 | W5 |
 | S4 | **插件 App 的发现与 Binder 连接**：测试 App 定义 `BIND_MCP_SERVICE`（signature）；另装一个插件 App，在 `assets/agent-plugin/` 放插件包，导出要求该权限的 `IMcpService`。测试 App 用 `<queries>` 发现它、通过 `createPackageContext` 读出插件包，再在界面前台和只有前台服务在跑两种情况下分别 `bindService()`，经通道收发消息；最后杀掉插件 App 的进程，并用一个没有该权限的 App 尝试 bind | 能发现、能读到对方的 assets、能 bind，后台 bind 不被系统拦截；消息到达时 `Binder.getCallingUid()` 等于插件 App 的 UID；插件 App 进程被杀后经 `linkToDeath` 感知，进行中的调用被正确清理；没有权限的 App bind 失败 | 后台 bind 不可靠，就只在运行时有任务（前台服务运行）时 bind；读不到 assets，就让插件 App 通过 Binder 接口返回插件包 | W14 |
 | S5 | **MCP Kotlin SDK 在 Android 上**：做法同 S3 第一部分，引入官方 MCP Kotlin SDK，完成编译、D8、R8，并确认它与 ACP SDK 0.30.1 能否共用同一套 Kotlin / Ktor 版本；实现 `McpBinderTransport`，在两个测试 App 之间跑通初始化、`tools/list`、`tools/call`、取消、`tools/list_changed`；再用 SDK 的 `StreamableHttpClientTransport`（Ktor + OkHttp 引擎）连一个真实的远端 Streamable HTTP MCP 服务，完成一次 `tools/call` 并测试断线重连 | 编译打包通过；Binder 往返和通知正常；远端能完成一次 `tools/call`；确定 SDK 版本、它支持的 MCP 协议修订版、Kotlin / Ktor / OkHttp 版本，写进依赖锁定表；如果需要升级 Kotlin，重跑 S3 第一部分 | 只用 SDK 的数据类型、自己写 JSON-RPC 层；远端客户端改用 OkHttp 自己实现 Streamable HTTP | W15、W19 |
 | S6 | **Runner**：Runner APK（不申请任何权限）通过 Binder 接收命令，用 `/system/bin/sh -c` 执行：传入 stdin JSON 和环境变量，测试超时（杀进程组）和输出上限；在 Runner 里尝试读取 AgentOS App 的数据、绑定 AgentOS App 的内部服务；测试在 PATH 里放一个转发到 `/system/bin/sh` 的 `bash`；测量一次 Hook 往返（`:agent` → `:ext` → Runner → 返回）的耗时 | 命令正确执行，超时后清理干净，输出被截断；读取 AgentOS 数据、绑定内部服务都失败；记下 `bash` 转发是否可行；Runner 已在运行时，一次 Hook 往返 p95 不超过 200 ms，冷启动耗时单独记录 | 超时清理不可靠，就改为每条命令在单独的进程里执行；延迟超标，就在有任务期间让 Runner 常驻，并在设置页提示 `PreToolUse` Hook 会拖慢每次工具调用 | W21 |
 | S7 | **默认助理**：用户在系统设置里选择默认助理，测试长按电源键 | 首批设备上能稳定唤起浮层 | 首版只提供快捷开关和悬浮球入口 | W13 |
 | S8 | **Pi Agent core 在 QuickJS 里（混合方案）**：用 esbuild 把 `pi-agent-core` 和 `pi-ai` 0.86.1 打成单文件，`pi-ai` 只含 `anthropic-messages`、`openai-completions` 两个协议族，官方 SDK 和 `pi-ai` 里引用 Node 内置模块的文件替换成空实现；放进测试 App，用 `quickjs-kt` 执行。Kotlin 提供真实定时器、流式 `fetch`（OkHttp）、UTF-8 编解码、`AbortController`；调用 `pi-ai` 时传入这个 `fetch`、占位 key 和 `maxRetries: 0`，真 key 由 Kotlin 在 `fetch` 里注入。在 API 35 / 36 / 37 真机上：用 `minimax` / `minimax-cn` 预设和一个 OpenAI 兼容端点，各完成一次流式对话和一次工具调用；中途 `abort`；多个会话的 `Agent` 实例并发；用保存的 messages 重建 `Agent` 后继续对话；测量 bundle 体积、加载 bundle 的冷启动耗时、每个会话的内存增量、每轮的额外延迟；导出 `model-catalog.json`；最后在电脑上用同一个 bundle 跑契约测试 | 流式输出逐段到达 Kotlin，工具调用和结果往返正确；`abort` 后本轮以 aborted 结束，没有残留的 HTTP 请求；`pi-ai` 和 SDK 不自己重试；重建后上下文一致；并发会话不串话；JS 里拿不到 key；冷启动目标不超过 1 秒，bundle 体积、内存和延迟记下数值；确定“一个 QuickJS 运行时承载多个会话”还是“每个会话一个运行时”；确定电脑上跑 bundle 的方式 | 官方 SDK 在 QuickJS 里跑不通：由宿主层实现这两个协议族，经自定义 `streamFn` 推给 Pi，Agent 循环仍然用 Pi，模型目录仍读 `pi-ai` 的数据文件；QuickJS 的性能或兼容性不够：换 V8 类引擎（如 Javet）再评估 | W3 |
+
+**当前状态（2026-09-29 整合）**：
+
+| # | 状态 | 结论 | 还差什么 |
+|---|---|---|---|
+| S1 | 不需要设备的部分完成 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降级、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁 | Magisk / KernelSU 真机（M1–M8 用例） |
+| S2 | 不需要设备的部分完成 | 监督契约 v0 写进 [spikes/S2.md](spikes/S2.md)：判活看进程，心跳只记录任务状态；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起 | root 真机，API 35 / 36 / 37 × Magisk / KernelSU；最关键的是 root 拉起前台服务能否绕开后台启动限制（B0、T1） |
+| S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑） | 可用；通道参数已定 | API 35 / 36 / 37 真机 |
+| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20） | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；用真实 key 跑 MiniMax 国际 / 国内和 OpenAI 兼容端点 |
+| S4–S7 | 未开始 | — | — |
 
 **S2、S3、S4、S6 验证的是四段不同的连接，不能互相替代：**
 - S2：root 监督进程 → AgentOS App，进程管理与状态广播；
@@ -309,11 +324,13 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 不属于任何里程碑，是 M1 的前置。
 
 #### W1 仓库与构建
-- [ ] 目录骨架、`.gitignore`（排除 `.DS_Store`、构建产物、密钥）、`LICENSE`（MIT，与 agenriod 一致）
-- [ ] Gradle 多模块：`core:runtime`、`core:extensions`、`sdk:binder-channel`、`sdk:acp-android`、`sdk:plugin-sdk`、`app`、`runner`、`plugins:samples:*`；`core/pi-runtime` 是 Node 工程，由 Gradle 任务在构建 APK 前调用它的 `build.mjs`
-- [ ] `gradle/libs.versions.toml`，按第 2 节锁定版本
-- [ ] 生成项目发布证书，私钥不进仓库
-- [ ] `.github/workflows/portable-tests.yml`
+- [x] 目录骨架、`.gitignore`（排除 `.DS_Store`、构建产物、密钥）、`LICENSE`（MIT，与 agenriod 一致）
+- [x] Gradle 多模块：`core:runtime`、`core:extensions`、`sdk:binder-channel`、`sdk:acp-android`、`sdk:plugin-sdk`、`app`、`runner`、`plugins:samples:*`；`core/pi-runtime` 是 Node 工程，由 Gradle 任务在构建 APK 前调用它的 `build.mjs`
+- [x] `gradle/libs.versions.toml`，按第 2 节锁定版本
+- [ ] 生成项目发布证书，私钥不进仓库（**待维护者**：证书决定以后所有版本的签名身份，按 README「开发」一节生成一次；构建脚本只从环境变量读取，签名流程已用一次性证书验证）
+- [x] `.github/workflows/portable-tests.yml`（本地确认 YAML 可解析；还没在 GitHub 上实际跑过）
+
+`plugins:samples:*` 目前只有自动加入机制：`plugins/samples/<name>/` 下有 `build.gradle.kts` 就进构建，W17 加示例时不用改 settings。
 
 #### W2 运行时宿主层
 - [ ] `core/contracts/`：按第 6 节迁移并改写 session-scheduling、session-selection、events，新写 errors
@@ -343,7 +360,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] `tests/acp-conformance/`：在电脑上用 SDK 的 `StdioTransport` 启动运行时（Pi 由 `JsEngine` 的电脑实现执行），用官方 TypeScript 客户端跑基础方法
 
 #### W5 Binder 通道
-- [ ] 按 S3 的结论冻结 `core/protocol/binder-channel-v1.md`（AIDL、单条消息上限、顺序、背压、`linkToDeath`、UID 校验）
+- [ ] 按 S3 的结论冻结 `core/protocol/binder-channel-v1.md`（AIDL、单条消息上限、顺序、背压、`linkToDeath`、UID 校验）；草案已在，参数见其第 8 节
 - [ ] `sdk/binder-channel/`：`IChannel`、`BinderChannel`
 - [ ] `sdk/acp-android/`：`IAcpService`、`BinderAcpTransport`
 - [ ] 把 S3 第二部分的测试 App 改成回归测试

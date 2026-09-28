@@ -8,7 +8,7 @@
 
 Agent 运行时是 AgentOS App 里的一个独立进程 `:agent`：外层是 Kotlin 宿主层，负责 ACP、身份、存储、调度和恢复；Agent 循环用上游的 **Pi Agent core**（`@earendil-works/pi-agent-core`），跑在进程内嵌的 QuickJS 里。root 只运行模块脚本：安装 App、开机拉起运行时、在它有任务时被杀后重新拉起、崩溃循环时进入 safe mode。AgentOS 自己的代码不以 root 运行，模型和插件也接触不到 root。设备已经 root，其他 root 应用仍可能读取 AgentOS 的数据，所以安全等级固定为 `best_effort`，并在设置页如实告知。
 
-本仓库接替原型 [agenriod](https://github.com/HanZijie/agenroid)。原型把 Agent 做进了系统镜像，本仓库改为 Magisk / KernelSU 模块，**当前处于规划阶段，还没有代码**。
+本仓库接替原型 [agenriod](https://github.com/HanZijie/agenroid)。原型把 Agent 做进了系统镜像，本仓库改为 Magisk / KernelSU 模块。**当前处于基础阶段**：W1 的 Gradle 工程骨架已就绪，S1、S2、S3、S8 四项验证已有结论（真机部分待测）；运行时、ACP Agent 端和界面还没开工，App 还不能对话。
 
 ![AgentOS 架构图](docs/assets/architecture.svg)
 
@@ -22,7 +22,7 @@ Agent 运行时是 AgentOS App 里的一个独立进程 `:agent`：外层是 Kot
 
 ## 开发者怎么接入
 
-- **调用 Agent**：在 App 里引入 `acp-android` SDK，用标准的 ACP 客户端接口建会话、发 prompt、接收流式更新。首次调用时，由用户在 AgentOS 里授权。`acp-android` 基于官方 ACP Kotlin SDK（固定 0.30.1），加上 Binder 传输；在 Android 15 / 16 上编译打包已验证通过，真机验证待做。
+- **调用 Agent**：在 App 里引入 `acp-android` SDK，用标准的 ACP 客户端接口建会话、发 prompt、接收流式更新。首次调用时，由用户在 AgentOS 里授权。`acp-android` 基于官方 ACP Kotlin SDK（固定 0.30.1），加上 Binder 传输；已在 Android 15 / 16 / 17 模拟器上跑通 ACP over Binder（S3），真机验证待做。
 - **把能力提供给 Agent**：在 App 里内嵌一个标准的 Agent Plugins 1.0 插件，放在 `assets/agent-plugin/`（`plugin.json`、`skills/`、`mcp.json`、Hooks）。MCP 服务用 `plugin-sdk` 在你自己的 App 进程里实现，在 `plugin.json` 的 `extensions."org.agentos"` 里声明，AgentOS 通过 Binder 连接，不需要任何解释器。
 - **分发插件包**：标准插件包（zip）可以直接导入 AgentOS。其中的 MCP 只支持远端 Streamable HTTP（`https://`）；Hooks 只支持命令型，用手机自带的 `sh` 执行。
 - **在电脑上调试**：通过 `adb forward` 用任意 ACP 客户端连接手机上的 Agent。
@@ -34,7 +34,7 @@ Agent 运行时是 AgentOS App 里的一个独立进程 `:agent`：外层是 Kot
 | [docs/architecture.md](docs/architecture.md) | 范围与决策记录、设计原则、组件、协议（ACP、Binder 消息通道、App 内部接口、扩展）、13 个功能的实现过程 |
 | [docs/extensions.md](docs/extensions.md) | 扩展模块（Extension Host）：插件格式、插件来源、MCP over Binder、远端 Streamable HTTP、Skills、Hooks、Runner |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | 文件级目录、构建与产物（含依赖版本锁定）、8 项验证、依赖顺序图、28 个工作包与 M1–M6 出口条件、从 agenriod 迁移、风险 |
-| [docs/spikes/](docs/spikes/) | 各项验证的结论；目前已有 S3 第一部分（ACP Kotlin SDK 在 Android 上的编译与打包） |
+| [docs/spikes/](docs/spikes/) | 各项验证的结论：S1（模块安装 APK）、S2（保活与 root 监督）、S3（ACP over Binder）、S8（Pi Agent core 在 QuickJS 里）；实验工程在 `spikes/`，不参与主构建 |
 | [docs/assets/request-flow.svg](docs/assets/request-flow.svg) | 核心链路时序图：后装的 App 通过 ACP 调用 Agent，工具由另一个 App 内嵌的插件经 Binder 提供（含可选的 Hook 步骤） |
 | [docs/assets/dependency-graph.svg](docs/assets/dependency-graph.svg) | 实现依赖顺序图：工作包和验证项的前后关系 |
 
@@ -150,4 +150,4 @@ read -rs AGENTOS_SIGNING_STORE_PASSWORD && export AGENTOS_SIGNING_STORE_PASSWORD
 
 ## 许可证
 
-MIT License，与 agenriod 保持一致。`LICENSE` 文件在 W1 建仓时加入。
+MIT License，与 agenriod 保持一致，见 [LICENSE](LICENSE)。
