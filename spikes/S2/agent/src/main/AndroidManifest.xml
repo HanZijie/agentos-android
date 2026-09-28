@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Contract item e: signature permission guarding the supervisor status receiver.
+         The real App uses org.agentos.permission.SEND_SUPERVISOR_STATUS; the spike uses its own
+         name so it can coexist with the real App on a test device. -->
+    <permission
+        android:name="org.agentos.spike.s2.permission.SEND_SUPERVISOR_STATUS"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <application
+        android:name=".spike.SpikeApp"
+        android:allowBackup="false"
+        android:label="S2 AgentOS stand-in"
+        android:largeHeap="true">
+
+        <activity
+            android:name=".spike.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Contract item a: runtime service in :agent, specialUse FGS, not exported
+             (only root and the App itself can start it). -->
+        <service
+            android:name=".agent.AgentService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:process=":agent">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="On-device agent runtime executing a user-requested task" />
+        </service>
+
+        <!-- Stand-in for the exported IAcpService (bind latency, tasks started by another App). -->
+        <service
+            android:name=".agent.ProbeService"
+            android:exported="true"
+            android:process=":agent" />
+
+        <!-- Contract item e, variant 1 (recommended): not exported + signature permission.
+             Runs in the main process so a status broadcast never spawns :agent. -->
+        <receiver
+            android:name=".agent.supervisor.SupervisorStatusReceiver"
+            android:exported="false"
+            android:permission="org.agentos.spike.s2.permission.SEND_SUPERVISOR_STATUS" />
+
+        <!-- Contract item e, variant 2: exported, protected only by the signature permission. -->
+        <receiver
+            android:name=".agent.supervisor.SupervisorStatusReceiverExported"
+            android:exported="true"
+            android:permission="org.agentos.spike.s2.permission.SEND_SUPERVISOR_STATUS" />
+    </application>
+</manifest>
