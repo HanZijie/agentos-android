@@ -40,10 +40,12 @@ dependencies {
 
 // lane B（W3）：Pi 打包产物的契约测试（org.agentos.runtime.pi.PiBundleContractTest）读取
 // core/pi-runtime/build.mjs 生成的 app/src/main/assets/pi-agent.js；没有生成时这些用例跳过。
+// 同一次构建里也要打包 APK 时，先让 :app:bundlePiAgent 生成产物（只约束顺序，不会因此拉起 app 的打包）。
 tasks.named<Test>("test") {
     val piAssets = rootProject.layout.projectDirectory.dir("app/src/main/assets")
     systemProperty("agentos.piAssetsDir", piAssets.asFile.absolutePath)
     inputs.files(piAssets.file("pi-agent.js"), piAssets.file("model-catalog.json"))
         .optional()
         .withPropertyName("piBundle")
+    mustRunAfter(":app:bundlePiAgent")
 }
