@@ -5,8 +5,12 @@
 #
 # modes: comma list of contract,measure,real (default contract,measure).
 # For "real", keys are taken from this shell's environment (MINIMAX_API_KEY, optional MINIMAX_ANTHROPIC_BASE_URL,
-# OPENAI_COMPAT_BASE_URL / _API_KEY / _MODEL) and passed as intent extras; they are
-# not written to any file. The fake endpoint must be running on this machine:
+# OPENAI_COMPAT_BASE_URL / _API_KEY / _MODEL) and passed as intent extras on the `adb shell am start`
+# command line; they are not written to any file.
+# API 37's adbd writes the whole `adb shell` command line to logcat, so this refuses to pass keys to
+# a device above API 36. For real endpoints on newer devices use the app's device test instead
+# (app/src/androidTest MiniMaxLiveDeviceTest), which receives the key through stdin.
+# The fake endpoint must be running on this machine:
 #   node bundle/test/fake-llm.mjs --port 8787
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,6 +20,14 @@ MODES="${2:-contract,measure}"
 ADB="${ADB:-$HOME/Library/Android/sdk/platform-tools/adb}"
 APK="android/build/outputs/apk/$VARIANT/android-$VARIANT.apk"
 OUT="android/build/s8-android-$ANDROID_SERIAL-$VARIANT-$(date +%Y%m%d-%H%M%S).json"
+
+if [[ "$MODES" == *real* ]]; then
+  sdk="$("$ADB" shell getprop ro.build.version.sdk | tr -d '\r')"
+  if [[ -z "$sdk" || "$sdk" -gt 36 ]]; then
+    echo "refusing to pass keys on the adb command line to API ${sdk:-?} (> 36 logs adb shell commands to logcat)" >&2
+    exit 2
+  fi
+fi
 
 curl --noproxy '*' -fsS -X POST http://127.0.0.1:8787/__reset >/dev/null
 "$ADB" reverse tcp:8787 tcp:8787 >/dev/null
