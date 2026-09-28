@@ -35,7 +35,7 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | handshake | inapp | 本 App 的 UID：initialize → session/new → prompt → close，文字完整 |
 | foreign-uid-rejected | client | 第三方 UID 调 `open`：`SecurityException`，原因码 `agentos.acp.not_open`，本端不留通道 |
 | foreign-no-leak | inapp | 被拒之后 `:agent` 没有连接和通道，`rejectedOpens` ≥ 1 |
-| oversize | inapp | A、B、D 同 SDK 回归；C：宿主层把 65,636 字符的文字切块发出，没有超长通知、没有丢弃、每块 ≤ 8,192 字符（事件日志对超过 65,536 字符的单个事件会截断字段，`textComplete` 只记录不判定） |
+| oversize | inapp | A、B、D 同 SDK 回归；C：宿主层把 65,636 字符的文字切成 ≤ 8,192 字符的块发出，没有超长通知、没有丢弃，文字完整送达（A4 修复了单条超长增量被事件日志截断的问题，C3 发现） |
 | client-kill | inapp | 执行器进程在流式中途自杀：`:agent` 以 `peer_died` 关闭连接和通道；任务不随连接取消，run.py 轮询到它自己结束（`promptsActive=0`） |
 | agent-kill-rebind | inapp | 流式中途 SIGKILL `:agent`：执行器感知、prompt 不挂住；系统重建服务后重新 bind 能对话 |
 | stream-realtime / cancel-realtime / reconnect / window-violation | inapp | 同 SDK 回归（stream 按字符数） |
@@ -48,6 +48,7 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | store-restart | inapp | 删库 → ACP 冷启动建两个会话、跑一轮 → SIGKILL 后直接读数据库文件（只读）：会话、已完成的任务、事件、Pi messages 都在，库在 CE、WAL；再冷启动：`runtime.started` / `runtime.recovered` 各加 1、系统流 sequence 连续 |
 | byok-roundtrip | inapp + run.py | IAgentControl v2：设置预设 → 读取只有首尾 4 位 → 同厂商换模型沿用 key → 8 种拒绝（换端点要 key、http、换行、Bearer、未知厂商、key 填错字段、坏 JSON）且消息里没有 key → 自定义端点 → 诊断里连掩码都没有；全程不重启 `:agent` |
 | byok-restart | inapp + run.py | SIGKILL 后冷启动：key 仍能解密、按端点匹配（`credentialResolves`），Keystore 主密钥在；`model-source.json` 在 CE、只有密文；App 的 CE / DE 私有目录下所有文件里没有明文 key |
+| byok-clear-inflight | inapp + run.py | 清除 = 立即作废（C3.1）：长流式进行中（ScriptedAgentCore 每 5 条前取一次 key，模拟每次模型请求经网络出口取 key）清除模型来源 → 本轮很快以 `model_not_configured` 结束、错误消息里没有 key；清除之后没有请求再拿到 key（`served` 不变、`denied` 增加）；同一会话下一轮也以 `model_not_configured` 失败。已经在传输中的那一次 HTTP 响应的中止要等网络出口支持（不在本用例） |
 | byok-clear | inapp + run.py | 清除 → 重启后仍未配置，文件已删，Keystore 主密钥已删 |
 
 BYOK 用例的 key 由 run.py 每次随机生成（`agtest-` + 48 字符，不是真实 key），经 stdin 写进 App 私有目录的 `files/test/byok_key`（`adb exec-in run-as …`），执行器读完立即删除。**不要把 key 放在 `adb shell` 的命令行里**：API 37 的 adbd 会把整条命令行写进 logcat（`adbd service requested 'shell,v2,…:am start … --es args …'`），C3 就是在 API 37 上这样发现的。执行器基类回显参数时也会把 `apiKey` 换成 `<redacted>`。每个 BYOK 用例结束后 run.py 在整个 logcat（`-b all`）和结果 JSON 里搜 key 的全文和中段，命中就判失败，命中的行（key 已替换）记在 `leakScan.hitLines`。
