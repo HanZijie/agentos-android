@@ -75,7 +75,7 @@ function otherCode(code) {
 }
 
 for (const t of gatewayTargets) {
-  describe(`desktop gateway pairing (${t.name})`, () => {
+  describe(`desktop gateway pairing (${t.name})`, { timeout: 180_000 }, () => {
     before(() => t.setup());
     after(() => t.teardown());
 

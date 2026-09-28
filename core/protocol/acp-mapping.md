@@ -3,7 +3,7 @@
 - **状态**：v1，W4 冻结 M1 的方法范围、映射规则和“自动选会话”扩展；W9 追加电脑端接入的传输与配对握手（第 10 节）；M2（W10）、M3a（W16）按第 2 节的计划追加。
 - **依据**：[acp-profile-v1.md](acp-profile-v1.md)（对外协议的权威文档）、architecture 5.3 / 5.6、[core/contracts/events.md](../contracts/events.md)、[errors.md](../contracts/errors.md)、[binder-channel-v1.md](binder-channel-v1.md)。
 - **实现**：`core/runtime/.../acp/`（`AgentSide.kt`：Agent 端与会话；`UpdateMapper.kt`：事件 → `session/update`；`ProfileExtensions.kt`：`_meta` 约定；`LineTransport.kt`：按行传输），官方 ACP Kotlin SDK 0.30.1 的 Agent 端；电脑端接入：`core/runtime/.../desktop/`（开关、配对、握手、连接管理）+ app 的 `DesktopGateway.kt`（抽象 socket）+ `tools/acp-bridge/`。扩展字段的 schema：[acp-extensions.schema.json](acp-extensions.schema.json)。
-- **测试**：`AcpAgentSideTest`（SDK 的 Kotlin Client，9 例）、`RuntimeStartTest`（启动与恢复期间，4 例）、`LineTransportTest`（8 例）、`DesktopPairingTest`（10 例）、`DesktopGatewayCoreTest`（11 例）；`tests/acp-conformance/`（官方 TypeScript 客户端 1.4.0）：13 例分别经 stdio 和电脑上的网关 + `tools/acp-bridge` 跑，网关配对与安全 9 例，手机上经 `adb forward` 的握手类 6 例（设备可选）。
+- **测试**：`AcpAgentSideTest`（SDK 的 Kotlin Client，10 例）、`RuntimeStartTest`（启动与恢复期间，4 例）、`LineTransportTest`（8 例）、`DesktopPairingTest`（10 例）、`DesktopGatewayCoreTest`（11 例）；`tests/acp-conformance/`（官方 TypeScript 客户端 1.4.0）：13 例分别经 stdio 和电脑上的网关 + `tools/acp-bridge` 跑，网关配对与安全 9 例，手机上经 `adb forward` 的握手类 6 例（设备可选）。
 
 ## 1. 连接
 

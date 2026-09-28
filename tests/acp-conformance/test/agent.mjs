@@ -249,6 +249,21 @@ export function deviceControl(serial, op, longExtras = {}) {
   return reply;
 }
 
+/**
+ * 手机上的宿主层没有配置模型时，任务以 model_not_configured 失败。流式用例之前借 C 的设备测试执行器
+ * （tests/device/acp-channel/inapp，debug 包里有）配一个回环地址上的测试端点：它在跑任何非 BYOK 场景之前调用
+ * ensureTestModel（ScriptedAgentCore 不会去连这个端点；key 是代码里的占位值，不经命令行）。已经可用时什么都不做。
+ */
+export async function ensureDeviceTestModel(serial) {
+  if (deviceControl(serial, "status").modelUsable) return false;
+  execFileSync(adbPath(), [
+    "-s", serial, "shell", "am", "start", "-W", "-n", "org.agentos.app/org.agentos.test.acp.inapp.AgentScenarioActivity",
+    "--es", "scenario", "handshake", "--es", "run", `a4-model-${Date.now()}`, "--es", "args", "'{}'",
+  ], { encoding: "utf8" });
+  await until(() => deviceControl(serial, "status").modelUsable, 30_000, "the device test model to be configured");
+  return true;
+}
+
 /** adb forward tcp:0 localabstract:agentos-acp，返回本机端口和移除函数。 */
 export function deviceForward(serial) {
   const port = Number.parseInt(execFileSync(adbPath(), ["-s", serial, "forward", "tcp:0", "localabstract:agentos-acp"], { encoding: "utf8" }).trim(), 10);

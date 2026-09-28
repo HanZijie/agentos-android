@@ -6,7 +6,7 @@
 |---|---|---|---|
 | W4 | 电脑上的运行时（`org.agentos.runtime.testing.AcpStdioAgent`：完整的 `RuntimeEngine` + 真实 SQLite + ACP Agent 端），Agent 循环是 FakeAgentCore | stdio，`LineTransport` | ✅ 13 例（`conformance.test.mjs`，目标 `stdio`） |
 | W9 | 同上，以网关模式运行（与手机上同一份 `DesktopGatewayCore`：开关、配对码、令牌、握手；监听本机 TCP 代替抽象 socket） | `tools/acp-bridge --connect` | ✅ 13 例（目标 `gateway`）+ 配对与安全 9 例（`gateway.test.mjs`） |
-| W9 | 手机上的 `:agent`（debug 包；C3 之前是占位的假 Agent） | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 握手类 6 例（`device.test.mjs`）+ 配对与安全 9 例，模拟器 API 36 |
+| W9 | 手机上的 `:agent`（debug 包；真 RuntimeEngine，Agent 循环暂时是 C 的 ScriptedAgentCore） | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 握手类 6 例（`device.test.mjs`）+ 配对与安全 9 例，模拟器 API 36 |
 | W4（B2 之后） | 电脑上的运行时，Agent 循环换成 B lane 的 PiAdapter（真实 Pi + 假模型端点） | stdio | A5 |
 
 ## 运行
@@ -31,7 +31,7 @@ cd tests/acp-conformance
 AGENTOS_ACP_DEVICE=<serial> npm run test:device
 ```
 
-`test:device` 跑 `device.test.mjs`（经 `tools/acp-bridge` 的握手类用例：initialize、session/new、prompt 流式、cancel、线上格式、出站单行上限）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。真 AgentRuntime 进 main（C3）之前，手机上是 C 的占位实现，所以只跑握手类用例；完整的 13 例在电脑上的 `gateway` 目标里跑，走的是同一份网关代码。
+`test:device` 跑 `device.test.mjs`（经 `tools/acp-bridge` 的握手类用例：initialize、session/new、prompt 流式、cancel、线上格式、70,000 字符输出的单行上限）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。手机上的 Agent 循环在 Pi 接上之前是 C 的 ScriptedAgentCore（不调模型、没有工具，按 prompt 里的 JSON 脚本输出），不认 FakeAgentCore 的指令和测试工具，所以只跑握手类用例；完整的 13 例在电脑上的 `gateway` 目标里跑，走的是同一份网关代码。宿主层没有配置模型时任务以 `model_not_configured` 失败，所以 `device.test.mjs` 开始前如果设备上还没有可用的模型，会借 C 的设备测试执行器（`tests/device/acp-channel/inapp` 的 `AgentScenarioActivity`，debug 包里有）配一个回环地址上的测试端点（ScriptedAgentCore 不会去连它；key 是代码里的占位值，不经 adb 命令行）。
 
 debug 包的测试入口也可以手动用：
 
