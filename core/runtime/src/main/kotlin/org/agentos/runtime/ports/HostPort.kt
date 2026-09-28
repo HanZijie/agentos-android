@@ -315,6 +315,15 @@ interface EnvironmentPort {
     /** safe mode 下运行时不自动继续恢复出来的任务（F13、W11）。 */
     val safeMode: StateFlow<SafeModeState>
 
+    /**
+     * 上一个 `:agent` 进程是不是被用户主动停止的（S2 监督契约 a 第 6 条：`ApplicationExitInfo` 的
+     * `REASON_USER_REQUESTED` / `REASON_USER_STOPPED`，由 W6 在进程启动时算好）。
+     *
+     * 为 true 时，启动恢复流程把恢复出来的排队任务取消（`task.cancelled { by: user_stop }`），不计入 runState，
+     * 运行时不会因为它们进入前台；结果未知的任务照常暂停等用户决定（本来就不重放）。只在 `AgentRuntime.start()` 时读一次。
+     */
+    val previousExitStoppedByUser: Boolean get() = false
+
     companion object {
         val NORMAL: EnvironmentPort = object : EnvironmentPort {
             override val safeMode: StateFlow<SafeModeState> = MutableStateFlow(SafeModeState.OFF).asStateFlow()

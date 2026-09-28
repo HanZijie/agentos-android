@@ -14,21 +14,33 @@ import org.agentos.runtime.store.TaskState
  *
  * - 运行中、取消中的任务：没有终态记录，说明上次执行在进程死亡时丢失——标记为结果未知（unknown），
  *   已派发、没有结果的工具调用一并标记为 unknown，会话暂停，写 `task.recovery_required`。**不自动重放。**
- * - 排队的任务：保持排队，由调度器重新调度（safe mode 下不调度）。
+ * - 排队的任务：保持排队，由调度器重新调度（safe mode 下不调度）。上一个进程被用户主动停止时（[userStopped]，S2 契约 a 第 6 条）
+ *   改为取消（`task.cancelled { by: user_stop }`），不继续。
  * - 会话状态按任务重新归位：有结果未知的任务 → paused；有排队的 → queued；否则 created。
  * - 系统流写 `runtime.recovered`。
  */
 internal object Recovery {
 
-    data class Result(val requeued: Int, val recoveryRequired: Int, val sessions: Int)
+    data class Result(val requeued: Int, val recoveryRequired: Int, val sessions: Int, val cancelled: Int)
 
-    suspend fun run(store: Store): Result = store.write { tx ->
+    suspend fun run(store: Store, userStopped: Boolean = false): Result = store.write { tx ->
         val interrupted = tx.tasks.listByState(TaskState.RUNNING, TaskState.CANCELLING)
         for (t in interrupted) {
             Scheduler.markRecoveryRequired(
                 tx, t, "runtime_restarted",
                 ErrorCode.TOOL_RESULT_UNKNOWN.info("The runtime stopped before this task finished; its side effects are unknown."),
             )
+        }
+        var cancelled = 0
+        if (userStopped) {
+            for (t in tx.tasks.listByState(TaskState.QUEUED)) {
+                tx.events.append(PendingEvent(t.sessionId, t.id, EventTypes.TASK_CANCEL_REQUESTED, buildJsonObject { put("by", "user_stop"); put("phase", "queued") }))
+                tx.tasks.finish(t.id, TaskState.CANCELLED, tx.now, "cancelled", null)
+                tx.events.append(
+                    PendingEvent(t.sessionId, t.id, EventTypes.TASK_CANCELLED, buildJsonObject { put("phase", "queued"); put("unknownToolCalls", kotlinx.serialization.json.JsonArray(emptyList())) }),
+                )
+                cancelled++
+            }
         }
         var requeued = 0
         val sessions = tx.sessions.listAll()
@@ -55,9 +67,11 @@ internal object Recovery {
                     put("requeued", requeued)
                     put("recoveryRequired", unknown)
                     put("interrupted", interrupted.size)
+                    put("userStopped", userStopped)
+                    put("cancelled", cancelled)
                 },
             ),
         )
-        Result(requeued, unknown, sessions.size)
+        Result(requeued, unknown, sessions.size, cancelled)
     }
 }
