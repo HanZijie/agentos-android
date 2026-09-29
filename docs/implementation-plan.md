@@ -383,7 +383,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
 - [x] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接（B3；字节码缓存在 `codeCacheDir/pi`，key 为 bundle SHA-256 + quickjs-kt 版本 + ABI + 协议版本，读取时校验；`:agent` 进程里首启中位 72 ms、字节码 12 ms；Pixel_8a 上 `:agent` 进程内经国内 key 的真实端点对话、工具调用、abort 通过）
 - [x] `AndroidStore`（BundledSQLiteDriver，CE 目录 `databases/agentos-runtime.db`）、`KeystoreSecrets`（只实现 `SecretPort`）、`HostPortImpl`（工具、Skill、Hook、确认暂为“未开放”实现）、`IAgentControl` v2（BYOK）
-- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 20 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除；API 35 / 36 / 37 与 Pixel_8a 均 20/20，logcat 与私有文件里搜不到 key）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 21 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束；API 35 / 36 / 37 与 Pixel_8a 均 21/21，logcat 与私有文件里搜不到 key）
 - [x] 换成真的 `AgentRuntime`（A3 的 `RuntimeEngine`，C3）；空闲后前台服务保留 2 s 宽限期
 - [ ] Agent 核心换成 Pi（PiAdapter + QuickJsEngine，等 B3；此前用 `ScriptedAgentCore` 占位）
 
@@ -395,15 +395,15 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `.github/workflows/module-package.yml`（还没在 GitHub 上实际跑过）
 
 #### W8 自带界面
-- [ ] `LocalAcpClient`：官方 SDK 客户端 + `BinderAcpTransport`
-- [ ] 对话界面、流式输出、取消
+- [x] `LocalAcpClient`：官方 SDK 客户端 + `BinderAcpTransport`（D3a）
+- [ ] 对话界面、流式输出、取消（D3a：桌面入口、对话界面已完成，界面用平台 View、不引入界面库；Pixel_8a 与 API 35 上从桌面入口打开，经 Binder 到 `:agent` 跑通 initialize → session/new → prompt，未配置模型时提示“还没有配置模型”；流式与取消的端到端等设置页完成后补测）
 - [ ] 设置页：BYOK（厂商预设读 `model-catalog.json`，另有自定义兼容端点：URL、协议、模型名、key）、安全等级、运行与监督状态
 - [ ] 首次引导：BYOK、通知权限、默认助理、电池优化豁免、已发现的插件
 
 #### W9 电脑端接入
-- [ ] `DesktopGateway`：开发者开关、抽象 socket `agentos-acp`、一次性配对码
-- [ ] `tools/acp-bridge/`
-- [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机
+- [x] `DesktopGateway`：开发者开关、抽象 socket `agentos-acp`、一次性配对码（A4；`IAgentControl` v3）
+- [x] `tools/acp-bridge/`（A4）
+- [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机（A4：Pixel_8a 模拟器上 `npm run test:device` 24/24；真机待测）
 
 **M1 验收**：
 - [ ] 找 10 名极客内测

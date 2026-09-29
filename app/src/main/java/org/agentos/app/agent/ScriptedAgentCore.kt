@@ -18,6 +18,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.events.AgentEvent
 import org.agentos.runtime.events.AssistantUpdate
 import org.agentos.runtime.ports.AgentCore
@@ -28,6 +29,7 @@ import org.agentos.runtime.ports.AgentCoreUnavailableException
 import org.agentos.runtime.ports.AgentSessionConfig
 import org.agentos.runtime.ports.FinishReason
 import org.agentos.runtime.ports.PiMessages
+import org.agentos.runtime.ports.SecretPort
 import org.agentos.runtime.ports.TurnHost
 import org.agentos.runtime.ports.TurnInput
 import org.agentos.runtime.ports.TurnOutcome
@@ -46,15 +48,25 @@ import java.util.concurrent.ConcurrentHashMap
  * - 没有工具（M1 的工具目录为空），不碰 key。
  *
  * 脚本（tests/device/acp-channel 的 agentCommand）：prompt 文字是 JSON 对象时读 chunks（默认 20）、chunkChars（0 = 每条
- * "chunk i "）、intervalMs（默认 20）、burst、cjk、bigChunkChars（最后再发一条这么长的文字）；不是 JSON 时回显 20 行。
+ * "chunk i "）、intervalMs（默认 20）、burst、cjk、bigChunkChars（最后再发一条这么长的文字）、keyEvery；不是 JSON 时回显 20 行。
+ *
+ * keyEvery = N（> 0）：每 N 条之前按模型的 baseUrl 向 [secrets] 取一次 key，模拟“每一次模型请求都经网络出口取 key”
+ * （真正的 Pi 在每次请求时经 HostFetch 这样做）。取不到就像网络出口拒发请求一样，本轮以 model_not_configured 结束——
+ * 设备用例用它演示“清除 = 立即作废”（C3.1）。key 本身不使用、不记录。
  */
-object ScriptedAgentCore : AgentCoreFactory {
-    const val MODEL_NAME = "agentos-scripted-placeholder"
-
-    /** 保存进 messages 的 assistant 文字上限（流式输出本身不截断）。 */
-    const val MAX_SAVED_TEXT = 16_384
+class ScriptedAgentCore(private val secrets: SecretPort? = null) : AgentCoreFactory {
 
     override fun create(): AgentCore = Core()
+
+    companion object {
+        const val MODEL_NAME = "agentos-scripted-placeholder"
+
+        /** 保存进 messages 的 assistant 文字上限（流式输出本身不截断）。 */
+        const val MAX_SAVED_TEXT = 16_384
+
+        /** keyEvery 取不到 key 时本轮的错误（不含 key、不含端点路径）。 */
+        const val NO_KEY_MESSAGE = "The model key is no longer configured (it was removed in AgentOS settings); this turn was stopped."
+    }
 
     /** 一轮的脚本。 */
     data class Script(
@@ -65,6 +77,7 @@ object ScriptedAgentCore : AgentCoreFactory {
         val cjk: Boolean,
         val bigChunkChars: Int,
         val echo: String?,
+        val keyEvery: Int = 0,
     ) {
         fun body(i: Int): String = when {
             echo != null -> "echo[$i]: ${echo.take(64)}\n"
@@ -88,12 +101,13 @@ object ScriptedAgentCore : AgentCoreFactory {
                     cjk = (o["cjk"] as? JsonPrimitive)?.booleanOrNull ?: false,
                     bigChunkChars = int("bigChunkChars", 0).coerceAtLeast(0),
                     echo = null,
+                    keyEvery = int("keyEvery", 0).coerceAtLeast(0),
                 )
             }
         }
     }
 
-    private class Core : AgentCore {
+    private inner class Core : AgentCore {
         private val s = MutableStateFlow<AgentCoreState>(AgentCoreState.Idle)
         override val state: StateFlow<AgentCoreState> = s.asStateFlow()
         private val sessions = ConcurrentHashMap<String, Session>()
@@ -207,10 +221,19 @@ object ScriptedAgentCore : AgentCoreFactory {
                     if (saved.length < MAX_SAVED_TEXT) saved.append(text.take(MAX_SAVED_TEXT - saved.length))
                 }
                 var aborted = false
+                var noKey = false
+                val requestUrl = config.model.baseUrl?.trimEnd('/')?.plus("/scripted-request")
                 loop@ for (i in 0 until script.chunks) {
                     if (signal.isCompleted) {
                         aborted = true
                         break@loop
+                    }
+                    // “每一次模型请求前取 key”：取不到就不再发请求，本轮失败
+                    if (script.keyEvery > 0 && i % script.keyEvery == 0 && secrets != null) {
+                        if (requestUrl == null || secrets.credentialFor(requestUrl) == null) {
+                            noKey = true
+                            break@loop
+                        }
                     }
                     emitText(script.body(i))
                     if (script.intervalMs > 0) {
@@ -222,11 +245,20 @@ object ScriptedAgentCore : AgentCoreFactory {
                         yield()
                     }
                 }
-                if (!aborted && script.bigChunkChars > 0) emitText("y".repeat(script.bigChunkChars))
-                if (!aborted && signal.isCompleted) aborted = true
+                if (!aborted && !noKey && script.bigChunkChars > 0) emitText("y".repeat(script.bigChunkChars))
+                if (!aborted && !noKey && signal.isCompleted) aborted = true
                 update(host, "text_end", 0)
 
-                val stopReason = if (aborted) "aborted" else "stop"
+                val stopReason = when {
+                    aborted -> "aborted"
+                    noKey -> "error"
+                    else -> "stop"
+                }
+                val errorMessage = when {
+                    aborted -> "Request was aborted"
+                    noKey -> NO_KEY_MESSAGE
+                    else -> null
+                }
                 val text = if (total > saved.length) "$saved…[${total - saved.length} more chars not saved]" else saved.toString()
                 val assistant = buildJsonObject {
                     put("role", "assistant")
@@ -242,15 +274,20 @@ object ScriptedAgentCore : AgentCoreFactory {
                         put("totalTokens", 0)
                     }
                     put("stopReason", stopReason)
-                    if (aborted) put("errorMessage", "Request was aborted")
+                    errorMessage?.let { put("errorMessage", it) }
                     put("timestamp", System.currentTimeMillis())
                 }
-                update(host, if (aborted) AssistantUpdate.ERROR else AssistantUpdate.DONE, null, reason = stopReason)
+                update(host, if (errorMessage != null) AssistantUpdate.ERROR else AssistantUpdate.DONE, null, reason = stopReason)
                 append(assistant)
                 host.onEvent(AgentEvent.MessageEnd(assistant))
-                host.onEvent(AgentEvent.TurnEnd(stopReason, if (aborted) "Request was aborted" else null, 0))
+                host.onEvent(AgentEvent.TurnEnd(stopReason, errorMessage, 0))
                 host.onEvent(AgentEvent.AgentEnd(synchronized(lock) { messages.size }))
-                return if (aborted) TurnOutcome.Aborted else TurnOutcome.Finished(FinishReason.END_TURN)
+                return when {
+                    aborted -> TurnOutcome.Aborted
+                    // 与网络出口拒发请求（NO_CREDENTIAL）的分类相同：模型没有配置好
+                    noKey -> TurnOutcome.Failed(ErrorCode.MODEL_NOT_CONFIGURED.info(NO_KEY_MESSAGE))
+                    else -> TurnOutcome.Finished(FinishReason.END_TURN)
+                }
             }
 
             private fun append(message: JsonObject) = synchronized(lock) { messages += message }

@@ -47,6 +47,7 @@ class ByokStoreScenarios(
         "byok-roundtrip" -> roundtrip(testKey(args))
         "byok-restart" -> restart(testKey(args))
         "byok-clear" -> clear(runCatching { testKey(args) }.getOrNull())
+        "byok-clear-inflight" -> clearInflight(testKey(args))
         "store-restart" -> storeRestart(args.optBoolean("fresh", true))
         "user-stop-arm" -> userStopArm()
         "user-stop-check" -> userStopCheck(args)
@@ -233,6 +234,69 @@ class ByokStoreScenarios(
         return JSONObject().put("ok", ok)
             .put("summary", "configured=${src.getBoolean("configured")} keystore=${byok.optJSONObject("keystore")} hits=${scan?.getInt("hits")}")
             .put("checks", checks).put("byok", byok).put("fileScan", scan ?: JSONObject.NULL)
+    }
+
+    /**
+     * 清除 = 立即作废（C3.1）：长流式进行中（ScriptedAgentCore 每 5 条前取一次 key，模拟每次模型请求经网络出口取 key）
+     * 清除模型来源 → 这一轮很快以 model_not_configured 结束、错误消息里没有 key；清除之后再没有请求拿到 key
+     * （served 不再增加，denied 增加）；同一会话的下一轮也以 model_not_configured 失败。
+     */
+    private suspend fun clearInflight(key: String): JSONObject {
+        control.use { p -> p.setModelSource(preset("minimax-cn", providerModels(p, "minimax-cn").first()), key) }
+        val c = AcpConn(ctx, TestIds.APP_ACP, ChannelConfig.DEFAULT, scope, "clear-inflight")
+        try {
+            c.connect()
+            val session = c.newSession()
+            val run = PromptRun()
+            var tClearNs = 0L
+            var charsAtClear = 0L
+            val atClear = kotlinx.coroutines.CompletableDeferred<JSONObject>()
+            runPrompt(session, """{"chunks":1000000,"intervalMs":20,"keyEvery":5}""", run, status) { r ->
+                if (tClearNs == 0L && r.chunkChars >= 400) {
+                    tClearNs = SystemClock.elapsedRealtimeNanos()
+                    charsAtClear = r.chunkChars
+                    scope.launch {
+                        runCatching { control.use { p -> p.clearModelSource(); p.diagnostics().getJSONObject("byok") } }
+                            .onSuccess { atClear.complete(it) }.onFailure { atClear.completeExceptionally(it) }
+                    }
+                }
+            }
+            val byokAtClear = kotlinx.coroutines.withTimeout(10_000) { atClear.await() }
+            val clearToEndMs = if (tClearNs > 0) (run.endNs - tClearNs) / 1e6 else -1.0
+            val follow = PromptRun()
+            runPrompt(session, """{"chunks":3,"intervalMs":0}""", follow)
+            val byokAfter = control.use { it.diagnostics().getJSONObject("byok") }
+            c.closeAndWait()
+
+            val middle = key.substring(4, key.length - 4)
+            fun clean(m: String?) = m != null && !m.contains(key) && !m.contains(middle)
+            val msg = run.error?.message
+            val followMsg = follow.error?.message
+            val reqAt = byokAtClear.optJSONObject("requests") ?: JSONObject()
+            val reqAfter = byokAfter.optJSONObject("requests") ?: JSONObject()
+            val checks = JSONObject()
+                .put("streamedBeforeClear", charsAtClear >= 400)
+                .put("turnEndedWithError", run.stopReason == null && msg != null && msg.contains("model_not_configured"))
+                .put("endedPromptly", clearToEndMs in 0.0..3_000.0)
+                .put("errorHasNoKey", clean(msg) && clean(followMsg))
+                .put("noKeyServedAfterClear", reqAfter.optLong("served") == reqAt.optLong("served") &&
+                    reqAfter.optLong("denied") > reqAt.optLong("denied"))
+                .put("revoked", reqAfter.optLong("revocations") >= 1 && !byokAfter.optBoolean("keySet") &&
+                    !byokAfter.optBoolean("credentialResolves") && byokAfter.optJSONObject("keystore")?.optBoolean("present") == false)
+                .put("nextTurnFails", follow.stopReason == null && followMsg != null && followMsg.contains("model_not_configured"))
+            val ok = checks.keys().asSequence().all { checks.optBoolean(it) }
+            return JSONObject().put("ok", ok)
+                .put("summary", "clearToEndMs=${"%.0f".format(clearToEndMs)} charsAfterClear=${run.chunkChars - charsAtClear} " +
+                    "served ${reqAt.optLong("served")}→${reqAfter.optLong("served")} denied ${reqAt.optLong("denied")}→${reqAfter.optLong("denied")} " +
+                    "checks=${checks.keys().asSequence().count { checks.optBoolean(it) }}/${checks.length()}")
+                .put("checks", checks)
+                .put("error", if (clean(msg)) msg else "<contains key>")
+                .put("followUpError", if (clean(followMsg)) followMsg else "<contains key>")
+                .put("clearToEndMs", clearToEndMs).put("charsAtClear", charsAtClear).put("charsAfterClear", run.chunkChars - charsAtClear)
+                .put("requestsAtClear", reqAt).put("requestsAfter", reqAfter)
+        } finally {
+            c.dispose()
+        }
     }
 
     private fun heartbeatText(): String = runCatching { File(de.filesDir, "supervisor/heartbeat").readText() }.getOrDefault("")

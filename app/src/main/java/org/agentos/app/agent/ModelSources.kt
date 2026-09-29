@@ -46,8 +46,8 @@ class ByokStorageException(message: String) : IllegalStateException("agentos.byo
  * - 厂商预设和自定义端点的模板都来自 B 的 [ModelCatalog]（`assets/model-catalog.json`）。
  * - 保存在 `:agent` 的 CE 私有目录 `files/byok/model-source.json`：模型来源（明文，不含 key）+ key 的密文，
  *   写临时文件再 rename，一次原子替换。
- * - 热加载：[set] / [clear] 成功后立即更新 [activeModel] 和 key；宿主层从下一轮起用新模型，进行中的一轮不受影响
- *   （换下来的 key 见 [KeystoreSecrets.activate]）。
+ * - [set] 是热加载：成功后立即更新 [activeModel] 和 key，宿主层从下一轮（下一次请求）起用新的，进行中的这一轮
+ *   不被打断（换下来的 key 见 [KeystoreSecrets.activate]）。[clear] 是立即作废：key 当场丢掉，之后的请求都拿不到 key。
  * - 只有“可用”（模型解析成功、key 能解密且绑定的端点覆盖模型的 baseUrl）时 [activeModel] 才非 null；
  *   否则任务以 model_not_configured 失败，设置页显示 [get] 里的 problems。
  *
@@ -227,6 +227,7 @@ class ModelSources(
             put("keySet", secrets.isSet)
             put("keyEndpoints", secrets.bindings().size)
             put("retiredKeyHeld", secrets.holdsRetiredKey)
+            putJsonObject("requests") { secrets.stats().forEach { (k, v) -> put(k, v as Long) } }
             put("credentialResolves", model?.baseUrl?.let { resolves(it) } ?: false)
             putJsonArray("problems") { problems.forEach { add(JsonPrimitive(it)) } }
             putJsonObject("catalog") {
@@ -291,7 +292,10 @@ class ModelSources(
         return get()
     }
 
-    /** 清除模型来源和 key（IAgentControl.clearModelSource）。之后任务以 model_not_configured 失败。 */
+    /**
+     * 清除模型来源和 key（IAgentControl.clearModelSource）：删除文件和 Keystore 主密钥，key 立即作废——进行中的这一轮
+     * 之后的模型请求也拿不到 key，以 model_not_configured 结束；新的任务同样以 model_not_configured 失败。
+     */
     @Synchronized
     fun clear() {
         ensureLoaded()
@@ -300,7 +304,8 @@ class ModelSources(
         problems.clear()
         record = null
         active.value = null
-        secrets.activate(null, emptyList())
+        // 清除 = 立即作废（F9）：不像更换那样把旧 key 留给进行中的这一轮
+        secrets.revoke()
         secrets.destroyMasterKey()
     }
 

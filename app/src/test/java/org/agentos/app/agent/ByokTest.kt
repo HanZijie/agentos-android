@@ -177,6 +177,28 @@ class KeystoreSecretsTest {
         assertEquals("a short line", s.redact("a short line"))
     }
 
+    /** 清除 = 立即作废：当前的和换下来的 key 一起丢掉，不等空闲；之后谁都拿不到。 */
+    @Test
+    fun revokeDropsEverythingImmediately() = runBlocking {
+        val s = KeystoreSecrets(SoftwareCipher()) { false } // 一直有任务在跑
+        val a = "https://a.example.com/v1"
+        val b = "https://b.example.com/v1"
+        s.activate("key-aaaaaaaa", listOf(a))
+        s.activate("key-bbbbbbbb", listOf(b))
+        assertEquals("key-aaaaaaaa", s.credentialFor("$a/chat/completions")?.reveal()) // 更换：进行中的这一轮还能用旧 key
+        s.revoke()
+        assertNull(s.credentialFor("$a/chat/completions"))
+        assertNull(s.credentialFor("$b/chat/completions"))
+        assertFalse(s.isSet)
+        assertFalse(s.holdsRetiredKey)
+        assertNull(s.masked())
+        assertEquals(1L, s.stats()["revocations"])
+        assertEquals(2L, s.stats()["denied"])
+        // 没有 key 时再撤销不计数
+        s.revoke()
+        assertEquals(1L, s.stats()["revocations"])
+    }
+
     private fun expectSecurity(block: () -> Unit) {
         try {
             block()
@@ -198,8 +220,9 @@ class ModelSourcesTest {
         dir: File = File(tmp.root, "byok"),
         c: SecretCipher = cipher,
         catalog: () -> ModelCatalog = { ModelCatalog.parse(TEST_CATALOG) },
+        idle: () -> Boolean = { true },
     ): Pair<ModelSources, KeystoreSecrets> {
-        val secrets = KeystoreSecrets(c)
+        val secrets = KeystoreSecrets(c, idle)
         return ModelSources(dir, secrets, catalog, clock = { clock }) to secrets
     }
 
@@ -377,6 +400,29 @@ class ModelSourcesTest {
         assertFalse(m2.get().bool("configured"))
         // 清除之后可以重新设置（新建主密钥）
         assertTrue(m.set(preset("minimax", "MiniMax-M2.7"), key).bool("usable"))
+    }
+
+    /**
+     * 有任务在跑时：更换是热加载（这一轮之后对旧端点的请求还能拿到旧 key），清除是立即作废（旧 key、新 key 都拿不到）。
+     */
+    @Test
+    fun replaceIsHotReloadButClearRevokesImmediately() = runBlocking {
+        val (m, secrets) = sources(idle = { false })
+        val cn = "https://api.minimaxi.com/anthropic/v1/messages"
+        val intl = "https://api.minimax.io/anthropic/v1/messages"
+        m.set(preset("minimax-cn", "MiniMax-M2.7"), key)
+        m.set(preset("minimax", "MiniMax-M2.7"), "sk-other-key-000000000")
+        assertEquals(key, secrets.credentialFor(cn)?.reveal())
+        assertEquals("sk-other-key-000000000", secrets.credentialFor(intl)?.reveal())
+        val servedBefore = secrets.stats()["served"] as Long
+        m.clear()
+        assertNull(secrets.credentialFor(cn))
+        assertNull(secrets.credentialFor(intl))
+        assertNull(m.activeModel.value)
+        assertEquals("no request gets a key after clear", servedBefore, secrets.stats()["served"])
+        assertFalse(m.status()["credentialResolves"]!!.jsonPrimitive.boolean)
+        assertFalse(m.status()["retiredKeyHeld"]!!.jsonPrimitive.boolean)
+        assertEquals("1", m.status()["requests"]!!.jsonObject["revocations"].toString())
     }
 
     @Test

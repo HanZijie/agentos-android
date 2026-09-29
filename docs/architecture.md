@@ -376,7 +376,11 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
    首版不支持用订阅账号登录（Claude Pro/Max、ChatGPT、Copilot 等 OAuth）。
 2. 主进程经 `IAgentControl`（v2 的 `setModelSource` 等）交给运行时。宿主层用 Android Keystore 里的 AES-256-GCM 主密钥（不要求���户认证）加密 key，与模型来源一起写入 `:agent` 的 CE 私有目录（`files/byok/model-source.json`，一次原子写入）。key 绑定端点：厂商预设绑定该厂商的全部 baseUrl，自定义端点只绑定它自己的 baseUrl，加密时把 baseUrl 作为附加认证数据，所以换端点必须重新输入 key。
    - **更换**：热加载，下一次模型请求生效，不打断正在运行的这一轮。
-   - **清除**：立即作废（整合人 2026-09-29 决定）：删除文件和 Keystore 主密钥，之后的模型请求（包括同一轮里的下一次）一律拿不到 key、以易懂的错误结束，不再用旧 key 跑完这一轮。正在传输的那一次 HTTP 响应的中止，要等网络出口（HostFetch）和 `SecretPort` 增加撤销信号后实现（M1 之后的待办）。
+   - **清除**：立即作废（整合人 2026-09-29 决定）：删除文件和 Keystore 主密钥，之后的模型请求（包括同一轮里的下一次）一律拿不到 key，以 `model_not_configured` 结束，不再用旧 key 跑完这一轮（C3.1 已实现）。正在传输的那一次 HTTP 响应也要中止，分三处实现，不阻塞 M1：
+     - `SecretPort` 追加 `revocations: Flow<Credential>`，默认空流（A）。清除时发出被撤销的 Credential，按对象身份比较；更换不发。
+     - HostFetch 取消携带该 Credential 的在途调用，抛 `NetErrorKind.KEY_REVOKED`，不重试（B）。
+     - `KeystoreSecrets.revoke()` 发出撤销信号（C）。
+     被中止的这一轮同样以 `model_not_configured` 结束，`details.reason=key_revoked`（整合人 2026-09-29 决定，不归入 `model_auth_failed`）。
    - 错误以 `agentos.byok.<code>` 返回，错误消息里不含 key。
 3. key 只在 Kotlin 宿主层里使用：Pi 发出的模型请求经过宿主层的 `fetch` 时才注入请求头，QuickJS 里的 Pi Agent core 看不到 key。
 4. key 不会出现在事件、快照、日志、诊断输出和模型输入里。界面上只显示首尾各 4 位。

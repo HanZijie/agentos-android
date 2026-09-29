@@ -54,7 +54,7 @@ class ScriptedAgentCoreTest {
 
     @Test
     fun streamsScriptInPiOrder() = runBlocking {
-        val core = ScriptedAgentCore.create()
+        val core = ScriptedAgentCore().create()
         core.start()
         assertEquals(AgentCoreState.Ready, core.state.value)
         val s = core.openSession("ses_1", config)
@@ -83,7 +83,7 @@ class ScriptedAgentCoreTest {
 
     @Test
     fun scripts() = runBlocking {
-        val core = ScriptedAgentCore.create().also { it.start() }
+        val core = ScriptedAgentCore().create().also { it.start() }
         val s = core.openSession("s", config)
         val cjk = Recorder()
         s.runTurn(TurnInput("""{"chunks":3,"chunkChars":4,"intervalMs":0,"cjk":true}"""), cjk)
@@ -101,7 +101,7 @@ class ScriptedAgentCoreTest {
 
     @Test
     fun abortEndsTheTurnAsAborted() = runBlocking {
-        val core = ScriptedAgentCore.create().also { it.start() }
+        val core = ScriptedAgentCore().create().also { it.start() }
         val s = core.openSession("s", config)
         val host = Recorder()
         val turn = async { s.runTurn(TurnInput("""{"chunks":1000000,"intervalMs":20}"""), host) }
@@ -123,9 +123,35 @@ class ScriptedAgentCoreTest {
         assertEquals(TurnOutcome.Finished(FinishReason.END_TURN), s.runTurn(TurnInput("""{"chunks":1,"intervalMs":0}"""), Recorder()))
     }
 
+    /** keyEvery：每段前取一次 key；key 被清除后下一段取不到，本轮以 model_not_configured 结束，消息里没有 key。 */
+    @Test
+    fun keyEveryStopsTheTurnOnceTheKeyIsGone() = runBlocking {
+        val secrets = KeystoreSecrets(SoftwareCipher()) { false }
+        val base = "https://gw.example.com/v1"
+        secrets.activate("sk-scripted-SECRET-000000", listOf(base))
+        val cfg = config.copy(model = ModelSpec(buildJsonObject { put("id", "m"); put("api", "openai-completions"); put("baseUrl", base) }))
+        val core = ScriptedAgentCore(secrets).create().also { it.start() }
+        val s = core.openSession("s", cfg)
+        val host = Recorder()
+        val turn = async { s.runTurn(TurnInput("""{"chunks":1000000,"intervalMs":10,"keyEvery":5}"""), host) }
+        while (host.text().length < 100) delay(5)
+        secrets.revoke()
+        val outcome = withTimeout(2_000) { turn.await() }
+        assertTrue(outcome is TurnOutcome.Failed)
+        val error = (outcome as TurnOutcome.Failed).error
+        assertEquals(org.agentos.runtime.errors.ErrorCode.MODEL_NOT_CONFIGURED, error.code)
+        assertTrue(!error.message.contains("SECRET"))
+        val end = host.events.last { it is AgentEvent.MessageEnd } as AgentEvent.MessageEnd
+        assertEquals("error", end.message["stopReason"]!!.jsonPrimitive.content)
+        assertEquals(EventTypes.AGENT_END, host.events.last().type)
+        // 没有 key 时一开始就失败；没有 keyEvery 的脚本不取 key
+        assertTrue(s.runTurn(TurnInput("""{"chunks":3,"intervalMs":0,"keyEvery":1}"""), Recorder()) is TurnOutcome.Failed)
+        assertEquals(TurnOutcome.Finished(FinishReason.END_TURN), s.runTurn(TurnInput("""{"chunks":3,"intervalMs":0}"""), Recorder()))
+    }
+
     @Test
     fun cancellingTheCallerPropagates() = runBlocking {
-        val core = ScriptedAgentCore.create().also { it.start() }
+        val core = ScriptedAgentCore().create().also { it.start() }
         val s = core.openSession("s", config)
         val host = Recorder()
         val turn = async { s.runTurn(TurnInput("""{"chunks":1000000,"intervalMs":20}"""), host) }
