@@ -44,6 +44,9 @@ class ConversationActivity : Activity() {
         super.onCreate(savedInstanceState)
         controller = ChatController.get(this)
         setContentView(buildLayout())
+        if (savedInstanceState == null && !org.agentos.app.onboarding.OnboardingActivity.isDone(this)) {
+            startActivity(android.content.Intent(this, org.agentos.app.onboarding.OnboardingActivity::class.java))
+        }
     }
 
     override fun onStart() {
@@ -83,6 +86,9 @@ class ConversationActivity : Activity() {
         bar.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         newChat = Ui.textButton(this, getString(R.string.ui_new_chat), R.color.ui_accent) { controller.newConversation() }
         bar.addView(newChat)
+        bar.addView(Ui.textButton(this, getString(R.string.ui_settings), R.color.ui_accent) {
+            startActivity(android.content.Intent(this, org.agentos.app.settings.SettingsActivity::class.java))
+        })
         root.addView(bar, Ui.matchWrap())
         root.addView(View(this).apply { setBackgroundColor(getColor(R.color.ui_divider)) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))

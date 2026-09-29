@@ -253,8 +253,10 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
         val data = e.data as? JsonObject
         val code = data?.get("agentosCode")?.jsonPrimitive?.contentOrNull
         val retryable = data?.get("retryable")?.jsonPrimitive?.booleanOrNull
-        val retryAfter = (data?.get("details") as? JsonObject)?.get("retryAfterSeconds")?.jsonPrimitive?.longOrNull
-        return AgentErrors.fromRpc(e.code, e.message, code, retryable, retryAfter)
+        val details = data?.get("details") as? JsonObject
+        val retryAfter = details?.get("retryAfterSeconds")?.jsonPrimitive?.longOrNull
+        val reason = details?.get("reason")?.jsonPrimitive?.contentOrNull
+        return AgentErrors.fromRpc(e.code, e.message, code, retryable, retryAfter, reason)
     }
 
     /** bindService to the App's own AcpService in :agent, suspending until connected. */
