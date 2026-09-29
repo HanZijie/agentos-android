@@ -55,6 +55,8 @@ dependencies {
     testImplementation(libs.junit4)
     // W8：ChatController 的状态测试（虚拟时间）
     testImplementation(libs.kotlinx.coroutines.test)
+    // W6（C5）：KeystoreSecrets 的撤销信号 + 真实 HostFetch 的端到端单测（F9 第二层）
+    testImplementation(libs.okhttp.mockwebserver)
 }
 
 // ---- Pi Agent core 打包（W3）----

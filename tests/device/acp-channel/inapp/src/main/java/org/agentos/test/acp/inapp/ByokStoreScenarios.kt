@@ -238,11 +238,13 @@ class ByokStoreScenarios(
     }
 
     /**
-     * 清除 = 立即作废（C3.1，C4 起走真正的 Pi）：模型来源是电脑上的假端点，key 是 BYOK 测试 key。模型第一轮流式输出后
-     * 要调用工具（fs_read，未开放），Pi 随后要发第二个请求。第一轮流式进行中清除模型来源：
-     * - 已经在传输中的第一轮照常结束（中止它是第二层，要网络出口配合，见 C3.1 报告）；
-     * - 第二个请求拿不到 key，HostFetch 不发（NO_CREDENTIAL），本轮以 model_not_configured 结束、错误消息里没有 key；
-     * - 假端点只见到一个带 key 的请求；KeystoreSecrets 清除后 served 不再增加、denied 增加；同一会话下一轮同样失败。
+     * 清除 = 立即作废（F9 两层，C5 起第二层也接上）：模型来源是电脑上的假端点，key 是 BYOK 测试 key。模型流式输出约
+     * 2.4 s，最后要调用工具（fs_read）。流式进行中清除模型来源：
+     * - 第一层：KeystoreSecrets 立即丢掉 key，之后谁都拿不到（清除后 served 不再增加）；
+     * - 第二层：KeystoreSecrets 在 revocations 上发出被撤销的 Credential，HostFetch 中止携带它的在途调用——
+     *   假端点看到连接在流完之前断开（completed=false），本轮很快以 model_not_configured 结束，
+     *   错误 data 里 details.reason=key_revoked，错误消息里没有 key；
+     * - 假端点只见到一个带 key 的请求；同一会话下一轮同样失败。
      */
     private suspend fun clearInflight(key: String): JSONObject {
         control.use { p -> p.setModelSource(FakeModel.source(), key) }
@@ -253,10 +255,11 @@ class ByokStoreScenarios(
             val session = c.newSession()
             val run = PromptRun()
             var tClearNs = 0L
+            var tClearCallNs = 0L
             var charsAtClear = 0L
             // 清除前、清除后各取一次快照（两次 Binder 调用之间设备可能已经拒过一次请求，所以不能只在清除后取）
             val snaps = kotlinx.coroutines.CompletableDeferred<Pair<JSONObject, JSONObject>>()
-            runPrompt(session, """{"chunks":60,"intervalMs":20,"tool":"fs_read","n":"$n"}""", run, status) { r ->
+            runPrompt(session, """{"chunks":120,"intervalMs":20,"tool":"fs_read","n":"$n"}""", run, status) { r ->
                 if (tClearNs == 0L && r.chunkChars >= 200) {
                     tClearNs = SystemClock.elapsedRealtimeNanos()
                     charsAtClear = r.chunkChars
@@ -264,6 +267,7 @@ class ByokStoreScenarios(
                         runCatching {
                             control.use { p ->
                                 val before = p.diagnostics().getJSONObject("byok")
+                                tClearCallNs = SystemClock.elapsedRealtimeNanos()
                                 p.clearModelSource()
                                 before to p.diagnostics().getJSONObject("byok")
                             }
@@ -273,11 +277,22 @@ class ByokStoreScenarios(
             }
             val (byokBefore, byokAtClear) = kotlinx.coroutines.withTimeout(10_000) { snaps.await() }
             val clearToEndMs = if (tClearNs > 0) (run.endNs - tClearNs) / 1e6 else -1.0
+            // 从调用 clearModelSource 起算（不含 bind 和清除前那次 diagnostics，慢设备上这两步可能要几百 ms）
+            val clearCallToEndMs = if (tClearCallNs > 0) (run.endNs - tClearCallNs) / 1e6 else -1.0
             val follow = PromptRun()
             runPrompt(session, """{"chunks":3,"intervalMs":0}""", follow)
             val byokAfter = control.use { it.diagnostics().getJSONObject("byok") }
             c.closeAndWait()
-            val requests = fakeRequests().filter { it.optString("userText").contains(n) }
+            // 假端点那头要等 adb reverse 隧道把断开传过去：轮询到这个请求结束（流完或断开），最多 5 s
+            var requests = fakeRequests().filter { it.optString("userText").contains(n) }
+            val tWait = SystemClock.elapsedRealtime()
+            while (SystemClock.elapsedRealtime() - tWait < 5_000 &&
+                requests.firstOrNull()?.let { !it.optBoolean("completed") && !it.optBoolean("disconnected") } == true
+            ) {
+                kotlinx.coroutines.delay(100)
+                requests = fakeRequests().filter { it.optString("userText").contains(n) }
+            }
+            val fakeSettleMs = SystemClock.elapsedRealtime() - tWait
 
             val middle = key.substring(4, key.length - 4)
             fun clean(m: String?) = m != null && !m.contains(key) && !m.contains(middle)
@@ -286,31 +301,44 @@ class ByokStoreScenarios(
             val reqBefore = byokBefore.optJSONObject("requests") ?: JSONObject()
             val reqAt = byokAtClear.optJSONObject("requests") ?: JSONObject()
             val reqAfter = byokAfter.optJSONObject("requests") ?: JSONObject()
+            val data = run.errorData()
+            val inFlight = requests.firstOrNull()
             val checks = JSONObject()
                 .put("streamedBeforeClear", charsAtClear >= 200)
                 .put("turnEndedWithError", run.stopReason == null && msg != null && msg.contains("model_not_configured"))
-                .put("endedPromptly", clearToEndMs in 0.0..5_000.0)
-                .put("errorHasNoKey", clean(msg) && clean(followMsg))
+                // 第二层：原因是 key 被撤销（不是“没有 key”或网络错误）
+                .put("reasonKeyRevoked", data != null && data.optString("agentosCode") == "model_not_configured" &&
+                    data.optJSONObject("details")?.optString("reason") == "key_revoked" && !data.optBoolean("retryable"))
+                // 第二层：假端点看到连接在流完之前断开
+                .put("inFlightAborted", inFlight != null && !inFlight.optBoolean("completed") && inFlight.optBoolean("disconnected"))
+                // 不中止的话还要流约 1.8 s；中止后应在 1 s 内结束
+                .put("endedPromptly", clearCallToEndMs in 0.0..1_000.0)
+                .put("errorHasNoKey", clean(msg) && clean(followMsg) && data.let { it == null || clean(it.toString()) })
                 .put("onlyOneKeyedRequest", requests.size == 1 && requests[0].optString("key") == "byok" && requests[0].optInt("round") == 0)
-                // 撤销之后 served 不可能再增加（清除后的快照与结束时相同）；denied 相对清除前增加（之后的请求被拒）
-                .put("noKeyServedAfterClear", reqAfter.optLong("served") == reqAt.optLong("served") &&
-                    reqAfter.optLong("denied") > reqBefore.optLong("denied"))
+                // 撤销之后 served 不可能再增加（清除后的快照与结束时相同）
+                .put("noKeyServedAfterClear", reqAfter.optLong("served") == reqAt.optLong("served"))
+                // 撤销信号发出去了、有订阅者（HostFetch）、没有发不出去的
+                .put("signalSent", reqBefore.optLong("subscribers") >= 1 &&
+                    reqAfter.optLong("signals") > reqBefore.optLong("signals") && reqAfter.optLong("signalsDropped") == 0L)
                 .put("revoked", reqAfter.optLong("revocations") >= 1 && !byokAfter.optBoolean("keySet") &&
                     !byokAfter.optBoolean("credentialResolves") && byokAfter.optJSONObject("keystore")?.optBoolean("present") == false)
                 .put("nextTurnFails", follow.stopReason == null && followMsg != null && followMsg.contains("model_not_configured"))
             val ok = checks.keys().asSequence().all { checks.optBoolean(it) }
             return JSONObject().put("ok", ok)
-                .put("summary", "clearToEndMs=${"%.0f".format(clearToEndMs)} charsAfterClear=${run.chunkChars - charsAtClear} " +
-                    "inFlightCompleted=${requests.firstOrNull()?.optBoolean("completed")} requests=${requests.size} " +
+                .put("summary", "clearToEndMs=${"%.0f".format(clearToEndMs)} (call ${"%.0f".format(clearCallToEndMs)}) " +
+                    "charsAfterClear=${run.chunkChars - charsAtClear} " +
+                    "inFlight completed=${inFlight?.optBoolean("completed")} disconnected=${inFlight?.optBoolean("disconnected")} " +
+                    "reason=${data?.optJSONObject("details")?.optString("reason")} requests=${requests.size} " +
                     "served ${reqBefore.optLong("served")}/${reqAt.optLong("served")}→${reqAfter.optLong("served")} " +
-                    "denied ${reqBefore.optLong("denied")}→${reqAfter.optLong("denied")} " +
+                    "signals ${reqBefore.optLong("signals")}→${reqAfter.optLong("signals")} subscribers=${reqBefore.optLong("subscribers")} " +
                     "checks=${checks.keys().asSequence().count { checks.optBoolean(it) }}/${checks.length()}")
                 .put("checks", checks)
                 .put("error", if (clean(msg)) msg else "<contains key>")
+                .put("errorData", if (data == null) JSONObject.NULL else if (clean(data.toString())) data else "<contains key>")
                 .put("followUpError", if (clean(followMsg)) followMsg else "<contains key>")
-                .put("clearToEndMs", clearToEndMs).put("charsAtClear", charsAtClear).put("charsAfterClear", run.chunkChars - charsAtClear)
-                // 第二层（中止传输中的响应）还没做：记录传输中的那一次是否照常结束
-                .put("inFlightResponseCompleted", requests.firstOrNull()?.optBoolean("completed") ?: JSONObject.NULL)
+                .put("clearToEndMs", clearToEndMs).put("clearCallToEndMs", clearCallToEndMs).put("charsAtClear", charsAtClear).put("charsAfterClear", run.chunkChars - charsAtClear)
+                .put("inFlightResponseCompleted", inFlight?.optBoolean("completed") ?: JSONObject.NULL)
+                .put("fakeSettleMs", fakeSettleMs)
                 .put("requestsBeforeClear", reqBefore).put("requestsAtClear", reqAt).put("requestsAfter", reqAfter)
                 .put("fakeRequests", JSONArray(requests))
         } finally {

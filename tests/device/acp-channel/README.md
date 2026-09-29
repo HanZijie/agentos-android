@@ -48,7 +48,7 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | store-restart | inapp | 删库 → ACP 冷启动建两个会话、跑一轮 → SIGKILL 后直接读数据库文件（只读）：会话、已完成的任务、事件、Pi messages 都在，库在 CE、WAL；再冷启动：`runtime.started` / `runtime.recovered` 各加 1、系统流 sequence 连续 |
 | byok-roundtrip | inapp + run.py | IAgentControl v2：设置预设 → 读取只有首尾 4 位 → 同厂商换模型沿用 key → 8 种拒绝（换端点要 key、http、换行、Bearer、未知厂商、key 填错字段、坏 JSON）且消息里没有 key → 自定义端点 → 诊断里连掩码都没有；全程不重启 `:agent` |
 | byok-restart | inapp + run.py | SIGKILL 后冷启动：key 仍能解密、按端点匹配（`credentialResolves`），Keystore 主密钥在；`model-source.json` 在 CE、只有密文；App 的 CE / DE 私有目录下所有文件里没有明文 key |
-| byok-clear-inflight | inapp + run.py | 清除 = 立即作废（C3.1，C4 起走真正的 Pi）：模型来源是假端点 + BYOK 测试 key，模型第一轮流式后要调用工具、Pi 随后要发第二个请求；第一轮流式中清除 → 第二个请求拿不到 key、HostFetch 不发，本轮以 `model_not_configured` 结束、错误消息里没有 key；假端点只见到一个带 key 的请求；清除后 `served` 不变、`denied` 增加；下一轮同样失败。传输中的那一次响应照常结束（中止它是第二层，要网络出口配合），记录在 `inFlightResponseCompleted` |
+| byok-clear-inflight | inapp + run.py | 清除 = 立即作废（F9 两层；C5 起第二层也接上）：模型来源是假端点 + BYOK 测试 key，模型流式约 2.4 s；流式中清除 → 第一层：KeystoreSecrets 立即丢掉 key，清除后 `served` 不再增加；第二层：KeystoreSecrets 在 `revocations` 上发出被撤销的 Credential，HostFetch 中止在途调用，假端点看到连接在流完之前断开（`completed=false`、`disconnected=true`），本轮 1 s 内以 `model_not_configured` 结束，错误 data 里 `details.reason=key_revoked`，错误消息和 data 里没有 key；撤销信号有订阅者且 `signalsDropped=0`；假端点只见到一个带 key 的请求；下一轮同样失败 |
 | byok-clear | inapp + run.py | 清除 → 重启后仍未配置，文件已删，Keystore 主密钥已删 |
 | pi-tool-round | inapp | 模型第一轮末尾要调用工具 `fs_read`（M1 工具目录为空）。按实际行为核对：客户端看到 tool_call，状态 FAILED；Pi 把错误结果（“Tool fs_read not found”）交回模型、发出第二个请求（带 tool_result）；两轮文字都送达，本轮 end_turn；两个请求的 key 都是宿主层注入的测试 key |
 | pi-context | inapp | 同一会话两轮：第二个请求带着第一轮的 user 和 assistant 消息，assistant 文字与客户端收到的一致 |
