@@ -347,6 +347,8 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 
 这一轮的 `session/prompt` 返回 `stopReason: cancelled`。`session/cancel` 会等运行中的任务真正停下再返回这一结果，最多等 12 秒。
 
+被取消的这一轮，`cancelled` 响应要等 SDK 完成取消后才交给客户端（A8）。原因是 SDK 0.30.1 在 `cancel()` 返回后才清掉“当前 prompt”，响应交得太早，客户端马上发的下一轮就会被误取消，或者得到 `invalid_state`。所以客户端收到 `cancelled` 时，会话一定已经可以接受下一轮。本连接没有进行中的一轮时，`session/cancel` 什么都不做。细节见 `core/protocol/acp-mapping.md` 第 8 节。
+
 ### F7 断开与恢复
 
 - **断开连接不等于关闭会话**（Profile 规定）。调用方 App 被杀或主动断开，任务照常跑完，结果保留；运行时在有任务期间保持前台。
@@ -377,7 +379,7 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 - 已实现（A7）：
   - 需要恢复的起始时间取最近一次 `task.recovery_required` 事件的时间，不改 Store 的 schema。
   - 过期结束的任务错误码为 `recovery_expired`（-32051），`runtime.recovered` 里新增 `expired` 计数。
-  - 期限和上限都是 `SchedulerConfig` 的参数。
+  - 期限和上限都是 `SchedulerConfig` 的参数，设为 0 表示关闭。事件是 `task.recovery_resolved { by: system, reason: recovery_expired, rule: age|limit, pendingSince }`，之后是 `task.failed`。待恢复的任务全部被放弃后，这个会话恢复调度。
 
 ### F9 自带模型 key（BYOK）
 
@@ -388,7 +390,7 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 2. 主进程经 `IAgentControl`（v2 的 `setModelSource` 等）交给运行时。宿主层用 Android Keystore 里的 AES-256-GCM 主密钥（不要求用户认证）加密 key，与模型来源一起写入 `:agent` 的 CE 私有目录（`files/byok/model-source.json`，一次原子写入）。key 绑定端点：厂商预设绑定该厂商的全部 baseUrl，自定义端点只绑定它自己的 baseUrl，加密时把 baseUrl 作为附加认证数据，所以换端点必须重新输入 key。
    - **更换**：热加载，下一次模型请求生效，不打断正在运行的这一轮。
    - **清除**：立即作废（整合人 2026-09-29 决定）：删除文件和 Keystore 主密钥，之后的模型请求（包括同一轮里的下一次）一律拿不到 key，以 `model_not_configured` 结束，不再用旧 key 跑完这一轮（C3.1 已实现）。正在传输的那一次 HTTP 响应也要中止，分三处实现，不阻塞 M1：
-     - `SecretPort` 追加 `revocations: Flow<Credential>`，默认空流（A，已完成）。清除时发出被撤销的 Credential，按对象身份比较；更换不发。
+     - `SecretPort` 追加 `revocations: Flow<Credential>`，默认空流（A，已完成）。清除时，每个被丢掉的 key（当前的和换下来的）各发一次，按对象身份比较，更换 key 时不发。它是不重放的热流，网络出口在发请求之前就已订阅。
      - HostFetch 在构造时订阅撤销流，按对象身份找到携带该 Credential 的在途调用，等响应头和读流两个阶段都会中止，抛 `NetErrorKind.KEY_REVOKED`，不重试（B5，已完成）。它还记下最近撤销的 32 个 Credential，所以“刚取到 key、还没登记请求”这几毫秒里撤销的，请求也不会发出去。
      - `KeystoreSecrets.revoke()` 发出撤销信号（C5，已完成）。设备实测（API 35 / 36 / 37 × debug / releaseTest，66/66）：从调用清除到这一轮结束 10–135 ms（只有第一层时约 930 ms），假端点看到在途连接被断开。发出的必须是 `credentialFor` 当初返回的那个对象，包括换下来但还留在内存里的旧 key。
      被中止的这一轮同样以 `model_not_configured` 结束，`details.reason=key_revoked`（整合人 2026-09-29 决定，不归入 `model_auth_failed`）。

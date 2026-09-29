@@ -6,7 +6,7 @@
 |---|---|---|---|
 | W4 | 电脑上的运行时（`org.agentos.runtime.testing.AcpStdioAgent`：完整的 `RuntimeEngine` + 真实 SQLite + ACP Agent 端），Agent 循环是 FakeAgentCore | stdio，`LineTransport` | ✅ 14 例（`conformance.test.mjs`，目标 `stdio`） |
 | W9 | 同上，以网关模式运行（与手机上同一份 `DesktopGatewayCore`：开关、配对码、令牌、握手；监听本机 TCP 代替抽象 socket） | `tools/acp-bridge --connect` | ✅ 14 例（目标 `gateway`）+ 配对与安全 9 例（`gateway.test.mjs`） |
-| W9（C4 之后） | 手机上的 `:agent`（debug 包；真实 Pi），模型是电脑上的 FakeModelServer 经 `adb reverse` | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 一致性 14 例中 10 例（4 例依赖工具、确认或 Jev，跳过）+ 设备专属 3 例 + 配对与安全 9 例（+1 例 todo：freezer），模拟器 API 36 |
+| W9（C4 之后） | 手机上的 `:agent`（debug 包；真实 Pi），模型是电脑上的 FakeModelServer 经 `adb reverse` | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 一致性 14 例中 10 例（4 例依赖工具、确认或 Jev，跳过）+ 设备专属 3 例 + 配对与安全 9 例 + 空闲 15 秒后仍能服务 1 例，模拟器 API 36 |
 | W4（B2 之后） | 电脑上的运行时，Agent 循环换成 B lane 的 PiAdapter（真实 Pi，跑在电脑上的 QuickJS 里）+ 假模型端点（FakeModelServer，Anthropic Messages / OpenAI Chat Completions 两个协议族） | stdio 和 gateway | ✅ 同样的 14 例 + 配对安全 9 例（`AGENTOS_ACP_CORE=pi`） |
 
 ## 运行
@@ -42,6 +42,8 @@ ANDROID_SERIAL=<serial> ../../gradlew -p ../.. :app:installDebug
 AGENTOS_ACP_DEVICE=<serial> npm run test:device
 ```
 
+设备用例开始前会执行 `adb shell dumpsys deviceidle whitelist +org.agentos.app`（`prepareDevice`），模拟 F2 首次引导里用户已允许“忽略电池优化”：这样 `:agent` 从后台也能进入前台服务（电脑端接入打开期间、有任务期间），不会被 cached-apps freezer 冻结。没有这一步（又没有 root 监督进程 promote）时，系统拒绝后台启动前台服务，空闲的 `:agent` 约 10 秒后被冻结，用例会卡住。
+
 设了 `AGENTOS_ACP_DEVICE` 时，一致性用例的默认目标是 `device`：手机上 `:agent` 里的真实 Pi 经 `tools/acp-bridge`（`adb forward` → `localabstract:agentos-acp`）对外。模型是电脑上的 B 的 FakeModelServer（`FakeModelServerMain`，按同样的 `{"fake":…}` 指令回应），经 `adb reverse tcp:18787 tcp:<端口>` 映射到手机的 `127.0.0.1:18787`；手机上的模型来源是 C 的测试端点（`tests/device/acp-channel/inapp` 的 `ensureTestModel`：`http://127.0.0.1:18787`、`fake-model`、测试 key），不是时借 C 的 `AgentScenarioActivity` 设置（key 在它的代码里，不经 adb 命令行）。
 
 手机上 M1 没有这些，依赖它们的用例在 `device` 目标上跳过（原因写在 `agent.mjs` 的 `SKIP`，测试输出里也有）：
@@ -57,7 +59,7 @@ AGENTOS_ACP_DEVICE=<serial> npm run test:device
 
 `test:device` 还跑 `device.test.mjs`（设备专属：连接身份是 adbd 的 uid 2000、70,000 字符的模型输出经网关完整送达、手机发出的每一行格式与大小）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。
 
-**已知问题（todo 用例）**：电脑端接入打开、`:agent` 空闲时是 cached 进程，约 10 秒后被 cached-apps freezer 冻结；这时电脑端的新连接和已建立会话的请求都得不到服务，直到别的事件解冻进程。`gateway.test.mjs` 的 “the gateway still answers after the phone has been idle for 15 s” 在手机上复现它（标为 todo，不让整组失败）；握手超时用例在等待期间用 status 广播保持进程解冻，只测网关自己的计时。
+**cached-apps freezer**：`:agent` 空闲时是 cached 进程，约 10 秒后会被冻结，冻结期间电脑端的连接和请求都得不到服务（A6 发现）。C6 起电脑端接入打开期间 `:agent` 以前台服务运行并显示常驻通知；`gateway.test.mjs` 在手机上空闲 15 秒（期间没有任何广播）后检查新连接能配对、已建立的会话照常应答，握手超时用例的等待期间同样没有任何广播。
 
 debug 包的测试入口也可以手动用：
 
