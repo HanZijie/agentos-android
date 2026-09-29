@@ -30,6 +30,21 @@ export function targets() {
 
 export const deviceSerial = process.env.AGENTOS_ACP_DEVICE || null;
 
+/**
+ * 电脑上的运行时用哪个 Agent 循环（AGENTOS_ACP_CORE）：fake（默认，FakeAgentCore）或 pi（真实 Pi：PiAdapter + 电脑上的
+ * QuickJS + 假模型端点 FakeModelServer，需要先在 core/pi-runtime 里 `npm ci && node build.mjs`）。
+ * pi 时 AGENTOS_ACP_PI_API 选模型协议族：anthropic（默认）或 openai。
+ */
+export const agentCore = process.env.AGENTOS_ACP_CORE ?? "fake";
+
+function coreArgs() {
+  if (agentCore === "fake") return [];
+  if (agentCore !== "pi") throw new Error(`AGENTOS_ACP_CORE must be fake or pi, not ${agentCore}`);
+  const args = ["--core=pi", `--pi-assets=${path.join(repoRoot, "app/src/main/assets")}`];
+  if (process.env.AGENTOS_ACP_PI_API) args.push(`--pi-api=${process.env.AGENTOS_ACP_PI_API}`);
+  return args;
+}
+
 let cachedClasspath;
 
 export function agentClasspath() {
@@ -45,7 +60,7 @@ export function agentClasspath() {
 
 function spawnJavaAgent(args) {
   const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, "bin", "java") : "java";
-  return spawn(java, ["-Dkotlin-logging-to-jul=true", "-cp", agentClasspath(), "org.agentos.runtime.testing.AcpStdioAgent", ...args], {
+  return spawn(java, ["-Dkotlin-logging-to-jul=true", "-cp", agentClasspath(), "org.agentos.runtime.testing.AcpStdioAgent", ...coreArgs(), ...args], {
     stdio: ["pipe", "pipe", "pipe"],
   });
 }

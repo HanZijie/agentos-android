@@ -273,8 +273,11 @@ interface ModelConfigPort {
 
 interface SecretPort {
     /**
-     * 按请求 URL 找 key：与已配置厂商的 baseUrl 按前缀匹配。只由网络出口（net/HostFetch）调用；
-     * 找不到时返回 null，网络出口不发请求（model_not_configured）。
+     * 按请求 URL 找 key：与 key 绑定的 endpoint（厂商的 baseUrl，或自定义端点）匹配——scheme、host、port 完全相同，
+     * 路径在段边界上匹配（`https://api.example.com/v1` 匹配 `…/v1/messages`，不匹配 `…/v10` 或别的 host）；
+     * 多个 endpoint 都匹配时取路径最长的。**不是字符串前缀匹配**：`https://api.example.com.evil.net/…` 拿不到
+     * `https://api.example.com` 的 key。参考实现是 `net/BaseUrlCredentials`（生产的 KeystoreSecrets 委托给它）。
+     * 只由网络出口（net/HostFetch）调用；找不到时返回 null，网络出口不发请求（model_not_configured）。
      */
     suspend fun credentialFor(url: String): Credential?
 }

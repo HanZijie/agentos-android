@@ -178,7 +178,7 @@ class FetchResponse internal constructor(
  * - drops `accept-encoding` and hop-by-hop headers set by JS (OkHttp handles gzip itself);
  * - never follows redirects (a redirect could carry the key header to another host) and never
  *   retries at the transport level (`retryOnConnectionFailure(false)`);
- * - allows cleartext http only to loopback hosts (tests, `adb reverse`);
+ * - allows cleartext http only to loopback hosts ([isLoopback]: local model servers, tests, `adb reverse`);
  * - classifies failures as retryable / non-retryable ([NetErrorKind], [HttpStatusPolicy]) and
  *   retries only per [retry] (default: no retry).
  *
@@ -322,8 +322,16 @@ class HostFetch(
             .callTimeout(0, TimeUnit.MILLISECONDS)
             .build()
 
-        fun isLoopback(host: String): Boolean =
-            host == "localhost" || host == "::1" || host == "[::1]" || host.startsWith("127.")
+        /**
+         * The hosts cleartext http may go to (architecture F9: local model servers on the device,
+         * tests, `adb reverse`): exactly `127.0.0.1`, `localhost` and `::1` (OkHttp canonicalizes
+         * IPv6 hosts without brackets). Kept in sync with the app's network security config
+         * (app/src/main/res/xml/network_security_config.xml), which the platform enforces as well.
+         * Deliberately not "starts with 127.": that would also match names like 127.example.com.
+         */
+        fun isLoopback(host: String): Boolean = host in LOOPBACK_HOSTS
+
+        val LOOPBACK_HOSTS: Set<String> = setOf("127.0.0.1", "localhost", "::1")
 
         /** Maps a transport failure to a [HostFetchException] with its [NetErrorKind]. */
         fun classify(e: IOException): HostFetchException {

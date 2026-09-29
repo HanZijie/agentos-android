@@ -49,7 +49,12 @@ dependencies {
     debugImplementation(project(":tests:device:acp-channel:inapp"))
     "releaseTestImplementation"(project(":tests:device:acp-channel:inapp"))
 
+    // W8 自带界面：Dispatchers.Main（平台 View，不引入 androidx 界面库）
+    implementation(libs.kotlinx.coroutines.android)
+
     testImplementation(libs.junit4)
+    // W8：ChatController 的状态测试（虚拟时间）
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // ---- Pi Agent core 打包（W3）----
