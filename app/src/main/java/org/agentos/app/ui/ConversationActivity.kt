@@ -237,7 +237,8 @@ class ConversationActivity : Activity() {
                 header.setText(if (item.thoughtExpanded) R.string.ui_thought_expanded else R.string.ui_thought_collapsed)
                 thought.visibility = if (hasThought && item.thoughtExpanded) View.VISIBLE else View.GONE
                 thought.text = item.thought.trim()
-                val body = item.text.trimStart()
+                // trailing newlines are kept while streaming (the next chunk may continue the line), trimmed once done
+                val body = if (item.streaming) item.text.trimStart() else item.text.trim()
                 text.visibility = if (body.isEmpty() && !item.streaming) View.GONE else View.VISIBLE
                 text.text = if (item.streaming) "$body▍" else body
             }

@@ -3,6 +3,7 @@ package org.agentos.app.settings
 import android.app.Activity
 import android.os.Bundle
 import android.text.InputType
+import android.text.method.PasswordTransformationMethod
 import android.view.View
 import android.view.WindowManager
 import android.widget.AdapterView
@@ -149,8 +150,13 @@ class ModelSourceActivity : Activity() {
 
     private fun field(hint: String, type: Int) = EditText(this).apply {
         this.hint = hint
-        inputType = type
+        // setSingleLine replaces the transformation method, so it must come before inputType: otherwise a password
+        // field loses PasswordTransformationMethod and shows (and exposes to accessibility) the key in clear text.
         setSingleLine(true)
+        inputType = type
+        if (type and InputType.TYPE_MASK_VARIATION == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+            transformationMethod = PasswordTransformationMethod.getInstance()
+        }
         setTextColor(getColor(R.color.ui_text))
         setHintTextColor(getColor(R.color.ui_text_secondary))
     }

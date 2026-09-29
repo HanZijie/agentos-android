@@ -140,7 +140,19 @@ class SettingsActivity : Activity() {
                 addView(Switch(context).apply {
                     isChecked = d.enabled
                     contentDescription = "电脑端接入"
-                    setOnCheckedChangeListener { _, on -> desktop { it.setDesktopAccessEnabled(on) } }
+                    setOnCheckedChangeListener { sw, on ->
+                        if (on || (d.pairings.isEmpty() && d.connections == 0)) {
+                            desktop { it.setDesktopAccessEnabled(on) }
+                        } else {
+                            // turning it off disconnects every computer and voids all pairings (IAgentControl v3)
+                            confirm(
+                                "关闭电脑端接入？",
+                                "会断开 ${d.connections} 个连接，并作废 ${d.pairings.size} 台电脑的配对；以后再打开需要重新配对。",
+                                "关闭",
+                                onCancel = { sw.setOnCheckedChangeListener(null); sw.isChecked = true; reloadLater() },
+                            ) { desktop { it.setDesktopAccessEnabled(false) } }
+                        }
+                    }
                 })
             })
             if (d.enabled) {
@@ -153,7 +165,13 @@ class SettingsActivity : Activity() {
                     })
                 }
                 val actions = mutableListOf<Pair<CharSequence, () -> Unit>>("生成配对码" to { newPairingCode() })
-                if (d.pairings.size > 1) actions += ("全部撤销" as CharSequence) to { desktop { it.revokeDesktopPairing("") } }
+                if (d.pairings.size > 1) {
+                    actions += ("全部撤销" as CharSequence) to {
+                        confirm("撤销全部 ${d.pairings.size} 台电脑的配对？", "它们的连接会立即断开，需要重新配对才能再连。", "全部撤销") {
+                            desktop { it.revokeDesktopPairing("") }
+                        }
+                    }
+                }
                 addView(Ui.buttons(context, *actions.toTypedArray()))
             }
         })
@@ -191,6 +209,20 @@ class SettingsActivity : Activity() {
             .show()
     }
 
+    private fun confirm(title: String, message: String, action: String, onCancel: () -> Unit = {}, onConfirm: () -> Unit) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(action) { _, _ -> onConfirm() }
+            .setNegativeButton("取消") { _, _ -> onCancel() }
+            .setOnCancelListener { onCancel() }
+            .show()
+    }
+
+    private fun reloadLater() {
+        scope?.launch { reload() }
+    }
+
     private fun desktop(call: (org.agentos.internal.IAgentControl) -> Unit) {
         scope?.launch {
             try {
@@ -206,7 +238,8 @@ class SettingsActivity : Activity() {
         scope?.launch {
             try {
                 val code = Desktop.parseCode(control.use { it.newDesktopPairingCode() })
-                val minutes = ((code.expiresAtMs - System.currentTimeMillis()) / 60_000).coerceAtLeast(0)
+                // round up: a 5-minute code read a moment later should still say 5, not 4
+                val minutes = ((code.expiresAtMs - System.currentTimeMillis() + 59_999) / 60_000).coerceAtLeast(1)
                 AlertDialog.Builder(this@SettingsActivity)
                     .setTitle("配对码")
                     .setMessage("${code.code}\n\n在电脑端第一次连接时输入。约 $minutes 分钟内有效，配对成功或输错 5 次后作废。")
