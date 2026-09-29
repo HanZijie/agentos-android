@@ -280,15 +280,18 @@ class RuntimeLifecycleTest {
     private class ClockPort : RuntimeLifecycle.Port {
         var tasks = 0
         var now = 1_000L
+        var hold = false
+        var allowStart = true
         val starts = mutableListOf<Int>()
         val stops = mutableListOf<Int>()
         val scheduled = mutableListOf<Long>()
         val published = mutableListOf<RuntimeLifecycle.Status>()
 
         override fun taskCount() = tasks
+        override fun holdForeground() = hold
         override fun requestServiceStart(): Boolean {
             starts += tasks
-            return true
+            return allowStart
         }
         override fun stopService(startId: Int): Boolean {
             stops += startId
@@ -364,5 +367,113 @@ class RuntimeLifecycleTest {
         p.now += 2_000
         lc.onIdleCheck()
         assertEquals(listOf(3), p.stops)
+    }
+
+    // ------------------------------------------------------------------ 保持前台的其他理由（规则 6：电脑端接入）
+
+    private fun recoveredIdle(p: ClockPort): RuntimeLifecycle {
+        val lc = RuntimeLifecycle(p, idleGraceMillis = 2_000)
+        lc.onRecoveryStarted()
+        lc.onRecoveryFinished()
+        return lc
+    }
+
+    /** 开关打开：没有任务也进前台、一直留着（任务来去都不停）；关闭后照常走宽限期再停。 */
+    @Test
+    fun hold_keepsForegroundWhileIdle_andReleasesAfterGrace() {
+        val p = ClockPort()
+        val lc = recoveredIdle(p)
+        assertTrue(p.starts.isEmpty())
+
+        p.hold = true
+        lc.onHoldChanged()
+        assertEquals("start requested with no task", listOf(0), p.starts)
+        lc.onServiceCommand(startId = 1, foregroundOk = true)
+        assertEquals(RuntimeLifecycle.Status(0, true, "idle"), p.published.last())
+        assertTrue(lc.holdingForeground())
+
+        p.now += 60_000
+        lc.onIdleCheck()
+        assertTrue("idle for a minute with desktop access on: still foreground", p.stops.isEmpty())
+
+        p.tasks = 1
+        lc.onTasksChanged()
+        p.tasks = 0
+        lc.onTasksChanged()
+        p.now += 5_000
+        lc.onIdleCheck()
+        assertTrue(p.stops.isEmpty())
+        assertEquals("already foreground: no second start request", listOf(0), p.starts)
+
+        p.hold = false
+        lc.onHoldChanged()
+        assertTrue("grace period first", p.stops.isEmpty())
+        assertEquals(2_000L, p.scheduled.last())
+        p.now += 2_000
+        lc.onIdleCheck()
+        assertEquals(listOf(1), p.stops)
+        assertEquals(RuntimeLifecycle.Status(0, false, "idle"), p.published.last())
+    }
+
+    /** 进程带着“已打开”的开关重新启动：bind 拉起的冷进程在恢复结束时要求前台；监督进程拉起的（服务命令先到）不停。 */
+    @Test
+    fun hold_atStartup_appliesWhenRecoveryEnds() {
+        val cold = ClockPort().apply { hold = true }
+        val lc = RuntimeLifecycle(cold, idleGraceMillis = 2_000)
+        lc.onTasksChanged()
+        lc.onRecoveryStarted()
+        assertTrue("no idle decisions before recovery ends", cold.starts.isEmpty())
+        lc.onRecoveryFinished()
+        assertEquals(listOf(0), cold.starts)
+        lc.onServiceCommand(startId = 1, foregroundOk = true)
+        cold.now += 10_000
+        lc.onIdleCheck()
+        assertTrue(cold.stops.isEmpty())
+
+        val boot = ClockPort().apply { hold = true }
+        val lc2 = RuntimeLifecycle(boot, idleGraceMillis = 2_000)
+        lc2.onRecoveryStarted()
+        lc2.onServiceCommand(startId = 3, foregroundOk = true)   // REASON=boot
+        lc2.onRecoveryFinished()
+        assertTrue(boot.starts.isEmpty())
+        assertTrue("no grace timer: nothing to stop", boot.scheduled.isEmpty())
+        boot.now += 10_000
+        lc2.onIdleCheck()
+        assertTrue(boot.stops.isEmpty())
+        assertEquals(RuntimeLifecycle.Status(0, true, "idle"), boot.published.last())
+    }
+
+    /** 系统不允许进前台：不在每次判断时重试；用户再次打开开关时重试。 */
+    @Test
+    fun hold_startDenied_retriesOnlyOnNextToggle() {
+        val p = ClockPort().apply { allowStart = false }
+        val lc = recoveredIdle(p)
+        p.hold = true
+        lc.onHoldChanged()
+        assertEquals(listOf(0), p.starts)
+        assertTrue(lc.foregroundDenied)
+        lc.onTasksChanged()
+        lc.onIdleCheck()
+        assertEquals("no retry loop", listOf(0), p.starts)
+
+        p.hold = false
+        lc.onHoldChanged()
+        p.hold = true
+        p.allowStart = true
+        lc.onHoldChanged()
+        assertEquals(listOf(0, 0), p.starts)
+        assertFalse(lc.foregroundDenied)
+    }
+
+    /** 开关打开期间服务被系统销毁：重新要求前台。 */
+    @Test
+    fun hold_serviceDestroyed_requestsForegroundAgain() {
+        val p = ClockPort()
+        val lc = recoveredIdle(p)
+        p.hold = true
+        lc.onHoldChanged()
+        lc.onServiceCommand(startId = 1, foregroundOk = true)
+        lc.onServiceDestroyed()
+        assertEquals(listOf(0, 0), p.starts)
     }
 }

@@ -66,7 +66,7 @@ class DesktopGateway(private val process: AgentProcess) {
     fun isEnabled(): Boolean = core.enabled
 
     /** 打开或关闭电脑端接入。关闭时断开所有电脑端连接，清掉配对码和全部配对。 */
-    fun setEnabled(on: Boolean) = core.setEnabled(on)
+    fun setEnabled(on: Boolean) = core.setEnabled(on).also { process.onDesktopAccessChanged() } // C6：开关打开时 :agent 留在前台（F11 第 4 点）
 
     /** 生成一次性配对码（5 分钟有效，替换旧的），给设置页显示。开关关闭时抛 IllegalStateException。 */
     fun newPairingCode(): PairingCode = core.newPairingCode()
