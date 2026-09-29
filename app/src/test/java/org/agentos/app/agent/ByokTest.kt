@@ -1,13 +1,25 @@
 package org.agentos.app.agent
 
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.agentos.runtime.net.FetchRequest
+import org.agentos.runtime.net.HostFetch
+import org.agentos.runtime.net.HostFetchException
+import org.agentos.runtime.net.NetErrorKind
+import org.agentos.runtime.net.PLACEHOLDER_API_KEY
 import org.agentos.runtime.pi.ModelCatalog
+import org.agentos.runtime.ports.Credential
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -20,6 +32,8 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -197,6 +211,103 @@ class KeystoreSecretsTest {
         // 没有 key 时再撤销不计数
         s.revoke()
         assertEquals(1L, s.stats()["revocations"])
+    }
+
+    /** F9 第二层：清除时在 revocations 上发出当前的和换下来的 Credential（就是交出去的那两个对象）；更换不发。 */
+    @Test
+    fun revokeSignalsWithdrawnCredentialsByIdentity() = runBlocking {
+        val s = KeystoreSecrets(SoftwareCipher()) { false }
+        val a = "https://a.example.com/v1"
+        val b = "https://b.example.com/v1"
+        val got = CopyOnWriteArrayList<Credential>()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) { s.revocations.collect { got += it } }
+        assertEquals(1L, s.stats()["subscribers"])
+        s.activate("key-aaaaaaaa", listOf(a))
+        val ca = s.credentialFor("$a/chat/completions")!!
+        s.activate("key-bbbbbbbb", listOf(b)) // 更换：热加载，不发信号
+        val cb = s.credentialFor("$b/chat/completions")!!
+        yield()
+        assertTrue("replacing a key sends no revocation", got.isEmpty())
+
+        s.revoke()
+        withTimeout(5_000) { while (got.size < 2) yield() }
+        assertEquals(2, got.size)
+        assertTrue(got.any { it === ca })
+        assertTrue(got.any { it === cb })
+        assertTrue("an equal-content Credential is a different key", got.none { it === Credential("key-aaaaaaaa") })
+        assertEquals(2L, s.stats()["signals"])
+        assertEquals(0L, s.stats()["signalsDropped"])
+
+        // 没有 key 时再清除：不发
+        s.revoke()
+        yield()
+        assertEquals(2, got.size)
+        job.cancel()
+    }
+
+    /** 没有订阅者（运行时还没建 HostFetch）时清除也不出错，信号不积压。 */
+    @Test
+    fun revokeWithoutSubscribers() {
+        val s = KeystoreSecrets(SoftwareCipher())
+        s.activate("key-aaaaaaaa", listOf("https://a.example.com/v1"))
+        s.revoke()
+        assertEquals(0L, s.stats()["subscribers"])
+        assertEquals(1L, s.stats()["signals"])
+        assertEquals(0L, s.stats()["signalsDropped"])
+    }
+
+    /**
+     * 端到端（F9 第二层）：真实的 HostFetch 构造时订阅 KeystoreSecrets；清除时正在读的流式响应以 KEY_REVOKED 中止，
+     * 之后的请求拿不到 key（第一层）。
+     */
+    @Test
+    fun revokeCutsOffInFlightHostFetch() = runBlocking {
+        val server = MockWebServer().apply { start() }
+        try {
+            val base = "http://127.0.0.1:${server.port}/anthropic"
+            val s = KeystoreSecrets(SoftwareCipher()) { false }
+            s.activate(key, listOf(base))
+            val fetch = HostFetch(s)
+            assertEquals(1L, s.stats()["subscribers"])
+            val line = "data: {\"n\":0000}\n\n"
+            server.enqueue(
+                MockResponse().setHeader("content-type", "text/event-stream")
+                    .setBody(line.repeat(200)).throttleBody(line.length.toLong(), 50, TimeUnit.MILLISECONDS),
+            )
+            fun post() = FetchRequest("$base/v1/messages", "POST", listOf("x-api-key" to PLACEHOLDER_API_KEY), "{}")
+            val response = fetch.open(post())
+            assertTrue(response.read()!!.isNotEmpty())
+            assertEquals(key, server.takeRequest().getHeader("x-api-key"))
+
+            val t0 = System.nanoTime()
+            s.revoke()
+            val e = try {
+                withTimeout(5_000) { while (response.read() != null) Unit }
+                null
+            } catch (x: HostFetchException) {
+                x
+            }
+            val ms = (System.nanoTime() - t0) / 1e6
+            assertNotNull("the in-flight body must be cut off", e)
+            assertEquals(NetErrorKind.KEY_REVOKED, e!!.kind)
+            assertFalse(e.retryable)
+            assertTrue(response.keyRevoked)
+            assertTrue("cut off after ${ms}ms", ms < 1_000)
+            assertFalse(key in e.message.orEmpty())
+            assertEquals(0, fetch.callsWithKey)
+
+            // 第一层：之后的请求拿不到 key，发不出去
+            try {
+                fetch.open(post())
+                fail("expected no key after revoke")
+            } catch (x: HostFetchException) {
+                assertFalse(key in x.message.orEmpty())
+            }
+            assertEquals(1, server.requestCount)
+            fetch.close()
+        } finally {
+            server.shutdown()
+        }
     }
 
     private fun expectSecurity(block: () -> Unit) {
