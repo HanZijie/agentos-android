@@ -160,7 +160,7 @@ agentos-android/
 ├── spikes/                                          # 验证项的一次性实验工程，每项一个独立目录（spikes/S<n>/），不参与主构建；结论写进 docs/spikes/S<n>.md
 ├── reference/                                       [W2] ← sideagentd（C++）、system/agent/daemon（Node）、../pi-acp-adapter：只作行为参考和契约测试
 ├── tests/
-│   ├── acp-conformance/                             [W4] 官方 TypeScript 客户端经 stdio 测电脑上的运行时；[W9] 经 adb forward 测真机
+│   ├── acp-conformance/                             [W4] 官方 TypeScript 客户端经 stdio 测电脑上的运行时（FakeAgentCore 与真实 Pi 两遍）；[W9] 经 adb forward 测手机：test/device.test.mjs（设备专属）、test/gateway.test.mjs（配对与安全，本机网关与手机各一遍）
 │   └── device/                                      [W6] 起：adb 驱动的真机测试，ACP 通道、MCP Binder、Runner、监督的用例分开；也可以在 root 过的模拟器上跑
 │       └── acp-channel/{common,agent,client,inapp}/ · run.py   [W5] SDK 回归（--suite sdk）；[W6] :agent 用例（--suite app，inapp 执行器以 debugImplementation / releaseTestImplementation 注入 debug 和 releaseTest 包，release 包里没有；测试 key 只经 stdin 投递（`adb shell content write` 到 inapp 的 KeyDropProvider），不进 adb 命令行（API 37 的 adbd 会把命令行写进 logcat））
 ├── docs/
@@ -369,7 +369,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] 冻结“自动选会话”扩展的方法名和字段，写入 `acp-extensions.schema.json`（形式：`session/new` 的 `_meta."org.agentos".autoSelect`，结果经 `session_info_update` 告知）
 - [x] `core/runtime/acp/`：`initialize`、`session/new`、`session/prompt`、`session/update`、`session/cancel`，以及自动选会话扩展
 - [x] `tests/acp-conformance/`：在电脑上用 SDK 的 `StdioTransport` 启动运行时，用官方 TypeScript 客户端跑基础方法（13/13，Agent 循环先用假 core）
-- [ ] 一致性测试换成真实 Pi（`JsEngine` 的电脑实现 + 假模型端点），等 B2 的 PiAdapter
+- [x] 一致性测试换成真实 Pi（A5）：`AcpStdioAgent --core=pi`，B 的 PiAdapter 加电脑上的 QuickJS，模型用进程内的 FakeModelServer，`--pi-api=anthropic|openai` 两个协议族都通过。CI 的 acp-conformance 任务跑 FakeAgentCore 和真实 Pi 两遍。一致性用例后来拆成 14 例（A6）
 
 #### W5 Binder 通道
 - [ ] 按 S3 的结论冻结 `core/protocol/binder-channel-v1.md`（AIDL、单条消息上限、顺序、背压、`linkToDeath`、UID 校验）；草案已在，参数见其第 8 节
@@ -407,6 +407,8 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机。
   - A4：Pixel_8a 模拟器上 `npm run test:device` 24/24。
   - A6：设备模式跑完整的一致性用例。手机上是真实 Pi，模型端点是电脑上的 `FakeModelServerMain`（经 `adb reverse`）。14 例中 10 例通过、4 例跳过：3 例依赖工具（W14 / W15，其中 1 例还要确认，W16），1 例依赖只有电脑上才有的 `--jev` 开关。
+  - 设备前置条件：App 已有“忽略电池优化”豁免（对应首次引导里的这一步；用例用 `dumpsys deviceidle whitelist` 模拟），否则从后台启动前台服务会被拒。
+  - 之后：freezer 用例转正（C6 之后，空闲 15 秒后新连接能配对、已建立会话照常应答）；握手超时在设备上实测约 10.0 秒断开，用例只校验上限。
   - 真机待测。
 - [x] 电脑端接入打开期间 `:agent` 以前台服务运行并显示通知，避免空闲时被 cached-apps freezer 冻结（architecture F11 第 4 点；A6 发现，C6 实现）。
   - C 的模拟器（API 35 / 36 / 37）上 `desktop_idle.py` 各 18/18：空闲 60 s 后经 acp-bridge 握手 73–344 ms，对话与取消成功，`isFrozen` 始终为 false。
