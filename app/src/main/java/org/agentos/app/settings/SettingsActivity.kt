@@ -54,6 +54,15 @@ class SettingsActivity : Activity() {
         super.onPause()
     }
 
+    /**
+     * Pulling down the notification shade does not pause the page, but the shade can change what it shows
+     * (the desktop-access notification's "关闭" turns the switch off): read again when the window is back.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) reloadLater()
+    }
+
     private suspend fun reload() {
         val snap = try {
             control.use { c ->
