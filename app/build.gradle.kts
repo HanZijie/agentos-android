@@ -14,11 +14,25 @@ android {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 设备用例的测试入口（恢复延迟等）：release 包里关闭
+            buildConfigField("boolean", "TEST_HOOKS", "false")
+        }
+        debug {
+            buildConfigField("boolean", "TEST_HOOKS", "true")
+        }
+        // W6（C4）：R8 下的设备验证。与 release 相同的 R8 规则和不可调试，另外用调试证书签名、带 in-app 执行器
+        // （tests/device/acp-channel/inapp）、打开测试入口（回环明文由 main 的网络安全配置放行，B4）。只用于测试，不发布
+        create("releaseTest") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            buildConfigField("boolean", "TEST_HOOKS", "true")
         }
     }
     buildFeatures {
         // app/src/main/aidl/org/agentos/internal/：IAgentControl（W6）、IExtensionHost / IExtensionCallback（W14）
         aidl = true
+        buildConfig = true
     }
 }
 
@@ -31,8 +45,9 @@ dependencies {
     // W6（C3）：Store 的 SQLite 驱动（AndroidStore）。BundledSQLiteDriver，与 core:runtime 电脑测试同一份 SQLite
     implementation(libs.androidx.sqlite.bundled)
 
-    // W6 设备用例的 in-app 执行器（tests/device/acp-channel/inapp）：只进 debug 包，release 包里没有
+    // W6 设备用例的 in-app 执行器（tests/device/acp-channel/inapp）：只进 debug 包和 releaseTest 包，release 包里没有
     debugImplementation(project(":tests:device:acp-channel:inapp"))
+    "releaseTestImplementation"(project(":tests:device:acp-channel:inapp"))
 
     // W8 自带界面：Dispatchers.Main（平台 View，不引入 androidx 界面库）
     implementation(libs.kotlinx.coroutines.android)
