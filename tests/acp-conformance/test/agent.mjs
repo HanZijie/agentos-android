@@ -314,10 +314,21 @@ export async function ensureDeviceTestModel(serial) {
 }
 
 /**
+ * 设备模式的前置条件：模拟 F2 首次引导里用户已允许“忽略电池优化”。这样 :agent 从后台（debug 广播打开开关、有任务时）
+ * 也能进入前台服务（C6：电脑端接入打开期间；W6：有任务期间），不会被 cached-apps freezer 冻结。没有这一步时系统拒绝
+ * 后台启动前台服务（logcat：Background started FGS: Disallowed），空闲的 :agent 约 10 秒后被冻结，用例会卡住。
+ * 真机上还可以由 root 监督进程 promote（S2 契约 a）；模拟器上没有监督进程。幂等。
+ */
+export function prepareDevice(serial) {
+  execFileSync(adbPath(), ["-s", serial, "shell", "dumpsys", "deviceidle", "whitelist", "+org.agentos.app"], { encoding: "utf8" });
+}
+
+/**
  * 设备模式的模型端点：电脑上起 B 的 FakeModelServer（FakeModelServerMain，按 {"fake":…} 指令回应），
  * `adb reverse tcp:18787 tcp:<端口>` 映射到手机，再确保手机上的模型来源指向它。返回 { port, stop() }。
  */
 export async function startDeviceModel(serial) {
+  prepareDevice(serial);
   const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, "bin", "java") : "java";
   const child = spawn(java, ["-cp", agentClasspath(), "org.agentos.runtime.testing.FakeModelServerMain", `--key=${DEVICE_MODEL.key}`], {
     stdio: ["pipe", "pipe", "pipe"],

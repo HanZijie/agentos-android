@@ -10,6 +10,7 @@ import {
   deviceControl,
   deviceForward,
   deviceSerial,
+  prepareDevice,
   PROTOCOL_VERSION,
   rawConnect,
   runBridge,
@@ -30,7 +31,6 @@ function localTarget() {
     name: "local",
     device: false,
     handshakeTimeoutMs: 500,
-    keepAwake: () => () => {},
     async setup() {
       gw = await startLocalGateway({ args: ["--handshake-timeout-ms=500"] });
       const s = await gw.status();
@@ -53,19 +53,8 @@ function deviceTarget(serial) {
     name: `device ${serial}`,
     device: true,
     handshakeTimeoutMs: 10_000,
-    // 空闲的 :agent 是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，计时器和 socket 都停住（见下面的 todo 用例）。
-    // 测网关自身的计时时，用 debug 入口的 status 广播让进程保持解冻
-    keepAwake: () => {
-      const timer = setInterval(() => {
-        try {
-          deviceControl(serial, "status");
-        } catch {
-          // 设备忙时下次再试
-        }
-      }, 3_000);
-      return () => clearInterval(timer);
-    },
     async setup() {
+      prepareDevice(serial);
       deviceControl(serial, "disable");
       deviceControl(serial, "enable");
       fwd = deviceForward(serial);
@@ -200,12 +189,11 @@ for (const t of gatewayTargets) {
     });
 
     test("a silent connection is closed after the handshake timeout", async (ctx) => {
-      // C 在设备上见过的偶发失败：等待的 10 秒里 :agent 被 freezer 冻结，看门狗要等解冻才触发。这里测的是看门狗本身：
-      // 等待期间保持解冻；断开即通过，只校验上限（设备上实测约 10.0–10.1 秒，见 A6 报告），实际时间写进诊断输出
-      const awake = t.keepAwake();
+      // 断开即通过，只校验上限（设备上实测约 10.0 秒），实际时间写进诊断输出。等待的 10 秒里没有任何广播：
+      // 电脑端接入打开期间 :agent 以前台服务运行（C6），不会被 cached-apps freezer 冻结，看门狗照常触发
       const raw = await rawConnect(t.port());
       const t0 = Date.now();
-      const closed = await raw.next(t.handshakeTimeoutMs + 30_000).finally(awake);
+      const closed = await raw.next(t.handshakeTimeoutMs + 30_000);
       const elapsed = Date.now() - t0;
       ctx.diagnostic(`closed after ${elapsed} ms (handshake timeout ${t.handshakeTimeoutMs} ms)`);
       assert.equal(closed, null, "no handshake response, just a close");
@@ -214,21 +202,30 @@ for (const t of gatewayTargets) {
     });
 
     test(
-      "the gateway still answers after the phone has been idle for 15 s",
-      {
-        skip: t.device ? false : "只在手机上有意义（cached-apps freezer）",
-        todo: t.device
-          ? "已知问题：电脑端接入打开、:agent 空闲时是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，电脑端的连接和已建立会话的请求都得不到服务，直到别的事件解冻进程。待定方案：电脑端接入打开期间 :agent 以前台服务运行（C 的 RuntimeLifecycle、D 的通知），见 A6 报告"
-          : false,
-      },
-      async () => {
+      "after the phone has been idle for 15 s a new desktop connection pairs and an open session still answers",
+      { skip: t.device ? false : "只在手机上有意义（cached-apps freezer）" },
+      async (ctx) => {
+        // A6 发现：电脑端接入打开、:agent 空闲时曾是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，连接和请求都没有响应。
+        // C6 起开关打开期间 :agent 以前台服务运行（F11 第 4 点）。这里空闲 15 秒、期间没有任何广播，然后必须照常服务
         const { code } = await t.control("pair");
+        const first = await rawConnect(t.port());
+        const token = (await first.pair({ code })).result.token;
+        first.send(initialize);
+        assert.equal((await first.next()).id, 1);
         await sleep(15_000);
-        const raw = await rawConnect(t.port());
-        raw.send({ jsonrpc: "2.0", id: 0, method: "_org.agentos/pair", params: { version: 1, code } });
-        const reply = await raw.next(12_000);
-        assert.ok(reply?.result, "paired after the phone was idle");
-        raw.close();
+        const t0 = Date.now();
+        first.send(newSession);
+        const created = await first.next(10_000);
+        ctx.diagnostic(`session/new answered after ${Date.now() - t0} ms on a connection idle for 15 s`);
+        assert.equal(created.id, 2);
+        assert.ok(created.result.sessionId);
+        const second = await rawConnect(t.port());
+        const t1 = Date.now();
+        const again = await second.pair({ token });
+        ctx.diagnostic(`a new connection paired after ${Date.now() - t1} ms`);
+        assert.ok(again.result, "paired after the phone was idle");
+        first.close();
+        second.close();
       },
     );
   });
