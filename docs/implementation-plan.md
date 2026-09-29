@@ -431,7 +431,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] 诊断页：版本、健康状态、上次错误、监督进程状态；不输出 key 和完整 prompt
 
 #### W12 断网与升级
-- [ ] 断网处理：错误分类、退避重试、任务 deadline
+- [ ] 断网处理：错误分类、退避重试、任务 deadline（退避重试已由 B6 提前完成：响应头之前重试，1–30 s 退避，每个请求最多 2 分钟，retry-after 优先；断网的端到端与 deadline 的精确收紧仍在 W12）
 - [ ] Store 的 schema 迁移：只向前迁移，迁移前备份，失败就回滚并停在 safe mode
 - [ ] OTA：开机时重新检查 API 和 fingerprint，超出支持范围就进入 safe mode
 - [ ] `tests/device/`：覆盖连续重启、断网、杀 App 各进程、杀监督进程
