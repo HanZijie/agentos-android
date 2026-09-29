@@ -3,7 +3,7 @@
 - **状态**：v1，W4 冻结 M1 的方法范围、映射规则和“自动选会话”扩展；W9 追加电脑端接入的传输与配对握手（第 10 节）；M2（W10）、M3a（W16）按第 2 节的计划追加。
 - **依据**：[acp-profile-v1.md](acp-profile-v1.md)（对外协议的权威文档）、architecture 5.3 / 5.6、[core/contracts/events.md](../contracts/events.md)、[errors.md](../contracts/errors.md)、[binder-channel-v1.md](binder-channel-v1.md)。
 - **实现**：`core/runtime/.../acp/`（`AgentSide.kt`：Agent 端与会话；`UpdateMapper.kt`：事件 → `session/update`；`ProfileExtensions.kt`：`_meta` 约定；`LineTransport.kt`：按行传输），官方 ACP Kotlin SDK 0.30.1 的 Agent 端；电脑端接入：`core/runtime/.../desktop/`（开关、配对、握手、连接管理）+ app 的 `DesktopGateway.kt`（抽象 socket）+ `tools/acp-bridge/`。扩展字段的 schema：[acp-extensions.schema.json](acp-extensions.schema.json)。
-- **测试**：`AcpAgentSideTest`（SDK 的 Kotlin Client，10 例）、`RuntimeStartTest`（启动与恢复期间，4 例）、`LineTransportTest`（8 例）、`DesktopPairingTest`（10 例）、`DesktopGatewayCoreTest`（11 例）；`tests/acp-conformance/`（官方 TypeScript 客户端 1.4.0）：13 例分别经 stdio 和电脑上的网关 + `tools/acp-bridge` 跑，网关配对与安全 9 例，手机上经 `adb forward` 的握手类 6 例（设备可选）。
+- **测试**：`AcpAgentSideTest`（SDK 的 Kotlin Client，10 例）、`RuntimeStartTest`（启动与恢复期间，4 例）、`LineTransportTest`（8 例）、`DesktopPairingTest`（10 例）、`DesktopGatewayCoreTest`（11 例）；`tests/acp-conformance/`（官方 TypeScript 客户端 1.4.0）：14 例分别经 stdio 和电脑上的网关 + `tools/acp-bridge` 跑（Agent 循环 FakeAgentCore 或真实 Pi），网关配对与安全 9 例；手机上（设备可选）经 `adb forward` 跑同样的 14 例（依赖工具、确认、Jev 的 4 例跳过）、设备专属 3 例、配对与安全 9 例。
 
 ## 1. 连接
 
@@ -197,6 +197,7 @@
 
 - 抽象 socket 的名字不归任何 App 所有，别的 App 可以抢先占用 `agentos-acp`。这时网关打不开监听（诊断里的 `listenError`，设置页应提示），电脑连到的是那个 App：它能看到电脑发出的配对码或令牌，但拿去也没用，因为真正的网关只接受 adbd / root 的连接。
 - 能用 adb 的人本来就能在手机上做很多事（例如 `input tap`）。配对码防的是“开着 USB 调试的手机被电脑上任意程序直接使用”和本机的其他 App，不防 adb 持有者本人。
+- **cached-apps freezer（待解决）**：`:agent` 空闲（没有任务、没有被绑定）时是 cached 进程，约 10 秒后会被冻结。冻结期间抽象 socket 上的新连接和已建立会话的请求都得不到服务，直到别的事件解冻进程（Binder 客户端绑定服务时，`:agent` 的优先级随绑定方变化，A6 没有验证那条路径）。在 API 36 模拟器上复现（A6）：空闲 15 秒后连接，25 秒没有响应。待定方案：电脑端接入打开期间 `:agent` 以前台服务运行并显示通知（C 的 RuntimeLifecycle、D 的通知）。
 
 ## 11. 从 pi-acp-adapter 借鉴与不采用的做法
 

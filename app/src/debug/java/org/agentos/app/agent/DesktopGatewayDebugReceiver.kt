@@ -32,8 +32,16 @@ class DesktopGatewayDebugReceiver : BroadcastReceiver() {
                 when (op) {
                     "enable" -> gw.setEnabled(true).let { gw.status().put("ok", true) }
                     "disable" -> gw.setEnabled(false).let { gw.status().put("ok", true) }
-                    // modelUsable：设备用例据此判断要不要先配测试模型（C 的 ensureTestModel）
-                    "status" -> gw.stats().put("ok", true).put("modelUsable", (process.models.get()["usable"] as? JsonPrimitive)?.booleanOrNull == true)
+                    // modelUsable / modelBaseUrl / modelId：设备用例据此判断手机上的模型来源是不是测试端点（C 的 ensureTestModel），
+                    // 不是就先配。只有端点和模型 id，没有 key
+                    "status" -> {
+                        val src = process.models.get()
+                        fun str(k: String) = (src[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                        gw.stats().put("ok", true)
+                            .put("modelUsable", (src["usable"] as? JsonPrimitive)?.booleanOrNull == true)
+                            .put("modelBaseUrl", str("baseUrl") ?: JSONObject.NULL)
+                            .put("modelId", str("model") ?: JSONObject.NULL)
+                    }
                     "revoke_all" -> JSONObject().put("ok", true).put("revoked", gw.revokeAll())
                     "pair" -> gw.newPairingCodeJson(intent.getLongExtra("ttlMs", 0L)).put("ok", true)
                     else -> JSONObject().put("ok", false).put("error", "unknown op: $op")

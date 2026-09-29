@@ -176,6 +176,9 @@ class FakeModelServer(
         val api = when {
             path.startsWith("/anthropic/") -> "anthropic"
             path.startsWith("/openai/") -> "openai"
+            // lane A（A6）：根路径的 Anthropic Messages。设备上的测试模型来源（C 的 ensureTestModel）的 baseUrl 是
+            // http://127.0.0.1:18787，没有 /anthropic 前缀；经 adb reverse 映射到这里（FakeModelServerMain）
+            path == "/v1/messages" || path.startsWith("/v1/messages?") -> "anthropic"
             else -> null
         }
         if (api == null || ex.method != "POST") {
