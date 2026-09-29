@@ -156,6 +156,7 @@ class PiScenarios(
         val c = conn("recovery-ctx")
         val r1 = PromptRun()
         var queued = false
+        var recoveredBefore = -1
         try {
             c.connect()
             val a = c.newSession()
@@ -167,20 +168,32 @@ class PiScenarios(
             waitRunState { it.optInt("activeTasks") >= 2 }
             scope.launch { runPrompt(a, t2, PromptRun()) }
             queued = waitRunState { it.optInt("activeTasks") >= 2 && it.optInt("queuedTasks") >= 1 }
+            recoveredBefore = recoveredCount(control.use { it.diagnostics() })
             status("queued=$queued; SIGKILL :agent")
             check(killAgentAndWait(ctx)) { "could not kill :agent" }
         } finally {
             c.dispose()
         }
-        // 冷启动（bind 拉起），等排队的那一轮在模型端出现并完成
-        var diag = JSONObject()
+        // 冷启动（diagnostics 的 bind 拉起 :agent），等排队的那一轮在模型端出现并完成
         var rec: JSONObject? = null
+        var loopDiag = JSONObject()
         val deadline = SystemClock.elapsedRealtime() + 40_000
         while (SystemClock.elapsedRealtime() < deadline) {
-            diag = control.use { it.diagnostics() }
+            loopDiag = control.use { it.diagnostics() }
             rec = fakeLog().lastOrNull { it.optString("userText") == t2 && it.optBoolean("completed") }
             if (rec != null) break
             delay(500)
+        }
+        // 上面那次 diagnostics 可能取在恢复流程结束前（拉起 :agent 的第一次调用，恢复还没开始），读假端点日志的工夫里
+        // 恢复已把排队的一轮交还调度器、Pi 也跑完了。所以找到 rec 之后再读：等本次恢复写完
+        // （engineStarted=true，且 Store 系统流里的 RUNTIME_RECOVERED 比杀进程前多；Store 跨次保留，只看 lastRecovered 可能是上一次的）
+        var diag = JSONObject()
+        val settleDeadline = SystemClock.elapsedRealtime() + 15_000
+        while (true) {
+            diag = control.use { it.diagnostics() }
+            val settled = diag.getJSONObject("runtime").optBoolean("engineStarted") && recoveredCount(diag) > recoveredBefore
+            if (settled || rec == null || SystemClock.elapsedRealtime() >= settleDeadline) break
+            delay(200)
         }
         val m = rec?.msgs().orEmpty()
         val rs = diag.getJSONObject("runtime").getJSONObject("runState")
@@ -198,7 +211,15 @@ class PiScenarios(
         return JSONObject().put("ok", allTrue(checks))
             .put("summary", "resumed=${rec != null} messages=${m.size} recovered=$recovered checks=${count(checks)}")
             .put("checks", checks).put("request", rec ?: JSONObject.NULL).put("turn1", r1.json()).put("runState", rs)
+            .put("runtimeRecovered", JSONObject().put("beforeKill", recoveredBefore).put("after", recoveredCount(diag)))
+            // 找到 rec 那一轮的 diagnostics 是否还是恢复前的（旧写法拿它判定，会误判）
+            .put("diagStaleWhenFound", rec != null && !(loopDiag.getJSONObject("runtime").optBoolean("engineStarted") &&
+                recoveredCount(loopDiag) > recoveredBefore))
     }
+
+    /** Store 系统流里 RUNTIME_RECOVERED 的条数（Store 未打开时 -1）。 */
+    private fun recoveredCount(diag: JSONObject): Int =
+        diag.optJSONObject("store")?.optJSONObject("system")?.optInt("runtimeRecovered", -1) ?: -1
 
     private suspend fun waitRunState(timeoutMs: Long = 15_000, pred: (JSONObject) -> Boolean): Boolean {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
