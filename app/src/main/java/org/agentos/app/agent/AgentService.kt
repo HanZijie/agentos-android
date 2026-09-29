@@ -3,11 +3,14 @@ package org.agentos.app.agent
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.util.Log
+import org.agentos.app.settings.SettingsActivity
 
 /**
  * 运行时的前台服务（监督契约 S2 a）：`org.agentos.app/.agent.AgentService`，`:agent` 进程，不导出，
@@ -20,6 +23,9 @@ import android.util.Log
  *
  * 每次 onStartCommand 先 `startForeground`（不管有没有任务），再把命令交给 [RuntimeLifecycle]，
  * 空闲判断在那之后、并且只在恢复流程结束后做。返回 START_NOT_STICKY：死后由谁拉起只由监督进程决定。
+ *
+ * 电脑端接入打开期间（architecture F11 第 4 点）没有任务也留在前台，通知换成“电脑端接入已开启”，点通知打开设置页，
+ * 通知上的“关闭”经 [DesktopAccessOffReceiver] 关掉开关（与设置页的关闭相同：断开连接、作废配对），随后照常退出前台。
  */
 class AgentService : Service() {
     private lateinit var runtime: AgentProcess
@@ -51,20 +57,58 @@ class AgentService : Service() {
     }
 
     private fun goForeground(): Boolean = try {
-        val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Agent 运行时", NotificationManager.IMPORTANCE_LOW))
-        }
-        val n = Notification.Builder(this, CHANNEL)
-            .setContentTitle("AgentOS 正在运行任务")
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setOngoing(true)
-            .build()
-        startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        startForeground(NOTIFICATION_ID, buildNotification(runtime.desktop.isEnabled()), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         true
     } catch (e: Exception) {
         Log.w(TAG, "startForeground failed: ${e.javaClass.simpleName}")
         false
+    }
+
+    /**
+     * 电脑端接入的开关变了：换通知。关掉且没有任务时服务马上要停（宽限期后），不再换成“正在运行任务”。
+     * 可以在任何线程调用。
+     */
+    internal fun refreshNotification(desktopOn: Boolean, tasks: Int) {
+        if (!desktopOn && tasks == 0) return
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(desktopOn)) }
+            .onFailure { Log.w(TAG, "notification update failed: ${it.javaClass.simpleName}") }
+    }
+
+    private fun buildNotification(desktopOn: Boolean): Notification {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (!desktopOn) {
+            ensureChannel(nm, CHANNEL, "Agent 运行时")
+            return Notification.Builder(this, CHANNEL)
+                .setContentTitle("AgentOS 正在运行任务")
+                .setSmallIcon(android.R.drawable.stat_notify_sync)
+                .setOngoing(true)
+                .build()
+        }
+        // 用词与设置页（D，SettingsActivity 的“电脑端接入”一节和关闭确认）一致
+        ensureChannel(nm, CHANNEL_DESKTOP, DESKTOP_CHANNEL_NAME)
+        val settings = PendingIntent.getActivity(
+            this, 0, Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE,
+        )
+        val off = PendingIntent.getBroadcast(
+            this, 0, Intent(this, DesktopAccessOffReceiver::class.java), PendingIntent.FLAG_IMMUTABLE,
+        )
+        return Notification.Builder(this, CHANNEL_DESKTOP)
+            .setContentTitle(DESKTOP_TITLE)
+            .setContentText(DESKTOP_TEXT)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+            .setContentIntent(settings)
+            .addAction(Notification.Action.Builder(null as Icon?, DESKTOP_OFF, off).build())
+            .build()
+    }
+
+    private fun ensureChannel(nm: NotificationManager, id: String, name: String) {
+        if (nm.getNotificationChannel(id) == null) {
+            nm.createNotificationChannel(NotificationChannel(id, name, NotificationManager.IMPORTANCE_LOW))
+        }
     }
 
     override fun onDestroy() {
@@ -87,5 +131,12 @@ class AgentService : Service() {
 
         private const val CHANNEL = "runtime"
         private const val NOTIFICATION_ID = 1
+
+        /** 电脑端接入打开期间的通知（F11 第 4 点）。 */
+        private const val CHANNEL_DESKTOP = "desktop_access"
+        const val DESKTOP_CHANNEL_NAME = "电脑端接入"
+        const val DESKTOP_TITLE = "电脑端接入已开启"
+        const val DESKTOP_TEXT = "允许电脑经 adb 连接。关闭会断开连接，并作废已配对的电脑。"
+        const val DESKTOP_OFF = "关闭"
     }
 }
