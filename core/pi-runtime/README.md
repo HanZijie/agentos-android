@@ -153,3 +153,12 @@ Pi 0.86.1 在 abort 后仍会对已完成的工具调用 `afterToolCall`；`befo
 - 模板的 `reasoning: false` 只决定请求里是否带 `thinking` 参数，不影响 thinking 块的接收和回传。用 MiniMax-M2.7 实测：模板默认值和 `reasoning: true` 下，对话、跨轮上下文、工具调用都正常，thinking 块照常流式到达并在下一轮原样回传。
 
 `schemaVersion` 只在不兼容的改动时加一；新增字段不加。
+
+## 模型兼容设置（AgentOS 扩展）
+
+`pi-ai` 0.86.1 没有的兼容开关，放在模型对象的 `compat` 里、和 `pi-ai` 自己的键并列（`pi-ai` 忽略不认识的键），统一带 `agentos` 前缀，实现在 `src/compat.js`、`src/think-tags.js`，挂在 `src/stream-fn.js`：
+
+| 键 | 作用 | 默认 |
+|---|---|---|
+| `agentosExtraBody` | 对象；它的键补进请求体里**还没有**的位置（经 `pi-ai` 的 `onPayload`），不覆盖 `pi-ai` 已经构造的字段 | MiniMax 的 OpenAI 兼容端点（host 为 `minimax.io` / `minimaxi.com` / `minimax.cn` 及其子域）自动带 `{"reasoning_split": true}`：思考改由 `reasoning_content` / `reasoning_details` 返回（MiniMax Chat Completions API 文档），`pi-ai` 原生按 thinking 处理并在下一轮回传 `reasoning_details`。显式设置优先，例如 `{"reasoning_split": false}` 关掉 |
+| `agentosThinkTags` | 布尔；openai-completions 路线上，回答**开头**的 `<think>…</think>` 转成 thinking 块：流式增量按 chunk 边界正确切分，只认第一个内容块的开头，正文中间出现的不动，模型自己已经发 thinking 时不动；这个 thinking 块不带签名，下一轮不回传 | 自定义端点（`provider: "custom"`）开，目录里的预设关 |

@@ -10,6 +10,8 @@ import { streamSimple as anthropicMessagesStream } from "@earendil-works/pi-ai/a
 import { streamSimple as openaiCompletionsStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { hostFetch, PLACEHOLDER_API_KEY } from "./host-bridge.js";
+import { addMissing, extraBody, thinkTagsEnabled } from "./compat.js";
+import { splitLeadingThinkStream } from "./think-tags.js";
 
 const FAMILIES = {
   "anthropic-messages": anthropicMessagesStream,
@@ -40,10 +42,20 @@ export function hostStreamFn(model, context, options = {}) {
   const impl = FAMILIES[model.api];
   if (!impl) return errorStream(model, `Unsupported model API in this build: ${model.api}`);
   const sid = options.sessionId ?? null;
-  return impl(model, context, {
+  const extra = extraBody(model);
+  const stream = impl(model, context, {
     ...options,
     apiKey: PLACEHOLDER_API_KEY,
     fetch: (input, init) => hostFetch(input, init, { sid }),
     maxRetries: 0,
+    onPayload: async (params, m) => {
+      let next = params;
+      if (options.onPayload) {
+        const replaced = await options.onPayload(params, m);
+        if (replaced !== undefined) next = replaced;
+      }
+      return addMissing(next, extra);
+    },
   });
+  return thinkTagsEnabled(model) ? splitLeadingThinkStream(stream) : stream;
 }
