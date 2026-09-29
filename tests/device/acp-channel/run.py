@@ -123,10 +123,29 @@ def push_key(adb, slot, key):
     """adb shell content write：key 只走 stdin，命令行里只有 URI。写进 App 私有目录 files/test/<slot>
     （inapp 的 KeyDropProvider，要求 DUMP；debug 和不可调试的 releaseTest 包都能用）。
     用 adb shell（shell v2）而不是 exec-in：exec-in 不等设备上的命令结束就返回，key 会晚于用例落盘。"""
-    cmd = [adb.adb, "-s", adb.serial, "shell", f"content write --uri {KEY_DROP}{slot}"]
-    p = subprocess.run(cmd, input=key, capture_output=True, text=True, timeout=60)
-    if p.returncode != 0 or p.stderr.strip():
-        raise RuntimeError(f"push key failed: {p.returncode} {p.stderr.strip()[:200]}")
+    want = len(key.encode("utf-8"))
+    got = None
+    for attempt in (1, 2):
+        cmd = [adb.adb, "-s", adb.serial, "shell", f"content write --uri {KEY_DROP}{slot}"]
+        p = subprocess.run(cmd, input=key, capture_output=True, text=True, timeout=60)
+        if p.returncode != 0 or p.stderr.strip():
+            raise RuntimeError(f"push key failed: {p.returncode} {p.stderr.strip()[:200]}")
+        # 写完核对长度（KeyDropProvider.query 只返回长度，不返回内容）；不对就重写一次
+        got = key_file_size(adb, slot)
+        if got == want:
+            return attempt
+    raise RuntimeError(f"push key: file size {got}, expected {want}")
+
+
+def key_file_size(adb, slot):
+    out = adb.sh(f"content query --uri {KEY_DROP}{slot}", check=False)
+    for part in out.replace(",", " ").split():
+        if part.startswith("size="):
+            try:
+                return int(part[5:])
+            except ValueError:
+                return None
+    return None
 
 
 def live_key():
@@ -344,10 +363,11 @@ def main():
             continue
         t0 = time.time()
         try:
+            push_attempts = None
             if kind == "byok":
-                push_key(adb, "byok_key", test_key)
+                push_attempts = push_key(adb, "byok_key", test_key)
             if kind == "live" and real_key:
-                push_key(adb, "live_key", real_key)
+                push_attempts = push_key(adb, "live_key", real_key)
             if scenario == "client-kill":
                 r = run_client_kill(adb, name, activity, args, timeout)
             elif kind == "userstop":
@@ -364,6 +384,8 @@ def main():
                 r["ok"] = False
         if r is not None:
             r["driverSec"] = round(time.time() - t0, 1)
+            if push_attempts is not None:
+                r["keyPushAttempts"] = push_attempts
             if kind == "negative":
                 # 负向实验：关掉流控后允许失败，但必须在超时内结束（不能挂住）
                 r["deliveredAll"] = r.get("ok")
