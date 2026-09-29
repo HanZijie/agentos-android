@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.util.Log
+import org.agentos.app.settings.Desktop
 import org.agentos.app.settings.SettingsActivity
 
 /**
@@ -132,11 +133,14 @@ class AgentService : Service() {
         private const val CHANNEL = "runtime"
         private const val NOTIFICATION_ID = 1
 
-        /** 电脑端接入打开期间的通知（F11 第 4 点）。 */
+        /**
+         * 电脑端接入打开期间的通知（F11 第 4 点）。标题和按钮用设置页（D，Desktop.kt）的常量，开关旁的说明引用的就是它们；
+         * 正文沿用设置页的开关文案（“允许电脑经 adb 连接”）和关闭确认框的说法。
+         */
         private const val CHANNEL_DESKTOP = "desktop_access"
         const val DESKTOP_CHANNEL_NAME = "电脑端接入"
-        const val DESKTOP_TITLE = "电脑端接入已开启"
+        const val DESKTOP_TITLE = Desktop.NOTIFICATION_TITLE
         const val DESKTOP_TEXT = "允许电脑经 adb 连接。关闭会断开连接，并作废已配对的电脑。"
-        const val DESKTOP_OFF = "关闭"
+        const val DESKTOP_OFF = Desktop.NOTIFICATION_ACTION
     }
 }
