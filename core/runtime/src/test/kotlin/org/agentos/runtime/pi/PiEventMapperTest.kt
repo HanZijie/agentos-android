@@ -157,6 +157,18 @@ class PiErrorClassifierTest {
     }
 
     @Test
+    fun revokedKeyIsModelNotConfiguredWithReason() {
+        // F9: clearing the model source mid-turn; the integrator's wording, never auth_failed.
+        for (outcome in listOf(failed(NetErrorKind.KEY_REVOKED), bodyFailed(NetErrorKind.KEY_REVOKED))) {
+            val info = PiErrorClassifier.classify(listOf(responded(200), outcome), "Connection error.")
+            assertEquals(ErrorCode.MODEL_NOT_CONFIGURED, info.code)
+            assertFalse(info.retryable)
+            assertEquals("The model key was removed in AgentOS settings; this turn was stopped.", info.message)
+            assertEquals("key_revoked", info.details!!["reason"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
     fun failuresAfterTheHead() {
         assertEquals(
             ErrorCode.MODEL_STREAM_INTERRUPTED,

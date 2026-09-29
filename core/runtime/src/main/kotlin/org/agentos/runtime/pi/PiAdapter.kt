@@ -157,6 +157,7 @@ class PiAdapter(
             sessions.values.forEach { it.onClosing() }
             runCatching { runtime?.close() }
         }
+        fetch.close() // ends the key-revocation subscription
         sessions.clear()
         stateFlow.value = AgentCoreState.Closed
         scope.cancel()
