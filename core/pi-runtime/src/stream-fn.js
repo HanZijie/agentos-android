@@ -10,6 +10,8 @@ import { streamSimple as anthropicMessagesStream } from "@earendil-works/pi-ai/a
 import { streamSimple as openaiCompletionsStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { hostFetch, PLACEHOLDER_API_KEY } from "./host-bridge.js";
+import { addMissing, extraBody, thinkTagsEnabled, thinkTagsReplay } from "./compat.js";
+import { restoreThinkTags, splitLeadingThinkStream } from "./think-tags.js";
 
 const FAMILIES = {
   "anthropic-messages": anthropicMessagesStream,
@@ -40,10 +42,24 @@ export function hostStreamFn(model, context, options = {}) {
   const impl = FAMILIES[model.api];
   if (!impl) return errorStream(model, `Unsupported model API in this build: ${model.api}`);
   const sid = options.sessionId ?? null;
-  return impl(model, context, {
+  const extra = extraBody(model);
+  const thinkTags = thinkTagsEnabled(model);
+  // Reasoning split out of <think> tags has no signature: pi-ai leaves it out of the next request
+  // ("drop"); "keep" puts it back in the answer text where the model wrote it.
+  const replayed = thinkTags && thinkTagsReplay(model) === "keep" ? restoreThinkTags(context, model) : context;
+  const stream = impl(model, replayed, {
     ...options,
     apiKey: PLACEHOLDER_API_KEY,
     fetch: (input, init) => hostFetch(input, init, { sid }),
     maxRetries: 0,
+    onPayload: async (params, m) => {
+      let next = params;
+      if (options.onPayload) {
+        const replaced = await options.onPayload(params, m);
+        if (replaced !== undefined) next = replaced;
+      }
+      return addMissing(next, extra);
+    },
   });
+  return thinkTags ? splitLeadingThinkStream(stream) : stream;
 }

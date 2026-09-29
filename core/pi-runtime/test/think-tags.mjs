@@ -1,0 +1,231 @@
+// Unit tests for src/think-tags.js and src/compat.js (plain Node, no bundle needed).
+//
+//   node test/think-tags.mjs        (part of npm test)
+import assert from "node:assert/strict";
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+import { convertMessages } from "@earendil-works/pi-ai/api/openai-completions";
+import { restoreLeadingThink, restoreThinkTags, splitLeadingThink, splitLeadingThinkStream } from "../src/think-tags.js";
+import { addMissing, extraBody, thinkTagsEnabled, thinkTagsReplay } from "../src/compat.js";
+
+let passed = 0;
+const tests = [];
+const test = (name, fn) => tests.push([name, fn]);
+
+/**
+ * A pi-ai-like stream: a text block (index 0) fed in `chunks`, optionally preceded by a provider
+ * thinking block and followed by a tool call; `partial` mirrors the growing message like pi-ai.
+ */
+function providerStream(chunks, { toolCall = false, providerThinking = null } = {}) {
+  const s = new AssistantMessageEventStream();
+  const out = { role: "assistant", content: [], stopReason: "stop" };
+  const snap = () => structuredClone(out);
+  queueMicrotask(() => {
+    s.push({ type: "start", partial: snap() });
+    let idx = 0;
+    if (providerThinking !== null) {
+      out.content.push({ type: "thinking", thinking: "" });
+      s.push({ type: "thinking_start", contentIndex: idx, partial: snap() });
+      out.content[idx].thinking = providerThinking;
+      s.push({ type: "thinking_delta", contentIndex: idx, delta: providerThinking, partial: snap() });
+      s.push({ type: "thinking_end", contentIndex: idx, content: providerThinking, partial: snap() });
+      idx++;
+    }
+    if (chunks.length > 0) {
+      out.content.push({ type: "text", text: "" });
+      s.push({ type: "text_start", contentIndex: idx, partial: snap() });
+      for (const c of chunks) {
+        out.content[idx].text += c;
+        s.push({ type: "text_delta", contentIndex: idx, delta: c, partial: snap() });
+      }
+      s.push({ type: "text_end", contentIndex: idx, content: out.content[idx].text, partial: snap() });
+      idx++;
+    }
+    if (toolCall) {
+      const call = { type: "toolCall", id: "t1", name: "add", arguments: { a: 2, b: 3 } };
+      out.content.push({ ...call, arguments: {} });
+      s.push({ type: "toolcall_start", contentIndex: idx, partial: snap() });
+      s.push({ type: "toolcall_delta", contentIndex: idx, delta: "{\"a\":2,\"b\":3}", partial: snap() });
+      out.content[idx] = call;
+      s.push({ type: "toolcall_end", contentIndex: idx, toolCall: call, partial: snap() });
+      out.stopReason = "toolUse";
+    }
+    s.push({ type: "done", reason: out.stopReason, message: snap() });
+    s.end();
+  });
+  return s;
+}
+
+async function run(chunks, opts) {
+  const stream = splitLeadingThinkStream(providerStream(chunks, opts));
+  const events = [];
+  for await (const e of stream) events.push(e);
+  const result = await stream.result();
+  const joined = (type, idx) => events.filter((e) => e.type === type && (idx === undefined || e.contentIndex === idx)).map((e) => e.delta).join("");
+  return { events, result, types: events.map((e) => `${e.type}${e.contentIndex ?? ""}`), thinking: joined("thinking_delta"), text: (idx) => joined("text_delta", idx) };
+}
+
+/** Splits `s` at the given (ascending) cut points. */
+const cut = (s, ...points) => {
+  const at = [0, ...points, s.length];
+  return at.slice(0, -1).map((p, i) => s.slice(p, at[i + 1])).filter((x) => x.length > 0);
+};
+
+test("a leading think segment becomes a thinking block, across chunk boundaries at any point", async () => {
+  const full = "<think>reason about it</think>\n\npong";
+  for (let i = 1; i < full.length; i++) {
+    for (const j of [i + 1, i + 3, i + 8]) {
+      if (j >= full.length) continue;
+      const r = await run(cut(full, i, j));
+      assert.equal(r.thinking, "reason about it", `cuts ${i},${j}`);
+      assert.equal(r.text(1), "pong", `cuts ${i},${j}`);
+      assert.deepEqual(r.result.content, [{ type: "thinking", thinking: "reason about it", agentosThinkTags: true }, { type: "text", text: "pong" }], `cuts ${i},${j}`);
+      assert.ok(!r.events.some((e) => (e.delta ?? "").includes("<") && e.type === "text_delta"), `no tag text at cuts ${i},${j}`);
+    }
+  }
+});
+
+test("event order and indices: thinking at 0, answer at 1", async () => {
+  const r = await run(["<think>", "a", "b</think>", " x", "y"]);
+  assert.deepEqual(r.types, ["start", "thinking_start0", "thinking_delta0", "thinking_delta0", "thinking_end0", "text_start1", "text_delta1", "text_delta1", "text_end1", "done"]);
+  assert.equal(r.events.find((e) => e.type === "thinking_end").content, "ab");
+  assert.equal(r.events.find((e) => e.type === "text_end").content, "xy");
+  // partials already show the split
+  assert.equal(r.events.find((e) => e.type === "text_delta").partial.content[0].type, "thinking");
+});
+
+test("whitespace before <think> and after </think> is dropped; one-character chunks work", async () => {
+  const r = await run([..."\n  <think>plan</think>\n\n  answer"]);
+  assert.equal(r.thinking, "plan");
+  assert.equal(r.text(1), "answer");
+});
+
+test("reasoning then a tool call and no answer text: no empty text block, tool call keeps index 1", async () => {
+  const r = await run(["<think>need the add tool</think>\n\n"], { toolCall: true });
+  assert.deepEqual(r.types, ["start", "thinking_start0", "thinking_delta0", "thinking_end0", "toolcall_start1", "toolcall_delta1", "toolcall_end1", "done"]);
+  assert.deepEqual(r.result.content.map((b) => b.type), ["thinking", "toolCall"]);
+});
+
+test("reasoning, answer text and a tool call: the tool call moves to index 2", async () => {
+  const r = await run(["<think>x</think>Let me add."], { toolCall: true });
+  assert.deepEqual(r.types.slice(-4), ["toolcall_start2", "toolcall_delta2", "toolcall_end2", "done"]);
+  assert.deepEqual(r.result.content.map((b) => b.type), ["thinking", "text", "toolCall"]);
+});
+
+test("unclosed think (max tokens, abort): everything is reasoning, no answer block", async () => {
+  const r = await run(["<think>abc</th"]);
+  assert.equal(r.thinking, "abc</th");
+  assert.deepEqual(r.result.content, [{ type: "thinking", thinking: "abc</th", agentosThinkTags: true }]);
+});
+
+test("untouched: plain text, lookalike prefixes, a think later in the text", async () => {
+  for (const chunks of [["hello ", "world"], ["<th", "e end"], ["<b>bold</b>"], ["answer <think>x</think> more"], ["<", "thinker"], [" "]]) {
+    const r = await run(chunks);
+    const original = chunks.join("");
+    assert.equal(r.text(0), original, JSON.stringify(chunks));
+    assert.equal(r.thinking, "");
+    assert.deepEqual(r.result.content, [{ type: "text", text: original }], JSON.stringify(chunks));
+  }
+});
+
+test("untouched: the provider already streams thinking (reasoning_content)", async () => {
+  const r = await run(["<think>x</think>y"], { providerThinking: "real reasoning" });
+  assert.equal(r.thinking, "real reasoning");
+  assert.equal(r.text(1), "<think>x</think>y");
+  assert.equal(r.result.content[1].text, "<think>x</think>y");
+});
+
+test("splitLeadingThink on messages", () => {
+  const m = (content) => ({ role: "assistant", content });
+  assert.deepEqual(splitLeadingThink(m([{ type: "text", text: "<think>a</think>\nb" }])).content, [{ type: "thinking", thinking: "a", agentosThinkTags: true }, { type: "text", text: "b" }]);
+  assert.deepEqual(splitLeadingThink(m([{ type: "text", text: "<think>a</think>" }, { type: "toolCall", id: "1" }])).content, [{ type: "thinking", thinking: "a", agentosThinkTags: true }, { type: "toolCall", id: "1" }]);
+  const same = m([{ type: "text", text: "no <think>here</think>" }]);
+  assert.equal(splitLeadingThink(same), same);
+  const thinkingFirst = m([{ type: "thinking", thinking: "t" }, { type: "text", text: "<think>x</think>" }]);
+  assert.equal(splitLeadingThink(thinkingFirst), thinkingFirst);
+});
+
+test("compat: extra body comes only from compat.agentosExtraBody (the glue knows no provider)", () => {
+  const oai = (baseUrl, compat) => ({ api: "openai-completions", provider: "custom", baseUrl, compat });
+  for (const u of ["https://api.minimax.cn/v1", "https://api.minimaxi.com/v1", "https://api.minimax.io/v1", "http://127.0.0.1:8080/v1"]) {
+    assert.deepEqual(extraBody(oai(u)), {}, u);
+  }
+  assert.deepEqual(extraBody(oai("https://api.minimax.cn/v1", { agentosExtraBody: { reasoning_split: true } })), { reasoning_split: true });
+  assert.deepEqual(extraBody(oai("http://127.0.0.1/v1", { agentosExtraBody: { foo: 1 } })), { foo: 1 });
+  for (const bad of [null, "x", 1, ["a"]]) assert.deepEqual(extraBody(oai("http://127.0.0.1/v1", { agentosExtraBody: bad })), {}, JSON.stringify(bad));
+  assert.deepEqual(extraBody(undefined), {});
+  assert.deepEqual(addMissing({ model: "m", stream: true }, { model: "x", reasoning_split: true }), { model: "m", stream: true, reasoning_split: true });
+  const p = { a: 1 };
+  assert.equal(addMissing(p, {}), p);
+});
+
+test("compat: think-tag replay is drop unless the model says keep", () => {
+  assert.equal(thinkTagsReplay({ api: "openai-completions", provider: "custom" }), "drop");
+  assert.equal(thinkTagsReplay({ compat: { agentosThinkTagsReplay: "keep" } }), "keep");
+  assert.equal(thinkTagsReplay({ compat: { agentosThinkTagsReplay: "KEEP" } }), "drop");
+  assert.equal(thinkTagsReplay({ compat: { agentosThinkTagsReplay: true } }), "drop");
+  assert.equal(thinkTagsReplay(undefined), "drop");
+});
+
+test("compat: think-tag split defaults on for custom OpenAI endpoints only", () => {
+  assert.equal(thinkTagsEnabled({ api: "openai-completions", provider: "custom" }), true);
+  assert.equal(thinkTagsEnabled({ api: "openai-completions", provider: "deepseek" }), false);
+  assert.equal(thinkTagsEnabled({ api: "openai-completions", provider: "deepseek", compat: { agentosThinkTags: true } }), true);
+  assert.equal(thinkTagsEnabled({ api: "openai-completions", provider: "custom", compat: { agentosThinkTags: false } }), false);
+  assert.equal(thinkTagsEnabled({ api: "anthropic-messages", provider: "custom" }), false);
+});
+
+const MODEL = { api: "openai-completions", provider: "custom", id: "m1", input: ["text"] };
+const said = (content, model = MODEL) => ({ role: "assistant", api: model.api, provider: model.provider, model: model.id, content, stopReason: "stop" });
+
+test("restoreLeadingThink is the inverse of the split for marked blocks only", () => {
+  for (const text of ["<think>a\nb</think>\n\nanswer", "<think>x</think>"]) {
+    const split = splitLeadingThink(said([{ type: "text", text }]));
+    const back = restoreLeadingThink(split).content;
+    assert.equal(back[0].type, "text");
+    assert.ok(back[0].text.startsWith("<think>") && back[0].text.includes("</think>"), back[0].text);
+    assert.deepEqual(splitLeadingThink({ ...split, content: back }).content, split.content, text);
+  }
+  const withTool = splitLeadingThink(said([{ type: "text", text: "<think>t</think>" }, { type: "toolCall", id: "1", name: "add", arguments: {} }]));
+  assert.deepEqual(restoreLeadingThink(withTool).content, [{ type: "text", text: "<think>t</think>" }, { type: "toolCall", id: "1", name: "add", arguments: {} }]);
+  const native = said([{ type: "thinking", thinking: "r", thinkingSignature: "reasoning_content" }, { type: "text", text: "a" }]);
+  assert.equal(restoreLeadingThink(native), native);
+  const user = { role: "user", content: [{ type: "thinking", thinking: "x", agentosThinkTags: true }] };
+  assert.equal(restoreLeadingThink(user), user);
+});
+
+test("restoreThinkTags touches only marked messages of the same model", () => {
+  const mine = splitLeadingThink(said([{ type: "text", text: "<think>mine</think>ok" }]));
+  const other = splitLeadingThink(said([{ type: "text", text: "<think>theirs</think>ok" }], { ...MODEL, id: "m2" }));
+  const ctx = { systemPrompt: "s", messages: [{ role: "user", content: "hi", timestamp: 1 }, mine, other] };
+  const r = restoreThinkTags(ctx, MODEL);
+  assert.notEqual(r, ctx);
+  assert.equal(r.messages[1].content[0].text, "<think>mine</think>\n\nok");
+  assert.equal(r.messages[2], other);
+  assert.equal(r.systemPrompt, "s");
+  const plain = { messages: [{ role: "user", content: "hi" }, said([{ type: "text", text: "ok" }])] };
+  assert.equal(restoreThinkTags(plain, MODEL), plain);
+  assert.equal(restoreThinkTags({}, MODEL).messages, undefined);
+});
+
+test("pi-ai request history: drop leaves the reasoning out, keep sends it back as <think>", () => {
+  const turn = splitLeadingThink(said([{ type: "text", text: "<think>the user wants pong</think>\n\npong" }]));
+  const ctx = { messages: [{ role: "user", content: "ping", timestamp: 1 }, turn, { role: "user", content: "again", timestamp: 2 }] };
+  const assistantOf = (c) => convertMessages(MODEL, c, {}, {}).find((m) => m.role === "assistant");
+  const dropped = assistantOf(ctx);
+  assert.equal(dropped.content, "pong");
+  assert.ok(!JSON.stringify(dropped).includes("the user wants pong"), JSON.stringify(dropped));
+  const kept = assistantOf(restoreThinkTags(ctx, MODEL));
+  assert.equal(kept.content, "<think>the user wants pong</think>\n\npong");
+});
+
+for (const [name, fn] of tests) {
+  try {
+    await fn();
+    passed++;
+    console.log(`PASS ${name}`);
+  } catch (e) {
+    console.log(`FAIL ${name}\n${e.stack}`);
+    process.exitCode = 1;
+  }
+}
+console.log(`\n${passed}/${tests.length} think-tags tests passed`);
