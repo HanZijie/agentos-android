@@ -46,16 +46,16 @@ object StatusText {
 
     /**
      * [supervisorJson] is getSupervisorStatus(); [supervisorMissing] comes from getDiagnostics
-     * (the runtime has run 30 s without a report from this boot).
+     * (the runtime has run 30 s without a report from this boot); [currentBootCount] is
+     * Settings.Global.BOOT_COUNT, used to tell a status stored in an earlier boot from the current one.
      */
-    fun supervisor(supervisorJson: String?, supervisorMissing: Boolean): List<Line> {
+    fun supervisor(supervisorJson: String?, supervisorMissing: Boolean, currentBootCount: Int? = null): List<Line> {
         val o = parse(supervisorJson)
         if (o == null || o.s("state") == null) {
             return listOf(
                 Line(
                     "监督进程",
-                    if (supervisorMissing) "未运行：没有收到本次开机的监督状态。AgentOS 模块可能被禁用或没有安装；运行时照常可用，但被杀后不会自动拉起"
-                    else "还没有收到监督状态",
+                    if (supervisorMissing) MISSING else "还没有收到监督状态",
                     warn = supervisorMissing,
                 ),
             )
@@ -81,12 +81,22 @@ object StatusText {
             }
             else -> state ?: "未知"
         }
-        val warn = state != "ok" || supervisorMissing
-        val lines = mutableListOf(Line("监督进程", text, warn))
+        val lines = mutableListOf<Line>()
+        val bootCount = o.i("boot_count")
+        val stale = supervisorMissing || (currentBootCount != null && bootCount != null && bootCount != currentBootCount)
+        if (stale) {
+            // the stored status is from an earlier boot: do not present it as the current state
+            lines += if (supervisorMissing) Line("监督进程", MISSING, warn = true) else Line("监督进程", "等待本次开机的监督状态")
+            lines += Line("上次收到的状态（不是本次开机的）", text)
+        } else {
+            lines += Line("监督进程", text, warn = state != "ok")
+        }
         o.s("module_version")?.let { v -> lines += Line("模块版本", "$v（${o.i("module_version_code") ?: 0}）") }
-        if (supervisorMissing) lines += Line("注意", "本次开机还没有收到监督状态，监督进程可能没有运行", warn = true)
         return lines
     }
+
+    private const val MISSING =
+        "未运行：没有收到本次开机的监督状态。AgentOS 模块可能被禁用或没有安装；运行时照常可用，但被杀后不会自动拉起"
 
     fun supervisorMissing(diagnosticsJson: String?): Boolean = parse(diagnosticsJson)?.b("supervisorMissing") == true
 
