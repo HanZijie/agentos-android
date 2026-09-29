@@ -36,6 +36,9 @@ object StatusText {
         return o.i("boot_count") == currentBootCount
     }
 
+    /** getRuntimeStatus `foregroundDenied`: the system refused the last foreground start. */
+    fun foregroundDenied(statusJson: String?): Boolean = parse(statusJson)?.b("foregroundDenied") == true
+
     fun runtime(statusJson: String?): List<Line> {
         val o = parse(statusJson) ?: return listOf(Line("运行时", "读不到状态", warn = true))
         val phase = when (o.s("phase")) {
@@ -49,8 +52,12 @@ object StatusText {
             Line("运行时", "$phase（pid ${o.i("pid") ?: "?"}，已运行 ${duration(o.l("uptimeMs") ?: 0)}）"),
             Line("进行中的任务", if (tasks == 0) "无" else "$tasks 个" + if (o.b("foreground") == true) "，前台运行" else ""),
         )
+        if (o.s("foregroundHold") == "desktop_access") {
+            // no task, but kept in the foreground for desktop access (F11 item 4, RuntimeLifecycle rule 6)
+            lines += Line("保持前台", "为电脑端接入保持前台")
+        }
         if (o.b("foregroundDenied") == true) {
-            lines += Line("前台服务", "系统拒绝了前台启动，由监督进程代为拉起；建议在首次引导里允许忽略电池优化", warn = true)
+            lines += Line("前台服务", "系统拒绝了前台启动，由监督进程代为拉起；建议允许 AgentOS 在后台运行（电池优化豁免）", warn = true)
         }
         return lines
     }

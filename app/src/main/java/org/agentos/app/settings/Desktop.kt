@@ -73,6 +73,22 @@ object Desktop {
     const val FOREGROUND_NOTE = "打开期间 AgentOS 会保持在后台运行，并显示常驻通知“$NOTIFICATION_TITLE”。" +
         "用完记得关闭：关掉这个开关，或点通知上的“$NOTIFICATION_ACTION”。"
 
+    /**
+     * F11 item 4 (M1): with desktop access on, the runtime relies on the battery optimisation exemption to
+     * enter the foreground when it is started in the background; without it the system freezes the idle
+     * process and computers stop getting answers. Asked when the switch is turned on, and kept as a
+     * warning on the card while it is on and still missing.
+     */
+    fun needsBatteryExemption(enabled: Boolean, exempt: Boolean): Boolean = enabled && !exempt
+
+    const val BATTERY_LABEL = "后台运行"
+    const val BATTERY_WARNING = "还没有允许：运行时在后台被重新拉起后可能进不了前台、被系统冻结，电脑端会连不上"
+    const val BATTERY_ACTION = "允许在后台运行"
+    const val BATTERY_DIALOG_TITLE = "允许 AgentOS 在后台运行？"
+    const val BATTERY_DIALOG_MESSAGE =
+        "电脑端接入打开期间，AgentOS 的运行时要一直在后台待命。没有电池优化豁免时，运行时被系统重新拉起后可能进不了前台、" +
+            "被系统冻结，电脑端就连不上。\n\n在接下来的系统弹窗里选择“允许”即可，以后可以在系统设置里撤销。"
+
     fun errorText(message: String?): String = when {
         message?.startsWith("agentos.desktop.disabled") == true -> "请先打开电脑端接入"
         else -> "操作失败，请重试"

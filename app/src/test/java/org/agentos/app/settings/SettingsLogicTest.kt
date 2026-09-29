@@ -125,6 +125,18 @@ class SettingsLogicTest {
         assertEquals("关闭", Desktop.summary(Desktop.parseAccess("""{"enabled":false,"listening":false,"pairings":[],"connections":[]}""")))
         assertEquals("482913", Desktop.parseCode("""{"code":"482913","expiresAtMs":5,"ttlMs":300000}""").code)
         assertEquals("请先打开电脑端接入", Desktop.errorText("agentos.desktop.disabled: off"))
+        // F11 item 4 (M1): ask for the battery optimisation exemption only while desktop access is on and it is missing
+        assertTrue(Desktop.needsBatteryExemption(enabled = true, exempt = false))
+        assertFalse(Desktop.needsBatteryExemption(enabled = true, exempt = true))
+        assertFalse(Desktop.needsBatteryExemption(enabled = false, exempt = false))
+        // runtime status: held in the foreground for desktop access; a refused foreground start is flagged
+        val held = StatusText.runtime("""{"pid":7,"phase":"READY","tasks":0,"foreground":true,"foregroundHold":"desktop_access","foregroundDenied":false,"uptimeMs":1000}""")
+        assertTrue(held.any { it.value == "为电脑端接入保持前台" })
+        val plain = StatusText.runtime("""{"pid":7,"phase":"READY","tasks":0,"foreground":false,"foregroundHold":null,"foregroundDenied":true,"uptimeMs":1000}""")
+        assertFalse(plain.any { it.value == "为电脑端接入保持前台" })
+        assertTrue(plain.any { it.label == "前台服务" && it.warn })
+        assertTrue(StatusText.foregroundDenied("""{"foregroundDenied":true}"""))
+        assertFalse(StatusText.foregroundDenied("""{"foregroundDenied":false}"""))
         // F11 item 4: the note next to the switch must use the same words as C's foreground notification
         assertEquals("电脑端接入已开启", Desktop.NOTIFICATION_TITLE)
         assertEquals("关闭", Desktop.NOTIFICATION_ACTION)

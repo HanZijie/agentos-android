@@ -128,12 +128,17 @@ class SettingsActivity : Activity() {
         })
 
         // ---- runtime and supervisor
+        val exempt = Battery.isExempt(this)
         column.addView(Ui.sectionTitle(this, "运行与监督"))
         column.addView(Ui.card(this).apply {
             if (s.runtime != null) StatusText.runtime(s.runtime).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
             StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount)
                 .forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
-            addView(Ui.buttons(context, "刷新" to { scope?.launch { reload() } }))
+            val actions = mutableListOf<Pair<CharSequence, () -> Unit>>("刷新" to { reloadLater() })
+            if (!exempt && StatusText.foregroundDenied(s.runtime)) {
+                actions.add(0, (Desktop.BATTERY_ACTION as CharSequence) to { Battery.request(this@SettingsActivity) })
+            }
+            addView(Ui.buttons(context, *actions.toTypedArray()))
         })
 
         // ---- desktop access (F11, W9)
@@ -152,8 +157,16 @@ class SettingsActivity : Activity() {
                     isChecked = d.enabled
                     contentDescription = "电脑端接入"
                     setOnCheckedChangeListener { sw, on ->
-                        if (on || (d.pairings.isEmpty() && d.connections == 0)) {
-                            desktop { it.setDesktopAccessEnabled(on) }
+                        if (on) {
+                            desktop { it.setDesktopAccessEnabled(true) }
+                            // F11 item 4: without the exemption the runtime may not get back to the foreground
+                            if (!Battery.isExempt(this@SettingsActivity)) {
+                                confirm(Desktop.BATTERY_DIALOG_TITLE, Desktop.BATTERY_DIALOG_MESSAGE, "去允许", cancelLabel = "暂不") {
+                                    Battery.request(this@SettingsActivity)
+                                }
+                            }
+                        } else if (d.pairings.isEmpty() && d.connections == 0) {
+                            desktop { it.setDesktopAccessEnabled(false) }
                         } else {
                             // turning it off disconnects every computer and voids all pairings (IAgentControl v3)
                             confirm(
@@ -167,6 +180,10 @@ class SettingsActivity : Activity() {
                 })
             })
             addView(Ui.paragraph(context, Desktop.FOREGROUND_NOTE))
+            if (Desktop.needsBatteryExemption(d.enabled, exempt)) {
+                addView(Ui.line(context, Desktop.BATTERY_LABEL, Desktop.BATTERY_WARNING, warn = true))
+                addView(Ui.buttons(context, Desktop.BATTERY_ACTION to { Battery.request(this@SettingsActivity) }))
+            }
             if (d.enabled) {
                 addView(Ui.paragraph(context, Desktop.HOW_TO))
                 d.pairings.forEach { p ->
@@ -221,12 +238,19 @@ class SettingsActivity : Activity() {
             .show()
     }
 
-    private fun confirm(title: String, message: String, action: String, onCancel: () -> Unit = {}, onConfirm: () -> Unit) {
+    private fun confirm(
+        title: String,
+        message: String,
+        action: String,
+        cancelLabel: String = "取消",
+        onCancel: () -> Unit = {},
+        onConfirm: () -> Unit,
+    ) {
         AlertDialog.Builder(this)
             .setTitle(title)
             .setMessage(message)
             .setPositiveButton(action) { _, _ -> onConfirm() }
-            .setNegativeButton("取消") { _, _ -> onCancel() }
+            .setNegativeButton(cancelLabel) { _, _ -> onCancel() }
             .setOnCancelListener { onCancel() }
             .show()
     }

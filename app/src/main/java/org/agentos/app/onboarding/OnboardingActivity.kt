@@ -6,9 +6,7 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.os.PowerManager
 import android.provider.Settings
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -18,6 +16,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.agentos.app.R
 import org.agentos.app.settings.AgentControlClient
+import org.agentos.app.settings.Battery
 import org.agentos.app.settings.Byok
 import org.agentos.app.settings.ModelSourceActivity
 import org.agentos.app.settings.StatusText
@@ -74,7 +73,7 @@ class OnboardingActivity : Activity() {
         modelUsable = model?.usable,
         notificationsGranted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
         assistantHeld = getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true,
-        batteryExempt = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName),
+        batteryExempt = Battery.isExempt(this),
         pluginCount = 0, // M3a: Extension Host discovery
         rooted = rooted,
     )
@@ -102,9 +101,7 @@ class OnboardingActivity : Activity() {
             Onboarding.Id.MODEL -> startActivity(Intent(this, ModelSourceActivity::class.java))
             Onboarding.Id.NOTIFICATIONS -> requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
             Onboarding.Id.ASSISTANT -> open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
-            Onboarding.Id.BATTERY -> open(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")),
-            )
+            Onboarding.Id.BATTERY -> Battery.request(this)
             else -> Unit
         }
     }
