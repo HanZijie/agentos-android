@@ -16,7 +16,6 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.events.AgentEvent
 import org.agentos.runtime.events.EventTypes
-import org.agentos.runtime.net.BaseUrlCredentials
 import org.agentos.runtime.pi.BytecodeCache
 import org.agentos.runtime.pi.JsEngine
 import org.agentos.runtime.pi.JsEngineFactory
@@ -24,6 +23,7 @@ import org.agentos.runtime.pi.JsScript
 import org.agentos.runtime.pi.ModelCatalog
 import org.agentos.runtime.pi.PiAdapter
 import org.agentos.runtime.pi.PiBundle
+import org.agentos.runtime.pi.PiErrorClassifier
 import org.agentos.runtime.pi.PiEventMapper
 import org.agentos.runtime.ports.AgentCoreState
 import org.agentos.runtime.ports.AgentCoreUnavailableException
@@ -155,15 +155,15 @@ abstract class PiAdapterContract {
 
     private val engines = Engines()
 
+    // Two key objects with the same secret: one per API family, so revoking one must spare the other.
+    private val anthropicKey by lazy { Credential(fake.key) }
+    private val openaiKey by lazy { Credential(fake.key) }
+    private var secrets: RevocableSecrets? = null
+
     private fun core(): PiAdapter = PiAdapter(
         bundle = { bundle },
         engineFactory = engines,
-        secrets = BaseUrlCredentials(
-            listOf(
-                BaseUrlCredentials.Entry(fake.anthropicBaseUrl, Credential(fake.key)),
-                BaseUrlCredentials.Entry(fake.openaiBaseUrl, Credential(fake.key)),
-            ),
-        ),
+        secrets = RevocableSecrets(listOf(fake.anthropicBaseUrl to anthropicKey, fake.openaiBaseUrl to openaiKey)).also { secrets = it },
         bytecodeCache = bytecodeCache,
     )
 
@@ -548,6 +548,63 @@ abstract class PiAdapterContract {
         }
         assertIs<TurnOutcome.Finished>(next)
         assertEquals(eventsAtCancel, host.events.size, "no callbacks to the cancelled caller's host")
+    }
+
+    /**
+     * Architecture F9 second layer: clearing the model source revokes the key; the streaming turn
+     * that carries it stops at once as model_not_configured (details.reason = key_revoked), with no
+     * further model request. A concurrent turn on another key object (same secret) is unaffected.
+     */
+    @Test
+    fun revokingTheKeyStopsTheStreamingTurnAndSparesOtherKeys() = runBlocking<Unit> {
+        val core = core()
+        val secrets = secrets!!
+        try {
+            withTimeout(scenarioTimeoutMs) {
+                core.start()
+                val (aTag, aModel) = families.first { it.first == "anthropic" }
+                val (bTag, bModel) = families.first { it.first == "openai" }
+                val a = core.openSession("a", config(aModel))
+                val b = core.openSession("b", config(bModel))
+                val hostA = RecordingTurnHost()
+                val hostB = RecordingTurnHost()
+                val n0 = fake.requests.size
+                val turnA = async { a.runTurn(TurnInput(prompt(aTag, FakeTurnScript(FakeStep.Text("x"), FakeStep.AwaitAbort))), hostA) }
+                val turnB = async {
+                    b.runTurn(TurnInput(prompt(bTag, FakeTurnScript(FakeStep.Text("y"), FakeStep.Text("done", chunkChars = 2, intervalMs = 300)))), hostB)
+                }
+                while (hostA.streamedText() != "x" || hostB.streamedText().isEmpty()) delay(5)
+
+                val t0 = System.nanoTime()
+                val revokedAt = System.currentTimeMillis()
+                secrets.revoke(anthropicKey)
+                val outcomeA = turnA.await()
+                val stoppedMs = (System.nanoTime() - t0) / 1e6
+
+                assertIs<TurnOutcome.Failed>(outcomeA)
+                assertEquals(ErrorCode.MODEL_NOT_CONFIGURED, outcomeA.error.code)
+                assertEquals(PiErrorClassifier.KEY_REVOKED_MESSAGE, outcomeA.error.message)
+                assertEquals(PiErrorClassifier.REASON_KEY_REVOKED, outcomeA.error.details!!["reason"]!!.jsonPrimitive.content)
+                assertEquals(false, outcomeA.error.retryable)
+                assertTrue(fake.key !in outcomeA.error.toString(), "no key in the error")
+                assertTrue(stoppedMs < 2_000, "turn stopped ${stoppedMs}ms after the revocation")
+                val requestA = fake.requests.drop(n0).single { it.api == "anthropic" }
+                withTimeout(5_000) { while (!requestA.closedEarly) delay(10) }
+                println("revoke -> Failed(key_revoked) ${"%.0f".format(stoppedMs)} ms; fake endpoint saw the connection close after ${requestA.closedAt - revokedAt} ms")
+
+                assertIs<TurnOutcome.Finished>(turnB.await(), "the other key's turn is unaffected")
+                assertEquals("ydone", hostB.streamedText())
+                assertEquals(1, fake.requests.drop(n0).count { it.api == "anthropic" }, "no model request after the revocation")
+
+                // First layer: the next turn finds no key at all.
+                val next = a.runTurn(TurnInput(prompt(aTag, FakeTurnScript(FakeStep.Text("never")))), RecordingTurnHost())
+                assertIs<TurnOutcome.Failed>(next)
+                assertEquals(ErrorCode.MODEL_NOT_CONFIGURED, next.error.code)
+                assertEquals(1, fake.requests.drop(n0).count { it.api == "anthropic" }, "nothing sent without a key")
+            }
+        } finally {
+            core.close()
+        }
     }
 
     @Test

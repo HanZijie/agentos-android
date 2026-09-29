@@ -64,10 +64,18 @@ object PiEventMapper {
  */
 object PiErrorClassifier {
 
+    /** User-facing message when the key was cleared in settings mid-turn (architecture F9, integrator's wording). */
+    const val KEY_REVOKED_MESSAGE: String = "The model key was removed in AgentOS settings; this turn was stopped."
+
+    /** `details.reason` of a turn stopped because its key was revoked. */
+    const val REASON_KEY_REVOKED: String = "key_revoked"
+
     fun classify(outcomes: List<ModelRequestOutcome>, piErrorMessage: String?): ErrorInfo {
         when (val last = outcomes.lastOrNull()) {
-            is ModelRequestOutcome.Failed -> return forHeadFailure(last)
+            is ModelRequestOutcome.Failed ->
+                return if (last.error.kind == NetErrorKind.KEY_REVOKED) keyRevoked() else forHeadFailure(last)
             is ModelRequestOutcome.BodyFailed -> {
+                if (last.error.kind == NetErrorKind.KEY_REVOKED) return keyRevoked()
                 val code = ModelFailures.forException(last.error, responseStarted = true)
                 return code.info("model response interrupted: ${last.error.kind.name.lowercase()}")
             }
@@ -84,9 +92,13 @@ object PiErrorClassifier {
         return forMessage(piErrorMessage)
     }
 
+    /** Not retryable: the user withdrew the key; the next turn needs a new model source. */
+    private fun keyRevoked(): ErrorInfo =
+        ErrorCode.MODEL_NOT_CONFIGURED.info(KEY_REVOKED_MESSAGE, buildJsonObject { put("reason", REASON_KEY_REVOKED) })
+
     private fun forHeadFailure(f: ModelRequestOutcome.Failed): ErrorInfo {
         val code = when (f.error.kind) {
-            NetErrorKind.NO_CREDENTIAL, NetErrorKind.REJECTED -> ErrorCode.MODEL_NOT_CONFIGURED
+            NetErrorKind.NO_CREDENTIAL, NetErrorKind.REJECTED, NetErrorKind.KEY_REVOKED -> ErrorCode.MODEL_NOT_CONFIGURED
             NetErrorKind.TIMEOUT -> ErrorCode.MODEL_TIMEOUT
             NetErrorKind.TLS -> ErrorCode.MODEL_TLS_FAILED
             NetErrorKind.CONNECT, NetErrorKind.DNS, NetErrorKind.NETWORK -> ErrorCode.MODEL_NETWORK
