@@ -1,7 +1,14 @@
 package org.agentos.runtime.net
 
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.agentos.runtime.ports.Credential
@@ -70,6 +77,11 @@ enum class NetErrorKind(val retryable: Boolean) {
     NO_CREDENTIAL(false),
     /** Refused by policy before sending: invalid URL, cleartext to a non-loopback host, ... */
     REJECTED(false),
+    /**
+     * The key this request carries was revoked while it was in flight (the user cleared the model
+     * source, architecture F9): the call was cut off. Never retried.
+     */
+    KEY_REVOKED(false),
 }
 
 class HostFetchException(
@@ -118,6 +130,8 @@ class FetchResponse internal constructor(
     private val response: Response,
     val attempts: Int,
     private val call: Call,
+    /** The key injected into this request, if any; [HostFetch] cuts the call off when it is revoked. */
+    private val keyUse: HostFetch.KeyUse? = null,
 ) : Closeable {
     val status: Int = response.code
     val statusText: String = response.message
@@ -128,12 +142,18 @@ class FetchResponse internal constructor(
     private val cancelled = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
 
+    /** True once the key this request carries has been revoked; [read] then fails with KEY_REVOKED. */
+    val keyRevoked: Boolean get() = keyUse?.revoked == true
+
     /**
      * The next chunk of the body as soon as any bytes are available (at most [maxBytes]),
-     * or null at the end. Throws [HostFetchException] ([NetErrorKind.CANCELED] after [cancel]).
+     * or null at the end. Throws [HostFetchException]: [NetErrorKind.CANCELED] after [cancel],
+     * [NetErrorKind.KEY_REVOKED] once the request's key has been revoked (no bytes after that).
      */
     suspend fun read(maxBytes: Long = 16 * 1024): ByteArray? {
+        if (keyRevoked) throw revoked().also { close() }
         if (cancelled.get()) throw HostFetchException(NetErrorKind.CANCELED, "Canceled")
+        if (closed.get()) return null // already at the end (or closed by the caller)
         val src = source ?: return null.also { close() }
         return withContext(Dispatchers.IO) {
             val buffer = Buffer()
@@ -141,9 +161,13 @@ class FetchResponse internal constructor(
                 src.read(buffer, maxBytes)
             } catch (e: IOException) {
                 close()
+                if (keyRevoked) throw revoked(e)
                 if (cancelled.get()) throw HostFetchException(NetErrorKind.CANCELED, "Canceled", e)
                 throw HostFetch.classify(e)
             }
+            // A revocation that raced with this read: do not hand out bytes, nor a clean end,
+            // after the key was withdrawn (a close-delimited body would otherwise look complete).
+            if (keyRevoked) throw revoked().also { close() }
             if (n < 0) {
                 close()
                 null
@@ -152,6 +176,8 @@ class FetchResponse internal constructor(
             }
         }
     }
+
+    private fun revoked(cause: Throwable? = null) = HostFetchException(NetErrorKind.KEY_REVOKED, HostFetch.KEY_REVOKED_MESSAGE, cause)
 
     /**
      * Aborts the transfer and closes the socket right away (F6: "宿主层关闭对应的 HTTPS 连接");
@@ -165,7 +191,10 @@ class FetchResponse internal constructor(
     }
 
     override fun close() {
-        if (closed.compareAndSet(false, true)) runCatching { response.close() }
+        if (closed.compareAndSet(false, true)) {
+            runCatching { response.close() }
+            keyUse?.release()
+        }
     }
 }
 
@@ -180,7 +209,13 @@ class FetchResponse internal constructor(
  *   retries at the transport level (`retryOnConnectionFailure(false)`);
  * - allows cleartext http only to loopback hosts ([isLoopback]: local model servers, tests, `adb reverse`);
  * - classifies failures as retryable / non-retryable ([NetErrorKind], [HttpStatusPolicy]) and
- *   retries only per [retry] (default: no retry).
+ *   retries only per [retry] (default: no retry);
+ * - cuts off calls whose key is revoked (architecture F9 "清除 = 立即作废", second layer): it
+ *   subscribes to [SecretPort.revocations] when constructed, before any request, remembers which
+ *   [Credential] object each open call carries, and cancels the matching calls when that object is
+ *   revoked (identity, `===`). Their [open] / [FetchResponse.read] fail with
+ *   [NetErrorKind.KEY_REVOKED], which is never retried. Calls with other keys are not affected.
+ *   [close] ends the subscription.
  *
  * Note: with `retryOnConnectionFailure(false)` OkHttp does not try the host's next IP address
  * within one attempt (for example IPv4 after a dead IPv6 route). The next attempt of [retry]
@@ -194,7 +229,7 @@ class HostFetch(
     private val clock: () -> Long = System::currentTimeMillis,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
     private val random: Random = Random.Default,
-) {
+) : Closeable {
     private val client: OkHttpClient = client.newBuilder()
         .retryOnConnectionFailure(false)
         .followRedirects(false)
@@ -209,6 +244,63 @@ class HostFetch(
 
     /** Retries performed by [retry]. */
     val retried: Int get() = retriedCount.get()
+
+    // ------------------------------------------------------------------ key revocation (F9)
+
+    /** One open call and the key injected into it. Identity-based: never equal to another use. */
+    internal inner class KeyUse(val credential: Credential) {
+        @Volatile var revoked: Boolean = false
+        @Volatile var call: Call? = null
+
+        fun cancelCall() {
+            call?.let { runCatching { it.cancel() } }
+        }
+
+        /** The call is over (response closed, or open failed): stop tracking it. */
+        fun release() {
+            synchronized(keyLock) { inUse.remove(this) }
+        }
+    }
+
+    private val keyLock = Any()
+    private val inUse = HashSet<KeyUse>() // guarded by keyLock
+    // Keys revoked recently, compared by identity: covers a revocation that arrives after
+    // credentialFor returned the key but before the call was registered.
+    private val recentlyRevoked = ArrayDeque<Credential>() // guarded by keyLock
+    private val revocationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("host-fetch-revocations"))
+
+    init {
+        // A hot flow without replay: subscribe now, synchronously, before the first request.
+        revocationScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            secrets.revocations
+                .catch { /* the first layer (credentialFor returns null) still applies */ }
+                .collect { revoke(it) }
+        }
+    }
+
+    private fun revoke(credential: Credential) {
+        val hit = synchronized(keyLock) {
+            recentlyRevoked.addLast(credential)
+            while (recentlyRevoked.size > RECENTLY_REVOKED) recentlyRevoked.removeFirst()
+            inUse.filter { it.credential === credential }.onEach { it.revoked = true }
+        }
+        hit.forEach { it.cancelCall() }
+    }
+
+    private fun track(credential: Credential): KeyUse = synchronized(keyLock) {
+        if (recentlyRevoked.any { it === credential }) throw HostFetchException(NetErrorKind.KEY_REVOKED, KEY_REVOKED_MESSAGE)
+        KeyUse(credential).also { inUse += it }
+    }
+
+    /** Calls currently carrying a key (for tests and diagnostics). */
+    val callsWithKey: Int get() = synchronized(keyLock) { inUse.size }
+
+    /** Ends the revocation subscription. Open calls are not touched. */
+    override fun close() {
+        revocationScope.cancel()
+    }
+
+    // ------------------------------------------------------------------ requests
 
     /**
      * Sends [request] and suspends until the response head arrives. Cancelling the calling
@@ -247,36 +339,54 @@ class HostFetch(
         builder.method(method, body)
         val okRequest = builder.build()
 
-        var attempt = 0
-        while (true) {
-            attempt++
-            startedCount.incrementAndGet()
-            val call = client.newCall(okRequest)
-            val response = try {
-                call.await()
-            } catch (e: IOException) {
-                val error = classify(e)
-                val wait = backoff(attempt)
-                if (error.retryable && canRetry(request, attempt, wait)) {
-                    retriedCount.incrementAndGet()
-                    sleep(wait)
-                    continue
+        val use = key?.let { track(it) }
+        try {
+            var attempt = 0
+            while (true) {
+                attempt++
+                if (use?.revoked == true) throw revokedError()
+                startedCount.incrementAndGet()
+                val call = client.newCall(okRequest)
+                // Publish the call before checking the flag; revoke() sets the flag before reading
+                // the call, so one of the two sides always sees the other.
+                use?.call = call
+                if (use?.revoked == true) throw revokedError()
+                val response = try {
+                    call.await()
+                } catch (e: IOException) {
+                    if (use?.revoked == true) throw revokedError(e)
+                    val error = classify(e)
+                    val wait = backoff(attempt)
+                    if (error.retryable && canRetry(request, attempt, wait)) {
+                        retriedCount.incrementAndGet()
+                        sleep(wait)
+                        continue
+                    }
+                    throw error
                 }
-                throw error
-            }
-            if (HttpStatusPolicy.isRetryable(response.code) && attempt < retry.maxAttempts) {
-                val serverWait = retryAfterMs(response)
-                val wait = serverWait ?: backoff(attempt)
-                if ((serverWait == null || serverWait <= retry.maxRetryAfterMs) && canRetry(request, attempt, wait)) {
+                if (use?.revoked == true) {
                     response.close()
-                    retriedCount.incrementAndGet()
-                    sleep(wait)
-                    continue
+                    throw revokedError()
                 }
+                if (HttpStatusPolicy.isRetryable(response.code) && attempt < retry.maxAttempts) {
+                    val serverWait = retryAfterMs(response)
+                    val wait = serverWait ?: backoff(attempt)
+                    if ((serverWait == null || serverWait <= retry.maxRetryAfterMs) && canRetry(request, attempt, wait)) {
+                        response.close()
+                        retriedCount.incrementAndGet()
+                        sleep(wait)
+                        continue
+                    }
+                }
+                return FetchResponse(response, attempt, call, use)
             }
-            return FetchResponse(response, attempt, call)
+        } catch (e: Throwable) {
+            use?.release()
+            throw e
         }
     }
+
+    private fun revokedError(cause: Throwable? = null) = HostFetchException(NetErrorKind.KEY_REVOKED, KEY_REVOKED_MESSAGE, cause)
 
     private suspend fun lookupKey(url: String): Credential {
         val credential = secrets.credentialFor(url)
@@ -312,6 +422,10 @@ class HostFetch(
             "transfer-encoding", "te", "trailer", "upgrade", "proxy-authorization", "proxy-connection",
         )
         private val BODY_METHODS = setOf("POST", "PUT", "PATCH")
+        private const val RECENTLY_REVOKED = 32
+
+        /** Message of [NetErrorKind.KEY_REVOKED] failures. Never contains the key. */
+        const val KEY_REVOKED_MESSAGE: String = "Model key revoked"
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

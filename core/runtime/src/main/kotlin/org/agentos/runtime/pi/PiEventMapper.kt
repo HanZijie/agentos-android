@@ -86,7 +86,7 @@ object PiErrorClassifier {
 
     private fun forHeadFailure(f: ModelRequestOutcome.Failed): ErrorInfo {
         val code = when (f.error.kind) {
-            NetErrorKind.NO_CREDENTIAL, NetErrorKind.REJECTED -> ErrorCode.MODEL_NOT_CONFIGURED
+            NetErrorKind.NO_CREDENTIAL, NetErrorKind.REJECTED, NetErrorKind.KEY_REVOKED -> ErrorCode.MODEL_NOT_CONFIGURED
             NetErrorKind.TIMEOUT -> ErrorCode.MODEL_TIMEOUT
             NetErrorKind.TLS -> ErrorCode.MODEL_TLS_FAILED
             NetErrorKind.CONNECT, NetErrorKind.DNS, NetErrorKind.NETWORK -> ErrorCode.MODEL_NETWORK
