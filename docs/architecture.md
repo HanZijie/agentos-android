@@ -95,7 +95,11 @@
 
 - **JS 里不做 I/O**。Pi 发出的网络请求一律经宿主层提供的 `fetch`（底层是 OkHttp）；模型 key 由宿主层按目标 endpoint 注入请求头，JS 运行时里看不到 key。工具只有目录里的 MCP 工具和内置的 `read_skill`，执行一律回到 Kotlin 的 Broker。
 - **模型调用走混合方案：协议适配用 `pi-ai`，网络和 key 留在 Kotlin。**
-  - 只打包 `pi-ai` 的 `anthropic-messages` 和 `openai-completions` 两个协议族及其官方 SDK（`@anthropic-ai/sdk`、`openai`）；Google、Bedrock、Azure 等不进包。MiniMax 用 `pi-ai` 自带的 `minimax` / `minimax-cn` 预设（Anthropic 协议，MiniMax 官方推荐的路线）。用户也可以用 OpenAI 兼容路线接 MiniMax（`https://api.minimax.cn/v1`，B7 已实测），但 M2.x 的思考内容会以 `<think>…</think>` 混在正文里：在请求里带 `reasoning_split: true` 才会拆到 `reasoning_content` 字段，由 B8 通过模型的 compat 设置解决，响应侧另加开头 `<think>` 段的兜底解析。DeepSeek、Kimi、Qwen、智谱等国内厂商都落在这两个协议族上。
+  - 只打包 `pi-ai` 的 `anthropic-messages` 和 `openai-completions` 两个协议族及其官方 SDK（`@anthropic-ai/sdk`、`openai`）；Google、Bedrock、Azure 等不进包。MiniMax 用 `pi-ai` 自带的 `minimax` / `minimax-cn` 预设（Anthropic 协议，MiniMax 官方推荐的路线）。用户也可以用 OpenAI 兼容路线接 MiniMax（`https://api.minimax.cn/v1`，B7 已实测），但 M2.x 的思考内容会以 `<think>…</think>` 混在正文里：在请求里带 `reasoning_split: true` 才会拆到 `reasoning_content` 字段，这个问题已由 B8 解决：
+  - `ModelCatalog.customModel` 在 host 是 MiniMax 的 OpenAI 端点时，给模型的 `compat` 写入 `agentosExtraBody: {reasoning_split: true}` 和 `agentosThinkTagsReplay: "keep"`。
+  - 其他自定义端点默认打开响应侧兜底：回答开头的 `<think>…</think>` 转成 thinking，下一轮默认不回传。
+  - `core/pi-runtime` 胶水层只认 `compat` 里带 `agentos` 前缀的键，不认识任何厂商，详见 `core/pi-runtime/README.md`。
+  - 真实 key 下的复跑见实施计划第 3 节 S8 一行。DeepSeek、Kimi、Qwen、智谱等国内厂商都落在这两个协议族上。
   - 调用 `pi-ai` 时一律传入宿主层的 `fetch`、占位 key 和 `maxRetries: 0`：真 key 在请求经过 `fetch` 时由 Kotlin 注入；重试、deadline、取消和“不重放”统一由宿主层负责，不让 SDK 或 `pi-ai` 自己重试。
   - 官方 SDK 和 `pi-ai` 里引用 Node 内置模块（`node:fs`、`node:child_process` 等）的文件，打包时用 esbuild 替换成空实现。
   - 退路：如果 S8 证明官方 SDK 在 QuickJS 里跑不通，就由宿主层实现这两个协议族，经自定义的 `streamFn` 推给 Pi；Agent 循环仍然是 Pi 的，模型目录仍然直接读 `pi-ai` 的数据文件，不自己维护。
@@ -418,8 +422,9 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
      - 通知渠道“电脑端接入”。点通知打开设置页；“关闭”和在设置页关闭效果相同，会断开连接、作废已配对的电脑。
      - 进程启动时按持久化的开关状态进前台，开机拉起、被杀后拉起、bind 冷启动都一样。
      - `getRuntimeStatus` 的 `foregroundHold` 为 `desktop_access`。
+     - 有任务时，通知副标题显示“正在运行任务”。忙闲变化引起的通知更新会合并 500 ms，否则会超出系统对每个 App 的通知限速（约每秒 5 次）（C6.1）。
    - 已知缺口（整合人 2026-09-29 决定）：`:agent` 在后台被拉起时，如果既不是 root 监督进程拉起的，也没有电池优化豁免，系统不允许它进前台（`foregroundDenied`），仍会被冻结。
-     - M1 依赖电池优化豁免：首次引导会请求；在设置页打开电脑端接入时，如果还没有豁免，要提示用户去授予（D）。
+     - M1 依赖电池优化豁免：首次引导会请求；在设置页打开电脑端接入时，如果还没有豁免，要提示用户去授予（D）。没有豁免时，电脑端的一轮只要超过约 10 秒，就会在中途被冻结，客户端会一直等，看不到任何报错（A 在模拟器上复现）。所以这个提示是 M1 必须有的。
      - 监督进程目前只在有任务时拉起，“开关开着、没有任务”时 `:agent` 被杀不会自动回来。W11 在心跳里追加 `hold=desktop`（监督契约 v0.3，见 spikes/S2.md）。
    - 长时间没有电脑端连接时是否自动关闭开关，留到 W11 再定。
 

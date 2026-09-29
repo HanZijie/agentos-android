@@ -36,7 +36,7 @@ import kotlin.test.assertTrue
  * The real MiniMax endpoint (domestic platform) through the production factory in the `:agent`
  * process: a text turn, a tool call and an abort, for the `minimax-cn` preset and, when given,
  * the same model on another Anthropic-compatible base URL and on MiniMax's OpenAI-compatible
- * endpoint (openai-completions, template and [OpenAiCompatibleTargets.MINIMAX_COMPAT]).
+ * endpoint (openai-completions, the variants of [OpenAiCompatibleTargets]).
  *
  * Credentials: the runner writes `MINIMAX_API_KEY=...` (and optionally
  * `MINIMAX_ANTHROPIC_BASE_URL=...`, `MINIMAX_OPENAI_BASE_URL=...`, `MINIMAX_OPENAI_MODEL=...`) into
@@ -86,8 +86,12 @@ class MiniMaxLiveDeviceTest {
 
     private val tools = listOf(ToolDeclaration("add", "Add two integers and return the sum.", addSchema))
 
-    /** A text turn, a tool call and an abort on one target; messages and events go to [seen] for the key check. */
-    private suspend fun runTarget(factory: AgentCoreFactory, name: String, model: ModelSpec, p: Prompts, seen: StringBuilder) {
+    /**
+     * A text turn, a tool call and an abort on one target; messages and events go to [seen] for the
+     * key check. [expectThinking]: the model always reasons, so thinking deltas must arrive; in no
+     * case may <think> tags show up in the answer (B8).
+     */
+    private suspend fun runTarget(factory: AgentCoreFactory, name: String, model: ModelSpec, p: Prompts, seen: StringBuilder, expectThinking: Boolean = false) {
         val core = factory.create() as PiAdapter
         try {
             withTimeout(240_000) {
@@ -105,9 +109,10 @@ class MiniMaxLiveDeviceTest {
                 assertIs<TurnOutcome.Finished>(text, "$name text: $text")
                 assertTrue("pong" in textHost.streamedText().lowercase(), "$name text: ${textHost.streamedText().takeLast(200)}")
                 val firstMs = firstDelta.await()
-                // MiniMax's OpenAI-compatible API puts M2.x thinking inline as <think>...</think>
-                // unless the request sets reasoning_split (pi-ai cannot): report it.
-                val inlineThink = "<think>" in textHost.streamedText()
+                val inlineThink = listOf("<think>", "</think>").any { it in textHost.streamedText() }
+                val thinkingDeltas = textHost.events.count { it is AgentEvent.MessageUpdate && it.update.kind == "thinking_delta" }
+                assertFalse(inlineThink, "$name: <think> tags in the answer: ${textHost.streamedText().takeLast(200)}")
+                if (expectThinking) assertTrue(thinkingDeltas > 0, "$name: no thinking deltas")
 
                 // 2. Tool call
                 val toolHost = RecordingTurnHost(
@@ -117,6 +122,7 @@ class MiniMaxLiveDeviceTest {
                 assertIs<TurnOutcome.Finished>(tool, "$name tool: $tool")
                 assertTrue(toolHost.calls.any { it.startsWith("execute:") }, "$name tool calls: ${toolHost.calls}")
                 assertTrue("5" in toolHost.streamedText(), "$name tool reply: ${toolHost.streamedText().takeLast(200)}")
+                assertFalse("think>" in toolHost.streamedText(), "$name: <think> tags in the tool turn's answer")
 
                 // 3. Abort while streaming
                 val abortHost = RecordingTurnHost()
@@ -129,7 +135,7 @@ class MiniMaxLiveDeviceTest {
                 listOf(textHost, toolHost, abortHost).forEach { h -> synchronized(h.events) { h.events.forEach { seen.append(it.toString()) } } }
                 Log.i(
                     Device.TAG,
-                    "live $name: text ok (first delta ${"%.0f".format(firstMs)} ms, inlineThink=$inlineThink), " +
+                    "live $name: text ok (first delta ${"%.0f".format(firstMs)} ms, thinkingDeltas=$thinkingDeltas, inlineThink=$inlineThink), " +
                         "tool ok (${toolHost.calls.count { it.startsWith("execute:") }} call), abort ok; startup ${core.startup}",
                 )
             }
@@ -148,22 +154,22 @@ class MiniMaxLiveDeviceTest {
         val catalog = PiAgentCores.loadCatalog(Device.context)
         val preset = catalog.model("minimax-cn", "MiniMax-M2.7")!!
         val presetBase = preset.json["baseUrl"]!!.jsonPrimitive.content
-        val targets = buildList {
-            add("minimax-cn" to preset.toModelSpec())
+        val targets = buildList<Triple<String, ModelSpec, Boolean>> {
+            add(Triple("minimax-cn", preset.toModelSpec(), false))
             env["MINIMAX_ANTHROPIC_BASE_URL"]?.takeIf { it.isNotEmpty() && it != presetBase }?.let { base ->
-                add("minimax-cn@custom-base" to ModelSpec(JsonObject(preset.json + ("baseUrl" to JsonPrimitive(base)))))
+                add(Triple("minimax-cn@custom-base", ModelSpec(JsonObject(preset.json + ("baseUrl" to JsonPrimitive(base)))), false))
             }
-            // OpenAI Chat Completions route on MiniMax's OpenAI-compatible endpoint (B7).
+            // OpenAI Chat Completions route on MiniMax's OpenAI-compatible endpoint (B7, B8).
             env["MINIMAX_OPENAI_BASE_URL"]?.takeIf { it.isNotEmpty() }?.let { base ->
                 val modelId = env["MINIMAX_OPENAI_MODEL"]?.takeIf { it.isNotEmpty() } ?: OpenAiCompatibleTargets.DEFAULT_MODEL
-                OpenAiCompatibleTargets.targets(catalog, base, modelId).forEach { (name, m) -> add(name to m.toModelSpec()) }
+                OpenAiCompatibleTargets.targets(catalog, base, modelId).forEach { (name, m) -> add(Triple(name, m.toModelSpec(), true)) }
             }
         }
-        val hostPort = FakeHostPort(credentials = targets.associate { (_, m) -> m.model["baseUrl"]!!.jsonPrimitive.content to key })
+        val hostPort = FakeHostPort(credentials = targets.associate { (_, m, _) -> m.model["baseUrl"]!!.jsonPrimitive.content to key })
         val factory = PiAgentCores.create(Device.context, hostPort)
         val seen = StringBuilder()
 
-        for ((name, model) in targets) runTarget(factory, name, model, live, seen)
+        for ((name, model, thinking) in targets) runTarget(factory, name, model, live, seen, expectThinking = thinking)
 
         synchronized(hostPort.log.lines) { hostPort.log.lines.forEach { seen.append(it) } }
         assertFalse(key in seen.toString(), "the key appears in messages, events or logs")
@@ -171,9 +177,10 @@ class MiniMaxLiveDeviceTest {
     }
 
     /**
-     * The OpenAI Chat Completions route of [realEndpointTextToolAndAbort] (both variants of
+     * The OpenAI Chat Completions route of [realEndpointTextToolAndAbort] (all variants of
      * [OpenAiCompatibleTargets]) through the same code, against the in-process fake endpoint:
-     * no key needed, runs on every device run.
+     * no key needed, runs on every device run. The requests of each variant carry reasoning_split
+     * and the replayed reasoning as the variant says ([OpenAiCompatibleTargets.checkFakeWire]).
      */
     @Test
     fun openAiRouteAgainstFakeEndpoint() = runBlocking<Unit> {
@@ -182,9 +189,15 @@ class MiniMaxLiveDeviceTest {
             val hostPort = FakeHostPort(credentials = mapOf(server.openaiBaseUrl to server.key))
             val factory = PiAgentCores.create(Device.context, hostPort)
             val seen = StringBuilder()
-            for ((name, model) in OpenAiCompatibleTargets.targets(catalog, server.openaiBaseUrl)) {
-                runTarget(factory, "fake $name", model.toModelSpec(), fake, seen)
+            val wireFailures = mutableListOf<String>()
+            for (variant in OpenAiCompatibleTargets.targets(catalog, server.openaiBaseUrl, OpenAiCompatibleTargets.FAKE_THINK_TAGS_MODEL)) {
+                val n0 = server.requests.size
+                runTarget(factory, "fake ${variant.name}", variant.model.toModelSpec(), fake, seen, expectThinking = true)
+                val failed = OpenAiCompatibleTargets.checkFakeWire(variant, server.requests.drop(n0).map { it.body })
+                Log.i(Device.TAG, "fake ${variant.name}: wire ${if (failed.isEmpty()) "ok" else failed.joinToString()}")
+                wireFailures += failed
             }
+            assertEquals(emptyList(), wireFailures)
             assertTrue(server.requests.all { it.api == "openai" && it.presentedKeyKind == "real" }, "OpenAI route, key injected by HostFetch")
             synchronized(hostPort.log.lines) { hostPort.log.lines.forEach { seen.append(it) } }
             assertFalse(server.key in seen.toString(), "the key appears in messages, events or logs")

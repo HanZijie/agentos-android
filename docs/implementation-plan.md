@@ -58,6 +58,7 @@ agentos-android/
 │   │   ├── src/host-bridge.js                       [W3] 调用 Kotlin 宿主层：fetch、工具、Hook 决定、事件
 │   │   ├── src/polyfills.js                         [W3] ← agenriod runtime/build.mjs 里的 polyfill，补上真实定时器和流式 fetch
 │   │   ├── src/node-stubs/                          [W3] 新写：替换官方 SDK 和 pi-ai 中引用 node:fs、node:child_process 等的文件
+│   │   ├── src/compat.js · src/think-tags.js        [W6，B8] 模型 compat 的 AgentOS 扩展键：agentosExtraBody（经 onPayload 补请求体）、agentosThinkTags / agentosThinkTagsReplay（开头 <think> 转 thinking、回放 keep / drop）；胶水层不认识任何厂商，说明见 core/pi-runtime/README.md
 │   │   ├── build.mjs                                [W3] ← agenriod runtime/build.mjs：esbuild 打成单文件，输出到 app/src/main/assets/pi-agent.js；同时从 pi-ai 的模型目录导出 model-catalog.json，供设置页的厂商预设使用
 │   │   └── test/                                    [W3] 用假宿主对打包结果做契约测试，Node 和 QuickJS 各跑一遍
 │   └── extensions/                                  # 扩展的纯逻辑（Kotlin/JVM）
@@ -384,7 +385,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
 - [x] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接（B3；字节码缓存在 `codeCacheDir/pi`，key 为 bundle SHA-256 + quickjs-kt 版本 + ABI + 协议版本，读取时校验；`:agent` 进程里首启中位 72 ms、字节码 12 ms；Pixel_8a 上 `:agent` 进程内经国内 key 的真实端点对话、工具调用、abort 通过）
 - [x] `AndroidStore`（BundledSQLiteDriver，CE 目录 `databases/agentos-runtime.db`）、`KeystoreSecrets`（只实现 `SecretPort`）、`HostPortImpl`（工具、Skill、Hook、确认暂为“未开放”实现）、`IAgentControl` v2（BYOK）
-- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 25 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束，在途响应被中止（details.reason=key_revoked，C5）；C3.1 时 API 35 / 36 / 37 与 Pixel_8a 均 21/21，C4 后的 25 项见本节“Agent 核心换成 Pi”一条；logcat 与私有文件里搜不到 key）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 26 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束，在途响应被中止（details.reason=key_revoked，C5）；C3.1 时 API 35 / 36 / 37 与 Pixel_8a 均 21/21，C4 后的 25 项见本节“Agent 核心换成 Pi”一条；C6.1 后加上 `desktop-access`（电脑端接入打开期间不被冻结，“关闭”会断开已建立的连接），共 26 项；logcat 与私有文件里搜不到 key）
 - [x] 换成真的 `AgentRuntime`（A3 的 `RuntimeEngine`，C3）；空闲后前台服务保留 2 s 宽限期
 - [x] Agent 核心换成 Pi（`PiAgentCores`：PiAdapter + QuickJsEngine，C4；`ScriptedAgentCore` 已删除）。`--suite app` 现为 25 项，新增假模型端点（`fake_model.py`，经 `adb reverse`）上的工具轮次、多轮上下文、`:agent` 被杀后恢复的上下文，以及 MiniMax 国内平台的真实对话 `live-minimax`（key 只从环境变量读、经 stdin 投递，对话后清除）。另有 `releaseTest` 构建：与 release 相同的 R8 规则、不可调试，调试证书签名并带测试执行器，只用于测试。API 35 / 36 / 37 上 debug 与 releaseTest 各 25/25；Pixel_8a 上 releaseTest 25/25，真实对话首字约 2 s，logcat 里搜不到 key。R8 下 quickjs-kt 按名字访问 `kotlin.UByteArray`，`app/proguard-rules.pro` 要 keep 它，否则 `:agent` 收到第一次模型响应时 JNI abort
 
@@ -405,7 +406,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `DesktopGateway`：开发者开关、抽象 socket `agentos-acp`、一次性配对码（A4；`IAgentControl` v3）
 - [x] `tools/acp-bridge/`（A4）
 - [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机。
-  - A4：Pixel_8a 模拟器上 `npm run test:device` 24/24。
+  - A4：Pixel_8a 模拟器上 `npm run test:device` 24/24。现在 38 项：33 通过、5 跳过（A 的 9833c63）。新增的“重试对客户端透明”用例检查三点：端点先后收到 429、429、200，客户端只看到一次 end_turn，中间有 1 s + 2 s 的退避。
   - A6：设备模式跑完整的一致性用例。手机上是真实 Pi，模型端点是电脑上的 `FakeModelServerMain`（经 `adb reverse`）。14 例中 10 例通过、4 例跳过：3 例依赖工具（W14 / W15，其中 1 例还要确认，W16），1 例依赖只有电脑上才有的 `--jev` 开关。
   - 设备前置条件：App 已有“忽略电池优化”豁免（对应首次引导里的这一步；用例用 `dumpsys deviceidle whitelist` 模拟），否则从后台启动前台服务会被拒。
   - 之后：freezer 用例转正（C6 之后，空闲 15 秒后新连接能配对、已建立会话照常应答）；握手超时在设备上实测约 10.0 秒断开，用例只校验上限。

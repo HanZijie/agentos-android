@@ -3,7 +3,8 @@
 //
 // C4 之后 :agent 的 Agent 循环是真实 Pi，模型是电脑上的 FakeModelServer（经 adb reverse 映射到手机的 127.0.0.1:18787），
 // 通用的一致性用例在 conformance.test.mjs 的 device 目标里跑。这里只放手机上才有意义的：连接的身份（adbd、DESKTOP）、
-// 一次性很长的模型输出经网关完整送达、手机发出的每一行的格式与大小。
+// 一次性很长的模型输出经网关完整送达、宿主层的模型重试对客户端透明（电脑上的 AcpStdioAgent 不重试）、
+// 手机发出的每一行的格式与大小。
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { deviceControl, deviceSerial, directive, PROTOCOL_VERSION, startAgent, startDeviceModel, textOf } from "./agent.mjs";
@@ -51,6 +52,24 @@ describe(`AgentOS on the phone over adb forward (${deviceSerial ?? "no device"})
     assert.equal(textOf(agent.updatesFor(sessionId)), "y".repeat(70_000));
     const status = deviceControl(deviceSerial, "status");
     assert.equal(status.connections[0].transport.droppedTooLarge, 0);
+  });
+
+  test("a retryable model failure is retried on the phone and invisible to the client", async () => {
+    // 宿主层的退避重试（B6，errors.md 第 4 节）：模型端点接下来两次回 429（不带 retry-after，走默认退避 1 s、2 s，
+    // 各加至多 25 % 抖动），第三次正常回答。客户端只看到一次成功：end_turn、文字不重复、只有 agent_message_chunk
+    const seen = (await model.control({ op: "requests" })).requests.length;
+    await model.control({ op: "failNext", status: 429, times: 2 });
+    const { sessionId } = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [] });
+    const started = Date.now();
+    const r = await agent.connection.prompt({ sessionId, prompt: directive({ chunks: 3, chunkChars: 5, text: "after" }) });
+    const elapsed = Date.now() - started;
+    assert.equal(r.stopReason, "end_turn");
+    const updates = agent.updatesFor(sessionId);
+    assert.equal(textOf(updates), "after".repeat(3));
+    assert.deepEqual([...new Set(updates.map((u) => u.sessionUpdate))], ["agent_message_chunk"]);
+    const plans = (await model.control({ op: "requests" })).requests.slice(seen).map((q) => `${q.plan}/${q.status}`);
+    assert.deepEqual(plans, ["fail429/429", "fail429/429", "script#0/200"]);
+    assert.ok(elapsed >= 3_000, `waited 1 s + 2 s before retrying, took ${elapsed} ms`);
   });
 
   test("every line from the phone is exactly one JSON-RPC 2.0 message, no extra fields, at most 65,536 characters", () => {

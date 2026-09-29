@@ -499,6 +499,27 @@ class FakeModelServer(
         private val created = System.currentTimeMillis() / 1000
         private var toolIndex = 0
 
+        // Models whose id contains "think-tags" behave like MiniMax M2.x on its OpenAI-compatible
+        // API: every answer starts with reasoning, inline as <think>…</think> in `content`, or in
+        // `reasoning_content` when the request sets reasoning_split: true.
+        private val thinkTags = "think-tags" in model
+        private val reasoningSplit = body["reasoning_split"]?.jsonPrimitive?.booleanOrNull == true
+        private var reasoned = false
+
+        private fun reasoning(text: String, chunkChars: Int, intervalMs: Long) {
+            reasoned = true
+            if (thinkTags && !reasoningSplit) {
+                // Small chunks, so the tags themselves are split across chunks as on the wire.
+                streamChunks(rec, "<think>$text</think>\n\n", minOf(chunkChars, 4), intervalMs) { part -> data(choice(buildJsonObject { put("content", part) }, null)) }
+            } else {
+                streamChunks(rec, text, chunkChars, intervalMs) { part -> data(choice(buildJsonObject { put("reasoning_content", part) }, null)) }
+            }
+        }
+
+        private fun reasonFirst() {
+            if (thinkTags && !reasoned) reasoning("The user asked something; answer briefly.", 4, 0)
+        }
+
         private fun data(choices: JsonArray, extra: Map<String, JsonElement> = emptyMap()) {
             val o = JsonObject(
                 mapOf(
@@ -518,13 +539,15 @@ class FakeModelServer(
 
         override fun start() = data(choice(buildJsonObject { put("role", "assistant"); put("content", "") }, null))
 
-        override fun text(text: String, chunkChars: Int, intervalMs: Long) =
+        override fun text(text: String, chunkChars: Int, intervalMs: Long) {
+            reasonFirst()
             streamChunks(rec, text, chunkChars, intervalMs) { part -> data(choice(buildJsonObject { put("content", part) }, null)) }
+        }
 
-        override fun thinking(text: String, chunkChars: Int, intervalMs: Long) =
-            streamChunks(rec, text, chunkChars, intervalMs) { part -> data(choice(buildJsonObject { put("reasoning_content", part) }, null)) }
+        override fun thinking(text: String, chunkChars: Int, intervalMs: Long) = reasoning(text, chunkChars, intervalMs)
 
         override fun toolUse(id: String, name: String, args: JsonObject) {
+            reasonFirst()
             val i = toolIndex++
             data(choice(buildJsonObject {
                 putJsonArray("tool_calls") {
