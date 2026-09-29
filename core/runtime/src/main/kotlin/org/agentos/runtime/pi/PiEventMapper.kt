@@ -84,6 +84,7 @@ object PiErrorClassifier {
                 val details = buildJsonObject {
                     put("status", last.status)
                     last.retryAfterSeconds?.let { put("retryAfterSeconds", it) }
+                    if (last.attempts > 1) put("attempts", last.attempts)
                 }
                 return ErrorInfo(code, "provider returned ${last.status}", code.retryable, details)
             }
@@ -109,7 +110,8 @@ object PiErrorClassifier {
             NetErrorKind.REJECTED -> "endpoint not allowed: ${f.error.message}"
             else -> "request failed before a response: ${f.error.kind.name.lowercase()}"
         }
-        return code.info(message)
+        // The egress retried before giving up (errors.md section 4): say how often, for diagnostics.
+        return code.info(message, f.error.attempts.takeIf { it > 1 }?.let { n -> buildJsonObject { put("attempts", n) } })
     }
 
     /**
