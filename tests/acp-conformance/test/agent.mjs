@@ -552,9 +552,12 @@ export function prepareDevice(serial) {
   // 豁免是不是测试加的，记在电脑上（按设备）：上次运行加了豁免、没来得及移除就被强行结束时，这次仍然认作测试加的，结束时移除
   const marker = path.join(os.tmpdir(), `agentos-acp-battery-exemption-${serial.replace(/[^\w.-]/g, "_")}`);
   const exempt = adbQuiet(serial, "shell", "cmd", "deviceidle", "whitelist").includes(APP_PACKAGE);
-  const ours = !exempt || existsSync(marker);
+  // AGENTOS_ACP_BATTERY_EXEMPTION=0：不加豁免，模拟用户没有允许“忽略电池优化”（复现 cached-apps freezer 的问题用）
+  const withoutExemption = process.env.AGENTOS_ACP_BATTERY_EXEMPTION === "0";
+  if (withoutExemption && exempt) console.error(`[acp-conformance] AGENTOS_ACP_BATTERY_EXEMPTION=0, but ${serial} already exempts ${APP_PACKAGE}`);
+  const ours = !withoutExemption && (!exempt || existsSync(marker));
   if (ours) writeFileSync(marker, `added by tests/acp-conformance for ${serial}\n`);
-  if (!exempt) execFileSync(adbPath(), ["-s", serial, "shell", "cmd", "deviceidle", "whitelist", `+${APP_PACKAGE}`], { encoding: "utf8" });
+  if (ours && !exempt) execFileSync(adbPath(), ["-s", serial, "shell", "cmd", "deviceidle", "whitelist", `+${APP_PACKAGE}`], { encoding: "utf8" });
   let done = false;
   const restore = () => {
     if (done) return;
@@ -589,7 +592,7 @@ export function prepareDevice(serial) {
 
 /**
  * 设备模式的模型端点：电脑上起 B 的 FakeModelServer（FakeModelServerMain，按 {"fake":…} 指令回应），
- * `adb reverse tcp:18787 tcp:<端口>` 映射到手机，再确保手机上的模型来源指向它。返回 { port, stop() }。
+ * `adb reverse tcp:18787 tcp:<端口>` 映射到手机，再确保手机上的模型来源指向它。返回 { port, control(cmd), stop() }。
  */
 export async function startDeviceModel(serial) {
   const restoreDevice = prepareDevice(serial);
@@ -602,20 +605,41 @@ export async function startDeviceModel(serial) {
   );
   const stderr = [];
   child.stderr.on("data", (d) => stderr.push(d.toString("utf8")));
+  const waiting = [];
   const port = await new Promise((resolve, reject) => {
     let buf = "";
     child.stdout.on("data", (d) => {
       buf += d.toString("utf8");
-      const nl = buf.indexOf("\n");
-      if (nl >= 0) resolve(JSON.parse(buf.slice(0, nl)).port);
+      for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
+        const msg = JSON.parse(buf.slice(0, i));
+        buf = buf.slice(i + 1);
+        if (msg.event === "ready") resolve(msg.port);
+        else waiting.shift()?.(msg);
+      }
     });
     child.once("exit", (code) => reject(new Error(`FakeModelServerMain exited (${code}): ${stderr.join("")}`)));
   });
   execFileSync(adbPath(), ["-s", serial, "reverse", `tcp:${DEVICE_MODEL.port}`, `tcp:${port}`]);
   await ensureDeviceTestModel(serial);
+  let chain = Promise.resolve();
   return {
     port,
     stderr,
+    /** 控制命令（FakeModelServerMain 的 stdin）：{op:"failNext",status,times,retryAfter?}、{op:"requests"}。 */
+    control(cmd) {
+      const p = chain.then(
+        () =>
+          new Promise((resolve) => {
+            waiting.push(resolve);
+            child.stdin.write(JSON.stringify(cmd) + "\n");
+          }),
+      );
+      chain = p.catch(() => {});
+      return p.then((reply) => {
+        if (!reply.ok) throw new Error(`fake model ${cmd.op} failed: ${reply.error}`);
+        return reply;
+      });
+    },
     async stop() {
       restoreDevice();
       child.stdin.end();

@@ -6,7 +6,7 @@
 |---|---|---|---|
 | W4 | 电脑上的运行时（`org.agentos.runtime.testing.AcpStdioAgent`：完整的 `RuntimeEngine` + 真实 SQLite + ACP Agent 端），Agent 循环是 FakeAgentCore | stdio，`LineTransport` | ✅ 14 例（`conformance.test.mjs`，目标 `stdio`） |
 | W9 | 同上，以网关模式运行（与手机上同一份 `DesktopGatewayCore`：开关、配对码、令牌、握手；监听本机 TCP 代替抽象 socket） | `tools/acp-bridge --connect` | ✅ 14 例（目标 `gateway`）+ 配对与安全 9 例（`gateway.test.mjs`） |
-| W9（C4 之后） | 手机上的 `:agent`（debug 包；真实 Pi），模型是电脑上的 FakeModelServer 经 `adb reverse` | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 一致性 14 例中 10 例（4 例依赖工具、确认或 Jev，跳过）+ 设备专属 3 例 + 配对与安全 9 例 + 空闲 15 秒后仍能服务 1 例，模拟器 API 36 |
+| W9（C4 之后） | 手机上的 `:agent`（debug 包；真实 Pi），模型是电脑上的 FakeModelServer 经 `adb reverse` | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 一致性 14 例中 10 例（4 例依赖工具、确认或 Jev，跳过）+ 设备专属 4 例 + 配对与安全 9 例 + 空闲 15 秒后仍能服务 1 例，模拟器 API 36 |
 | W4（B2 之后） | 电脑上的运行时，Agent 循环换成 B lane 的 PiAdapter（真实 Pi，跑在电脑上的 QuickJS 里）+ 假模型端点（FakeModelServer，Anthropic Messages / OpenAI Chat Completions 两个协议族） | stdio 和 gateway | ✅ 同样的 14 例 + 配对安全 9 例（`AGENTOS_ACP_CORE=pi`） |
 
 ## 运行
@@ -57,9 +57,15 @@ AGENTOS_ACP_DEVICE=<serial> npm run test:device
 
 “目录外的工具”一例在手机上照常跑：模型调用的工具从来没有声明过，真实 Pi 自己返回 `Tool <name> not found`。
 
-`test:device` 还跑 `device.test.mjs`（设备专属：连接身份是 adbd 的 uid 2000、70,000 字符的模型输出经网关完整送达、手机发出的每一行格式与大小）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。
+“失败的一轮”一例在手机上用不可重试的 `model_bad_request`（400）检查错误映射，电脑上用可重试的 `model_rate_limited`（429，顺带检查 `retryable: true`）：手机上的宿主层会重试 429（B6，errors.md 第 4 节：`retry-after` 优先，否则 1、2、4…30 s 退避，每个请求最多 2 分钟；假端点回 429 时带 `retry-after: 1`，最多 10 次，约 9 秒），电脑上的 `AcpStdioAgent` 不重试。重试本身由设备专属用例检查（见下）。
+
+`test:device` 还跑 `device.test.mjs`（设备专属：连接身份是 adbd 的 uid 2000、70,000 字符的模型输出经网关完整送达、可重试的模型错误在手机上被重试且对客户端透明（假端点接下来两次回 429，第三次正常：客户端只看到一次 `end_turn` 和不重复的文字，端点收到 429、429、200 三个请求，中间等了 1 s + 2 s）、手机发出的每一行格式与大小）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。
+
+设备模式的假端点（`FakeModelServerMain`）的 stdin 是控制通道，每行一条 JSON，stdout 回一行：`{"op":"failNext","status":429,"times":2,"retryAfter":"1"}`（接下来几个请求不看内容都回这个状态，`retryAfter` 可省略）、`{"op":"requests"}`（到目前为止的请求：序号、剧本、状态码，不含内容和 key）。用例里是 `startDeviceModel()` 返回的 `control(cmd)`。
 
 **cached-apps freezer**：`:agent` 空闲时是 cached 进程，约 10 秒后会被冻结，冻结期间电脑端的连接和请求都得不到服务（A6 发现）。C6 起电脑端接入打开期间 `:agent` 以前台服务运行并显示常驻通知；`gateway.test.mjs` 在手机上空闲 15 秒（期间没有任何广播）后检查新连接能配对、已建立的会话照常应答，握手超时用例的等待期间同样没有任何广播。
+
+没有电池优化豁免时 `:agent` 从后台进不了前台服务，一轮对话只要超过约 10 秒就会在中途被冻结，直到有别的东西（比如一条发给 App 的广播）把它唤醒。`AGENTOS_ACP_BATTERY_EXEMPTION=0 npm run test:device` 不加豁免，模拟用户没有允许，用来复现：模拟器上“失败的一轮”用可重试的 429 时，第 10 次请求刚开始就被冻结（logcat：`freezing <pid> org.agentos.app:agent`），90 秒时 `still running` 的诊断广播把它唤醒（`sync unfroze`）后这一轮才结束；没有任何广播时一直等到整组 300 秒超时，after 钩子关连接，挂着的请求以没有 code 的 `ACP connection closed` 失败（Pixel_8a，main 7028e3d）。
 
 #### 中断与残留状态
 
