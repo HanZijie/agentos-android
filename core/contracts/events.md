@@ -125,7 +125,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 | `task.cancelled` | `{ phase, unknownToolCalls }`：取消时已发出、没拿到结果的工具调用 | — | W2 |
 | `task.failed` | `{ attempt, attemptState }`；`attemptState`：`not_started` / `failed` / `unknown` | 有 | W2 |
 | `task.recovery_required` | `{ attempt, reason, unknownToolCalls: [{ toolCallId, name }] }`；`reason`：`runtime_restarted` / `agent_core_failed` / `cancel_grace_exceeded` | — | W2 recovery |
-| `task.recovery_resolved` | `{ decision, by }`；`decision`：`retry` / `abandon` | — | W10 |
+| `task.recovery_resolved` | `{ decision, by, reason?, rule?, pendingSince? }`；`decision`：`retry` / `abandon`；`by`：用户放弃时是调用方，运行时按 F8 过渡期限放弃时是 `system`，并带 `reason: "recovery_expired"`、`rule`（`age`：需要恢复满 24 小时；`limit`：超过 50 条时最旧的）和 `pendingSince`（最近一次 `task.recovery_required` 的时间）。放弃之后紧接着是终态 `task.failed`（`abandoned` / `recovery_expired`） | — | W2 recovery（过期放弃）、W10（用户决定） |
 | `tool_round_limit` | `{ rounds, limit }`：工具轮次超过上限，本轮随后以 `task.completed { stopReason: "max_turn_requests" }` 结束 | — | W2 |
 
 ### 4.3 工具派发、确认、Hook
@@ -147,7 +147,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 | eventType | payload | error | 产生者 |
 |---|---|---|---|
 | `runtime.started` | `{ version, schemaVersion }` | — | W2 |
-| `runtime.recovered` | `{ requeued, recoveryRequired, interrupted, userStopped, cancelled }`：启动恢复流程（F8）的结果——重新排队的任务数、等恢复决定的任务数、这次启动围栏掉的执行数、上一个进程是否被用户主动停止、因此取消的排队任务数 | — | W2 recovery |
+| `runtime.recovered` | `{ requeued, recoveryRequired, interrupted, userStopped, cancelled, expired }`：启动恢复流程（F8）的结果——重新排队的任务数、等恢复决定的任务数（按过渡期限放弃之后剩下的）、这次启动围栏掉的执行数、上一个进程是否被用户主动停止、因此取消的排队任务数、按过渡期限放弃的任务数 | — | W2 recovery |
 | `agent_core.failed` | `{ runningTasks }`：泵故障（S8），按运行时崩溃处理 | 有 | W2 |
 | `agent_core.restarted` | `{}`：新的 Agent core 实例已启动；各会话在下次用到时按 Store 里的 messages 重建 | — | W2 |
 | `supervisor.status` | `{ state, reason? }`：root 监督进程的状态广播（S2 契约） | — | W7、W11 |

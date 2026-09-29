@@ -363,13 +363,6 @@ internal class Scheduler(
         )
     }
 
-    private fun failTask(tx: StoreTx, task: TaskRecord, error: ErrorInfo, attemptState: String) {
-        tx.tasks.finish(task.id, TaskState.FAILED, tx.now, null, error)
-        tx.events.append(
-            PendingEvent(task.sessionId, task.id, EventTypes.TASK_FAILED, buildJsonObject { put("attempt", task.attempt); put("attemptState", attemptState) }, error),
-        )
-    }
-
     /** 一个任务结束后会话的去向：还有排队的 → queued（排到轮转队尾），否则 created；暂停和终态不动。 */
     private fun afterTask(tx: StoreTx, sessionId: String) {
         val s = tx.sessions.get(sessionId) ?: return
@@ -473,6 +466,14 @@ internal class Scheduler(
                     PendingEvent(sessionId, null, EventTypes.SESSION_STATE_CHANGED, buildJsonObject { put("from", from.wire); put("to", to.wire); reason?.let { put("reason", it) } }),
                 )
             }
+        }
+
+        /** 任务以失败结束：写终态 `task.failed`（带错误）。调度器和启动恢复流程共用。 */
+        fun failTask(tx: StoreTx, task: TaskRecord, error: ErrorInfo, attemptState: String) {
+            tx.tasks.finish(task.id, TaskState.FAILED, tx.now, null, error)
+            tx.events.append(
+                PendingEvent(task.sessionId, task.id, EventTypes.TASK_FAILED, buildJsonObject { put("attempt", task.attempt); put("attemptState", attemptState) }, error),
+            )
         }
 
         /** 标记结果未知并写 task.recovery_required（运行时重启、泵故障、取消宽限期超时共用）。 */
