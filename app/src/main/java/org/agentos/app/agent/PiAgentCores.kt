@@ -30,16 +30,17 @@ import java.io.File
  *   starts load the bytecode.
  * - Threads: each core owns one `pi-js-N` thread (see [QuickJsEngine]); `start()` does not block
  *   its caller, so it may run on any dispatcher.
- * - Retries: [RetryPolicy.NONE] by default (M1): a failed model call ends the turn with a
- *   classified error (errors.md) and the host decides. A production policy should allow at
- *   least 2 attempts before any byte reaches JS, see the W3 report.
+ * - Retries: [RetryPolicy.DEFAULT] (errors.md section 4): before the response head reaches JS,
+ *   network failures, connect timeouts, 408 / 425 / 429 / 5xx are retried with backoff from 1 s to
+ *   30 s, retry-after first, at most 2 minutes per request; each retry is logged through
+ *   `hostPort.log`. After the head, nothing is retried.
  */
 object PiAgentCores {
 
     const val BUNDLE_ASSET: String = "pi-agent.js"
     const val CATALOG_ASSET: String = "model-catalog.json"
 
-    fun create(context: Context, hostPort: HostPort, retry: RetryPolicy = RetryPolicy.NONE): AgentCoreFactory {
+    fun create(context: Context, hostPort: HostPort, retry: RetryPolicy = RetryPolicy.DEFAULT): AgentCoreFactory {
         val app = context.applicationContext
         return PiAdapter.factory(
             bundle = { loadBundle(app) },

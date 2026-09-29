@@ -157,6 +157,33 @@ class AcpAgentSideTest {
         assertEquals(StopReason.END_TURN, pair.prompt(session, "still fine").response().stopReason)
     }
 
+    /**
+     * B5（F9 第二层）：用户在设置里清除 key 时，在途的这一轮在宿主层以 Failed(model_not_configured, retryable=false,
+     * details.reason=key_revoked) 结束。ACP 的 -32051 错误要把 details 原样带给客户端（errors.md model_not_configured）。
+     */
+    @Test
+    fun `a revoked key ends the turn with model_not_configured and details reason key_revoked in the error data`() = test { pair ->
+        pair.initialize()
+        val session = pair.newSession()
+        val message = "The model key was removed in AgentOS settings; this turn was stopped."
+        val prompt = directive(
+            "chunks" to 1, "text" to "partial",
+            "fail" to "model_not_configured", "failMessage" to message,
+            "failDetails" to buildJsonObject { put("reason", "key_revoked") },
+        )
+        val e = assertFailsWith<JsonRpcException> { pair.prompt(session, prompt) }
+        assertEquals(RpcCodes.TASK_FAILED, e.code)
+        // Agent 发出的原始错误（不经 SDK 的 Client 转换）
+        val raw = pair.lastError()
+        assertEquals(RpcCodes.TASK_FAILED, raw["code"]!!.jsonPrimitive.content.toInt())
+        assertEquals("model_not_configured: $message", raw["message"]!!.jsonPrimitive.content)
+        val data = raw["data"]!!.jsonObject
+        assertEquals("model_not_configured", data["agentosCode"]!!.jsonPrimitive.content)
+        assertEquals("false", data["retryable"]!!.jsonPrimitive.content)
+        assertEquals("key_revoked", data["details"]!!.jsonObject["reason"]!!.jsonPrimitive.content)
+        assertTrue(data["taskId"]!!.jsonPrimitive.content.startsWith("tsk_"))
+    }
+
     @Test
     fun `unsupported inputs are rejected explicitly`() = test { pair ->
         pair.initialize()
