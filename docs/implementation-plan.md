@@ -72,18 +72,18 @@ agentos-android/
 │   ├── src/main/aidl/org/agentos/internal/          [W6] IAgentControl；[W14] IExtensionHost、IExtensionCallback（都不导出）
 │   ├── src/main/assets/pi-agent.js                  [W3] 由 core/pi-runtime/build.mjs 生成，不手改，不进仓库；同目录的 model-catalog.json 同样是生成物
 │   ├── src/androidTest/                         [W6] 设备测试，跑在 :agent 进程（QuickJsEngine、PiAdapter 契约、冷启动、可选的真实端点）
-│   ├── src/debug/                               [W6] 只在 debug 包生效��测试入口、网络配置
+│   ├── src/debug/                               [W9] 只进 debug 包：DesktopGatewayDebugReceiver（电脑端接入的测试入口，要求 DUMP）。回环明文放行在 main（B4）；设备用例的测试入口由 BuildConfig.TEST_HOOKS 控制（debug、releaseTest 打开）
 │   ├── src/main/assets/agent-plugin/                [W17] AgentOS 自带插件（标准 Agent Plugin：plugin.json、skills/）
 │   └── src/main/java/org/agentos/app/
 │       ├── agent/                                   # 运行时进程 :agent
 │       │   ├── AgentService.kt                      [W6] 有任务时前台服务（specialUse）；写心跳文件
 │       │   ├── AgentProcess.kt · RuntimeLifecycle.kt · Heartbeat.kt   [W6] :agent 进程入口；前台 / 空闲判断（纯 Kotlin，恢复期间不判空闲）；心跳（DE 存储，监督契约 b）
-│       │   ├── PlaceholderAgentRuntime.kt           [W6] 临时：A3 的 AgentRuntime 实现进 main 后删除
 │       │   ├── AcpService.kt                        [W6] 导出的 IAcpService：每条通道绑定调用方 UID，交给 SDK 的 Agent 端；M1 只接受本 App；[W25] 放开第三方
 │       │   ├── AndroidStore.kt                      [W6] SQLite 实现
 │       │   ├── QuickJsEngine.kt                     [W6，B lane] ← agenriod PiRuntime.kt、NativeAgentBridge.kt 的 QuickJS 接线：JsEngine 的 Android 实现，加载 pi-agent.js
 │       │   ├── PiAgentCores.kt                      [W6，B lane] :agent 的 AgentCoreFactory：PiAdapter.factory + QuickJsEngine + hostPort.secrets
 │       │   ├── KeystoreSecrets.kt                   [W6] BYOK，Keystore 加密
+│       │   ├── ModelSources.kt                      [W6] 模型来源（厂商预设 / 自定义兼容端点）的校验、保存（files/byok/model-source.json）与热加载；清除 = key 立即作废
 │       │   ├── HostPortImpl.kt                      [W6]；[W16] 工具与确认；[W20] Skill；[W22] Hook
 │       │   ├── AgentControl.kt                      [W6] IAgentControl 的实现
 │       │   ├── ConsentCoordinator.kt                [W16] 前台时弹确认界面，后台时发通知；60 秒无响应视为拒绝
@@ -161,7 +161,7 @@ agentos-android/
 ├── tests/
 │   ├── acp-conformance/                             [W4] 官方 TypeScript 客户端经 stdio 测电脑上的运行时；[W9] 经 adb forward 测真机
 │   └── device/                                      [W6] 起：adb 驱动的真机测试，ACP 通道、MCP Binder、Runner、监督的用例分开；也可以在 root 过的模拟器上跑
-│       └── acp-channel/{common,agent,client,inapp}/ · run.py   [W5] SDK 回归（--suite sdk）；[W6] :agent 用例（--suite app，inapp 执行器以 debugImplementation 注入 app，release 包里没有）
+│       └── acp-channel/{common,agent,client,inapp}/ · run.py   [W5] SDK 回归（--suite sdk）；[W6] :agent 用例（--suite app，inapp 执行器以 debugImplementation / releaseTestImplementation 注入 debug 和 releaseTest 包，release 包里没有；测试 key 只经 stdin 投递（`adb shell content write` 到 inapp 的 KeyDropProvider），不进 adb 命令行（API 37 的 adbd 会把命令行写进 logcat））
 ├── docs/
 │   ├── architecture.md · extensions.md · implementation-plan.md · assets/
 │   ├── spikes/                                      # 验证项的结论：S1、S2、S3、S8（真机部分待测）
