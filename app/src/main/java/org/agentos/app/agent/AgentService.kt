@@ -58,7 +58,11 @@ class AgentService : Service() {
     }
 
     private fun goForeground(): Boolean = try {
-        startForeground(NOTIFICATION_ID, buildNotification(runtime.desktop.isEnabled()), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        startForeground(
+            NOTIFICATION_ID,
+            buildNotification(runtime.desktop.isEnabled(), runtime.runtime.runState.value.busy),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+        )
         true
     } catch (e: Exception) {
         Log.w(TAG, "startForeground failed: ${e.javaClass.simpleName}")
@@ -66,16 +70,20 @@ class AgentService : Service() {
     }
 
     /**
-     * 电脑端接入的开关变了：换通知。关掉且没有任务时服务马上要停（宽限期后），不再换成“正在运行任务”。
+     * 电脑端接入的开关或忙闲变了：换通知。关掉且没有任务时服务马上要停（宽限期后），不再换成“正在运行任务”。
      * 可以在任何线程调用。
      */
     internal fun refreshNotification(desktopOn: Boolean, tasks: Int) {
         if (!desktopOn && tasks == 0) return
-        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(desktopOn)) }
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(desktopOn, tasks > 0)) }
             .onFailure { Log.w(TAG, "notification update failed: ${it.javaClass.simpleName}") }
     }
 
-    private fun buildNotification(desktopOn: Boolean): Notification {
+    /**
+     * 只有任务：“AgentOS 正在运行任务”。电脑端接入打开时标题始终是“电脑端接入已开启”（用户一眼看得出它开着），
+     * 同时有任务时副标题加“正在运行任务”（两种前台理由并存）。
+     */
+    private fun buildNotification(desktopOn: Boolean, busy: Boolean): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (!desktopOn) {
             ensureChannel(nm, CHANNEL, "Agent 运行时")
@@ -96,6 +104,7 @@ class AgentService : Service() {
         return Notification.Builder(this, CHANNEL_DESKTOP)
             .setContentTitle(DESKTOP_TITLE)
             .setContentText(DESKTOP_TEXT)
+            .setSubText(if (busy) DESKTOP_BUSY else null)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
             .setShowWhen(false)
@@ -142,5 +151,6 @@ class AgentService : Service() {
         const val DESKTOP_TITLE = Desktop.NOTIFICATION_TITLE
         const val DESKTOP_TEXT = "允许电脑经 adb 连接。关闭会断开连接，并作废已配对的电脑。"
         const val DESKTOP_OFF = Desktop.NOTIFICATION_ACTION
+        const val DESKTOP_BUSY = "正在运行任务"
     }
 }

@@ -103,6 +103,8 @@ def app_cases():
         ("pi-tool-round", a, "pi-tool-round", {}, 120, "check"),
         ("pi-context", a, "pi-context", {}, 120, "check"),
         ("recovery-context", a, "recovery-context", {}, 180, "check"),
+        # C6：电脑端接入打开期间 :agent 留在前台、不被 cached-apps freezer 冻结（desktop_idle.py；releaseTest 不走 acp-bridge）
+        ("desktop-access", a, "desktop", {"idle": 60}, 900, "desktop"),
         ("live-minimax", a, "live-minimax", {"keyFile": "test/live_key"}, 240, "live"),
     ]
 
@@ -372,6 +374,10 @@ def main():
                 r = run_client_kill(adb, name, activity, args, timeout)
             elif kind == "userstop":
                 r = run_user_stop(adb, name, activity, timeout)
+            elif kind == "desktop":
+                import desktop_idle  # noqa: PLC0415（它也 import 本模块）
+                idle = int(os.environ.get("AGENTOS_DESKTOP_IDLE", args.get("idle", 60)))
+                r = desktop_idle.run_desktop(adb, idle, with_bridge=(a.app_build == "debug"), log=lambda m: print(m, flush=True))
             else:
                 r = run_one(adb, name, activity, scenario, args, timeout)
         except Exception as e:  # noqa: BLE001

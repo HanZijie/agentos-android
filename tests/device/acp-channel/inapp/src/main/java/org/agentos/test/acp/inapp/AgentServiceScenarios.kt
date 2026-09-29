@@ -112,6 +112,7 @@ class AgentServiceScenarios(
         "server-stats-clean" -> serverStatsClean()
         "desktop-access" -> desktopAccess(args)
         "desktop-restart" -> desktopRestart(args)
+        "desktop-status" -> desktopStatus()
         else -> null
     }
 
@@ -149,6 +150,17 @@ class AgentServiceScenarios(
             .put("checks", checks).put("settleMs", settleMs).put("runtime", rt)
             .put("access", JSONObject().put("enabled", access.optBoolean("enabled")).put("listening", access.optBoolean("listening"))
                 .put("pairings", access.optJSONArray("pairings")?.length() ?: 0))
+    }
+
+    /** 只读：电脑端接入的开关、监听、配对台数和运行时状态（不改任何东西；不含配对码和令牌）。 */
+    private suspend fun desktopStatus(): JSONObject {
+        val a = control.use { it.desktopAccess() }
+        val rt = control.use { it.runtimeStatus() }
+        return JSONObject().put("ok", true)
+            .put("summary", "enabled=${a.optBoolean("enabled")} listening=${a.optBoolean("listening")} " +
+                "pairings=${a.optJSONArray("pairings")?.length() ?: 0} fg=${rt.optBoolean("foreground")} hold=${rt.opt("foregroundHold")}")
+            .put("enabled", a.optBoolean("enabled")).put("listening", a.optBoolean("listening"))
+            .put("pairings", a.optJSONArray("pairings")?.length() ?: 0).put("runtime", rt)
     }
 
     /**

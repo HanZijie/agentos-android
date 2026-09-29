@@ -245,6 +245,8 @@ class AgentProcess private constructor(val app: Context) {
             // 进行中的任务都结束了：设置里换下来的旧 key 不再需要（KeystoreSecrets.activate）
             secrets.retire()
         }
+        // 电脑端接入打开时，通知的副标题跟着忙闲变（“正在运行任务”）
+        if (desktop.isEnabled()) service?.refreshNotification(true, if (busy) 1 else 0)
     }
 
     private fun installCrashHandler() {

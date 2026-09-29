@@ -14,9 +14,13 @@ A6 查明：`:agent` 空闲（没有任务、没有被 Binder 绑定）时是 ca
  5. 连接不断、再空闲 IDLE 秒，同一会话再来一轮；再测一次取消。
  6. 开关开着时杀掉 :agent，分别按“监督进程开机拉起”（SUPERVISOR_START）和“bind 冷启动”拉起：恢复后留在前台、重新监听，
     空闲 20 秒不被冻结；用保存的令牌重新连上。
- 7. 点通知上的“关闭”（uiautomator）：开关关闭、宽限期后退出前台、通知消失；反向对照：随后进程确实会被冻结。
+ 7. 带着一条已建立的电脑端连接点通知上的“关闭”（uiautomator）：开关关闭、连接被断开（acp-bridge 以“被手机关闭”退出）、
+    宽限期后退出前台、通知消失；反向对照：随后进程确实会被冻结。
+有任务时通知的副标题是“正在运行任务”（第 5 步的长回复期间检查），任务结束后去掉。
 
-结果写 results/raw/desktop-<serial>-api<N>-debug[-label]-<时间>.json。全部通过时退出码 0。
+run.py --suite app 的 desktop-access 用例调用 [run_desktop]：debug 包跑全程；releaseTest 包没有 debug 入口、拿不到配对码，
+跳过经 acp-bridge 的部分（第 4、5 步和重连），其余照跑（R8 下的前台、通知、“关闭”按钮）。单独运行时结果写
+results/raw/desktop-<serial>-api<N>-debug[-label]-<时间>.json，全部通过时退出码 0。
 """
 import argparse
 import json
@@ -39,6 +43,8 @@ TEST_MODEL_KEY = "agtest-fake-model-key"
 TITLE = "电脑端接入已开启"
 TEXT = "允许电脑经 adb 连接。关闭会断开连接，并作废已配对的电脑。"
 OFF = "关闭"
+BUSY = "正在运行任务"
+BRIDGE_CLOSED_BY_PHONE = 6  # tools/acp-bridge 的退出码
 
 
 # ---------------------------------------------------------------------- 旁观（只经 system_server，不碰 App 进程）
@@ -77,10 +83,12 @@ def agent_notification(adb):
     r = recs[0][:6000]
     title = re.search(r"android\.title=String \((.*?)\)\n", r)
     text = re.search(r"android\.text=String \((.*?)\)\n", r)
+    sub = re.search(r"android\.subText=String \((.*?)\)\n", r)
     actions = re.findall(r'\[\d+\] "([^"]*)" -> PendingIntent', r)
     ch = re.search(r"Notification\(channel=(\S+)", r)
     return {"present": True, "count": len(recs), "channel": ch.group(1) if ch else None,
-            "title": title.group(1) if title else None, "text": text.group(1) if text else None, "actions": actions}
+            "title": title.group(1) if title else None, "text": text.group(1) if text else None,
+            "subText": sub.group(1) if sub else None, "actions": actions}
 
 
 def sample(adb, t0, phase):
@@ -196,7 +204,7 @@ def chunk_text(notes):
     return "".join(out)
 
 
-def prompt(bridge, sid, script, timeout=30, cancel_after_first_chunk=False):
+def prompt(bridge, sid, script, timeout=30, cancel_after_first_chunk=False, at_first_chunk=None):
     state = {"cancelled": False, "firstChunkMs": None}
     t = time.time()
 
@@ -204,6 +212,8 @@ def prompt(bridge, sid, script, timeout=30, cancel_after_first_chunk=False):
         u = (m.get("params") or {}).get("update") or {}
         if u.get("sessionUpdate") == "agent_message_chunk" and state["firstChunkMs"] is None:
             state["firstChunkMs"] = round((time.time() - t) * 1000)
+            if at_first_chunk:
+                at_first_chunk()
             if cancel_after_first_chunk and not state["cancelled"]:
                 state["cancelled"] = True
                 bridge.send({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}})
@@ -257,6 +267,169 @@ def tap_off_in_shade(adb):
 
 # ---------------------------------------------------------------------- 主流程
 
+def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
+    """前提：debug 或 releaseTest 包已装好，fake_model 已经 adb reverse 到手机（认测试 key）。返回一个用例结果。"""
+    adb.sh(f"pm grant {R.APP_PKG} android.permission.POST_NOTIFICATIONS", check=False)
+    adb.sh(f"cmd deviceidle whitelist -{R.APP_PKG}", check=False)
+    adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
+    adb.sh("wm dismiss-keyguard", check=False)
+    t0 = time.time()
+    checks, info, samples = {}, {}, []
+    state_dir = tempfile.TemporaryDirectory(prefix="c6-bridge-")
+    state = os.path.join(state_dir.name, "acp-bridge.json")
+    bridge = None
+
+    def step(name, ok, detail=None):
+        checks[name] = bool(ok)
+        if detail is not None:
+            info[name] = detail
+        log(f"  {'ok ' if ok else 'FAIL'} {name}" + (f"  {json.dumps(detail, ensure_ascii=False)[:300]}" if detail is not None else ""))
+
+    def home():
+        adb.sh("input keyevent KEYCODE_HOME", check=False)
+
+    try:
+        r = R.run_one(adb, "c6-model", R.INAPP_ACTIVITY, "handshake", {}, 60)
+        step("testModelReady", r and r.get("ok"), r and r.get("summary"))
+        R.run_one(adb, "c6-off0", R.INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
+        r = R.run_one(adb, "c6-on", R.INAPP_ACTIVITY, "desktop-access", {"on": True}, 60)
+        step("enabledFromUi", r and r.get("ok"), r and r.get("summary"))
+        home()
+        code = None
+        if with_bridge:
+            code = debug_op(adb, "pair").get("code")
+            step("pairingCode", bool(code))
+        n = agent_notification(adb)
+        s = agent_service(adb)
+        step("notificationShown", n.get("present") and n.get("title") == TITLE and n.get("text") == TEXT and OFF in n.get("actions", [])
+             and n.get("channel") == "desktop_access" and not n.get("subText") and s["foreground"] and s["channel"] == "desktop_access",
+             {k: n.get(k) for k in ("title", "subText", "channel", "actions")})
+
+        log(f"idle {idle_sec}s (no connection)…")
+        samples += idle(adb, idle_sec, t0, "idle-before-connect")
+
+        if with_bridge:
+            bridge = Bridge(adb, state, code=code)
+            init = bridge.request("initialize", {"protocolVersion": 1, "clientCapabilities": {}}, 30)
+            init_ok = (init.get("msg") or {}).get("result", {}).get("protocolVersion") == 1
+            step("handshakeAfterIdle", init_ok, {"msFromBridgeStart": round((time.time() - bridge.t0) * 1000), "initMs": init["ms"],
+                                                 "timeout": init.get("timeout", False), "stderr": bridge.stderr[-2:]})
+            sid = None
+            if init_ok:
+                new = bridge.request("session/new", {"cwd": "/", "mcpServers": []}, 30)
+                sid = ((new.get("msg") or {}).get("result") or {}).get("sessionId")
+            step("sessionNew", bool(sid))
+            if sid:
+                p1 = prompt(bridge, sid, {"chunks": 5, "intervalMs": 20, "n": "c6-first"})
+                step("promptAfterIdle", p1["stopReason"] == "end_turn" and p1["chars"] > 0, p1)
+
+                log(f"idle {idle_sec}s (connection open)…")
+                samples += idle(adb, idle_sec, t0, "idle-connected")
+                p2 = prompt(bridge, sid, {"chunks": 5, "intervalMs": 20, "n": "c6-second"})
+                step("promptOnEstablishedSessionAfterIdle", p2["stopReason"] == "end_turn" and p2["chars"] > 0, p2)
+
+                # 长回复进行中：两种前台理由并存，通知副标题是“正在运行任务”；取消后去掉
+                busy_note = {}
+
+                def at_first_chunk():
+                    time.sleep(0.5)
+                    busy_note.update(agent_notification(adb))
+
+                p3 = prompt(bridge, sid, {"chunks": 400, "intervalMs": 20, "n": "c6-cancel"},
+                            cancel_after_first_chunk=True, at_first_chunk=at_first_chunk)
+                step("cancel", p3["stopReason"] == "cancelled" and p3["cancelSent"] and p3["ms"] < 5_000, p3)
+                after = {}
+                for _ in range(10):
+                    after = agent_notification(adb)
+                    if not after.get("subText"):
+                        break
+                    time.sleep(0.5)
+                step("busyShownWithDesktopOn", busy_note.get("title") == TITLE and busy_note.get("subText") == BUSY
+                     and after.get("title") == TITLE and not after.get("subText"),
+                     {"whileBusy": busy_note.get("subText"), "afterwards": after.get("subText")})
+            rc = bridge.close()
+            step("bridgeClosedCleanly", rc == 0, {"exit": rc})
+            bridge = None
+
+        # 开关开着时 :agent 被杀、再被拉起（监督进程开机拉起 / bind 冷启动）
+        for path in ("boot", "bind"):
+            r = R.run_one(adb, f"c6-restart-{path}", R.INAPP_ACTIVITY, "desktop-restart", {"path": path}, 90)
+            step(f"restart-{path}", r and r.get("ok"), r and r.get("summary"))
+            home()
+            samples += idle(adb, 20, t0, f"idle-after-restart-{path}")
+
+        if with_bridge:
+            # 重启后用保存的令牌重新连上（不再需要配对码），这条连接留着，下面由“关闭”断开
+            bridge = Bridge(adb, state)
+            init = bridge.request("initialize", {"protocolVersion": 1, "clientCapabilities": {}}, 30)
+            new = bridge.request("session/new", {"cwd": "/", "mcpServers": []}, 30)
+            step("reconnectWithTokenAfterRestart", (init.get("msg") or {}).get("result", {}).get("protocolVersion") == 1
+                 and ((new.get("msg") or {}).get("result") or {}).get("sessionId"),
+                 {"initMs": init["ms"], "stderr": bridge.stderr[-2:]})
+
+        step("neverFrozenWhileOn", samples and all(x.get("alive") and x.get("isFrozen") is False for x in samples),
+             {"samples": len(samples), "frozen": sum(1 for x in samples if x.get("isFrozen"))})
+        step("foregroundServiceWhileOn", samples and all(x.get("fgService") and (x.get("procState") or 99) <= 4 for x in samples),
+             {"procStates": sorted({x.get("procState") for x in samples}), "oomAdj": sorted({x.get("oomAdj") for x in samples})})
+
+        # 通知上的“关闭”
+        tapped = tap_off_in_shade(adb)
+        t_off = time.time()
+        if bridge:
+            try:
+                rc = bridge.p.wait(10)
+            except subprocess.TimeoutExpired:
+                rc = None
+            step("offClosesEstablishedConnection", rc == BRIDGE_CLOSED_BY_PHONE,
+                 {"exit": rc, "sec": round(time.time() - t_off, 1), "stderr": bridge.stderr[-1:]})
+            bridge = None
+        left = None
+        while time.time() - t_off < 10:
+            s = agent_service(adb)
+            n = agent_notification(adb)
+            if not s["foreground"] and not n.get("present"):
+                left = round(time.time() - t_off, 1)
+                break
+            time.sleep(0.5)
+        step("leftForegroundAfterOff", left is not None, {"sec": left})
+        # 开关状态：debug 包问 debug 入口；releaseTest 经 inapp（它会 bind :agent，所以放在反向对照之后）
+        if with_bridge:
+            st = debug_op(adb, "status")
+            step("offViaNotification", bool(tapped) and st.get("enabled") is False and st.get("listening") is False,
+                 {"tapped": tapped, "enabled": st.get("enabled"), "pairings": len(st.get("pairings", []))})
+        # 反向对照：关掉之后没有别的东西让进程保持解冻（点通知按钮给 App 30 秒临时白名单，之后应当被冻结）
+        frozen_at = None
+        while time.time() - t_off < 90:
+            p = agent_proc(adb)
+            if p.get("isFrozen"):
+                frozen_at = round(time.time() - t_off, 1)
+                break
+            time.sleep(3)
+        step("frozenAfterOff", frozen_at is not None, {"sec": frozen_at})
+        if not with_bridge:
+            r = R.run_one(adb, "c6-off-check", R.INAPP_ACTIVITY, "desktop-status", {}, 60)
+            step("offViaNotification", bool(tapped) and r and r.get("enabled") is False and r.get("listening") is False,
+                 {"tapped": tapped, "check": r and r.get("summary")})
+    finally:
+        if bridge:
+            bridge.close()
+        if with_bridge:
+            try:
+                debug_op(adb, "disable")
+            except Exception:  # noqa: BLE001
+                pass
+        state_dir.cleanup()
+
+    ok = bool(checks) and all(checks.values())
+    passed = sum(checks.values())
+    summary = (f"checks={passed}/{len(checks)} bridge={with_bridge} samples={len(samples)} "
+               f"frozen={sum(1 for x in samples if x.get('isFrozen'))} "
+               f"handshakeMs={(info.get('handshakeAfterIdle') or {}).get('msFromBridgeStart')} "
+               f"offToBackgroundSec={(info.get('leftForegroundAfterOff') or {}).get('sec')} "
+               f"frozenAfterOffSec={(info.get('frozenAfterOff') or {}).get('sec')}")
+    return {"ok": ok, "summary": summary, "checks": checks, "info": info, "samples": samples}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--serial", default=os.environ.get("ANDROID_SERIAL"))
@@ -270,141 +443,24 @@ def main():
     if not a.no_install:
         R.install(adb, os.path.join(R.REPO, "app", "build", "outputs", "apk", "debug", "app-debug.apk"))
     adb.sh(f"am force-stop {R.APP_PKG}", check=False)
-    # 首次引导里请求的通知权限（F2）；电池优化豁免故意不给：验证的是从前台界面打开这条正常路径
-    adb.sh(f"pm grant {R.APP_PKG} android.permission.POST_NOTIFICATIONS", check=False)
-    adb.sh(f"cmd deviceidle whitelist -{R.APP_PKG}", check=False)
-    adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
-    adb.sh("wm dismiss-keyguard", check=False)
     device = {"serial": a.serial, "model": adb.prop("ro.product.model"), "sdk": adb.prop("ro.build.version.sdk"),
               "release": adb.prop("ro.build.version.release"), "fingerprint": adb.prop("ro.build.fingerprint")}
     print(json.dumps(device, ensure_ascii=False), flush=True)
-
-    t0 = time.time()
-    checks, info, samples = {}, {}, []
     fm = R.start_fake_model(adb, {TEST_MODEL_KEY: "test"})
-    state_dir = tempfile.TemporaryDirectory(prefix="c6-bridge-")
-    state = os.path.join(state_dir.name, "acp-bridge.json")
-    bridge = None
-
-    def step(name, ok, detail=None):
-        checks[name] = bool(ok)
-        if detail is not None:
-            info[name] = detail
-        print(f"  {'ok ' if ok else 'FAIL'} {name}" + (f"  {json.dumps(detail, ensure_ascii=False)[:300]}" if detail is not None else ""), flush=True)
-
-    def home():
-        adb.sh("input keyevent KEYCODE_HOME", check=False)
-
     try:
-        r = R.run_one(adb, "c6-model", R.INAPP_ACTIVITY, "handshake", {}, 60)
-        step("testModelReady", r and r.get("ok"), r and r.get("summary"))
-        R.run_one(adb, "c6-off0", R.INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
-        r = R.run_one(adb, "c6-on", R.INAPP_ACTIVITY, "desktop-access", {"on": True}, 60)
-        step("enabledFromUi", r and r.get("ok"), r and r.get("summary"))
-        home()
-        code = debug_op(adb, "pair").get("code")
-        step("pairingCode", bool(code))
-        n = agent_notification(adb)
-        s = agent_service(adb)
-        step("notificationShown", n.get("present") and n.get("title") == TITLE and n.get("text") == TEXT and OFF in n.get("actions", [])
-             and n.get("channel") == "desktop_access" and s["foreground"] and s["channel"] == "desktop_access",
-             {k: n.get(k) for k in ("title", "channel", "actions")})
-
-        # 空闲（没有连接）
-        print(f"idle {a.idle}s (no connection)…", flush=True)
-        samples += idle(adb, a.idle, t0, "idle-before-connect")
-
-        # 电脑端连接：配对握手 + initialize + session/new + 一轮对话
-        bridge = Bridge(adb, state, code=code)
-        init = bridge.request("initialize", {"protocolVersion": 1, "clientCapabilities": {}}, 30)
-        init_ok = (init.get("msg") or {}).get("result", {}).get("protocolVersion") == 1
-        step("handshakeAfterIdle", init_ok, {"msFromBridgeStart": round((time.time() - bridge.t0) * 1000), "initMs": init["ms"],
-                                             "timeout": init.get("timeout", False), "stderr": bridge.stderr[-3:]})
-        sid = None
-        if init_ok:
-            new = bridge.request("session/new", {"cwd": "/", "mcpServers": []}, 30)
-            sid = ((new.get("msg") or {}).get("result") or {}).get("sessionId")
-        step("sessionNew", bool(sid))
-        if sid:
-            p1 = prompt(bridge, sid, {"chunks": 5, "intervalMs": 20, "n": "c6-first"})
-            step("promptAfterIdle", p1["stopReason"] == "end_turn" and p1["chars"] > 0, p1)
-
-            print(f"idle {a.idle}s (connection open)…", flush=True)
-            samples += idle(adb, a.idle, t0, "idle-connected")
-            p2 = prompt(bridge, sid, {"chunks": 5, "intervalMs": 20, "n": "c6-second"})
-            step("promptOnEstablishedSessionAfterIdle", p2["stopReason"] == "end_turn" and p2["chars"] > 0, p2)
-            p3 = prompt(bridge, sid, {"chunks": 400, "intervalMs": 20, "n": "c6-cancel"}, cancel_after_first_chunk=True)
-            step("cancel", p3["stopReason"] == "cancelled" and p3["cancelSent"] and p3["ms"] < 5_000, p3)
-        rc = bridge.close()
-        step("bridgeClosedCleanly", rc == 0, {"exit": rc})
-        bridge = None
-
-        # 开关开着时 :agent 被杀、再被拉起（监督进程开机拉起 / bind 冷启动）
-        for path in ("boot", "bind"):
-            r = R.run_one(adb, f"c6-restart-{path}", R.INAPP_ACTIVITY, "desktop-restart", {"path": path}, 90)
-            step(f"restart-{path}", r and r.get("ok"), r and r.get("summary"))
-            home()
-            samples += idle(adb, 20, t0, f"idle-after-restart-{path}")
-        # 重启后用保存的令牌重新连上（不再需要配对码）
-        bridge = Bridge(adb, state)
-        init = bridge.request("initialize", {"protocolVersion": 1, "clientCapabilities": {}}, 30)
-        step("reconnectWithTokenAfterRestart", (init.get("msg") or {}).get("result", {}).get("protocolVersion") == 1,
-             {"initMs": init["ms"], "stderr": bridge.stderr[-2:]})
-        bridge.close()
-        bridge = None
-
-        on = [x for x in samples]
-        step("neverFrozenWhileOn", on and all(x.get("alive") and x.get("isFrozen") is False for x in on),
-             {"samples": len(on), "frozen": sum(1 for x in on if x.get("isFrozen"))})
-        step("foregroundServiceWhileOn", on and all(x.get("fgService") and (x.get("procState") or 99) <= 4 for x in on),
-             {"procStates": sorted({x.get("procState") for x in on}), "oomAdj": sorted({x.get("oomAdj") for x in on})})
-
-        # 通知上的“关闭”
-        tapped = tap_off_in_shade(adb)
-        t_off = time.time()
-        st = debug_op(adb, "status")
-        step("offViaNotification", bool(tapped) and st.get("enabled") is False and st.get("listening") is False,
-             {"tapped": tapped, "enabled": st.get("enabled"), "pairings": len(st.get("pairings", []))})
-        left = None
-        while time.time() - t_off < 10:
-            s = agent_service(adb)
-            n = agent_notification(adb)
-            if not s["foreground"] and not n.get("present"):
-                left = round(time.time() - t_off, 1)
-                break
-            time.sleep(0.5)
-        step("leftForegroundAfterOff", left is not None, {"sec": left})
-        # 反向对照：关掉之后没有别的东西让进程保持解冻（通知按钮给的 30 秒临时白名单过后应当被冻结）
-        frozen_at = None
-        while time.time() - t_off < 90:
-            p = agent_proc(adb)
-            if p.get("isFrozen"):
-                frozen_at = round(time.time() - t_off, 1)
-                break
-            time.sleep(3)
-        step("frozenAfterOff", frozen_at is not None, {"sec": frozen_at, "last": agent_proc(adb)})
+        r = run_desktop(adb, a.idle, with_bridge=True, log=lambda m: print(m, flush=True))
     finally:
-        if bridge:
-            bridge.close()
-        try:
-            debug_op(adb, "disable")
-        except Exception:
-            pass
         adb.run("reverse", "--remove", f"tcp:{R.fake_model.DEVICE_PORT}", check=False)
         fm.stop()
-        state_dir.cleanup()
-
-    ok = bool(checks) and all(checks.values())
-    out = {"suite": "desktop", "build": "debug", "device": device, "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-           "ok": ok, "checks": checks, "info": info, "samples": samples}
+    out = {"suite": "desktop", "build": "debug", "device": device, "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **r}
     os.makedirs(os.path.join(HERE, "results", "raw"), exist_ok=True)
     tag = f"-{a.label}" if a.label else ""
     path = os.path.join(HERE, "results", "raw",
                         f"desktop-{a.serial.replace(':', '_')}-api{device['sdk']}-debug{tag}-{time.strftime('%Y%m%d-%H%M%S')}.json")
     with open(path, "w") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
-    print(f"\n{sum(checks.values())}/{len(checks)} ok  ->  {path}")
-    sys.exit(0 if ok else 1)
+    print(f"\n{sum(r['checks'].values())}/{len(r['checks'])} ok  ->  {path}")
+    sys.exit(0 if r["ok"] else 1)
 
 
 if __name__ == "__main__":
