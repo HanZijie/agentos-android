@@ -3,6 +3,7 @@ package org.agentos.test.acp.inapp
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
+import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import java.io.File
@@ -15,7 +16,7 @@ import java.io.FileNotFoundException
  *
  * - key 不经过任何命令行（API 37 的 adbd 会把 adb shell 的命令行写进 logcat）；
  * - releaseTest 包不可调试、没有 run-as，也能用；
- * - Manifest 要求 android.permission.DUMP：只有 shell 和系统能写。只能写，不能读、不能列目录。
+ * - Manifest 要求 android.permission.DUMP：只有 shell 和系统能写。只能写、查长度，不能读内容、不能列目录。
  */
 class KeyDropProvider : ContentProvider() {
     override fun onCreate() = true
@@ -33,7 +34,12 @@ class KeyDropProvider : ContentProvider() {
         )
     }
 
-    override fun query(uri: Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?): Cursor? = null
+    /** 只返回 key 文件的长度（字节，不存在时 -1），给 run.py 写完后校验；不返回内容。 */
+    override fun query(uri: Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?): Cursor? {
+        val name = uri.lastPathSegment?.takeIf { it in NAMES } ?: return null
+        val f = File(context?.filesDir ?: return null, "test/$name")
+        return MatrixCursor(arrayOf("size")).apply { addRow(arrayOf<Any>(if (f.isFile) f.length() else -1L)) }
+    }
     override fun getType(uri: Uri): String? = null
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, s: String?, a: Array<out String>?) = 0

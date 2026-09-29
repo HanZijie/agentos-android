@@ -254,18 +254,24 @@ class ByokStoreScenarios(
             val run = PromptRun()
             var tClearNs = 0L
             var charsAtClear = 0L
-            val atClear = kotlinx.coroutines.CompletableDeferred<JSONObject>()
+            // 清除前、清除后各取一次快照（两次 Binder 调用之间设备可能已经拒过一次请求，所以不能只在清除后取）
+            val snaps = kotlinx.coroutines.CompletableDeferred<Pair<JSONObject, JSONObject>>()
             runPrompt(session, """{"chunks":60,"intervalMs":20,"tool":"fs_read","n":"$n"}""", run, status) { r ->
                 if (tClearNs == 0L && r.chunkChars >= 200) {
                     tClearNs = SystemClock.elapsedRealtimeNanos()
                     charsAtClear = r.chunkChars
                     scope.launch {
-                        runCatching { control.use { p -> p.clearModelSource(); p.diagnostics().getJSONObject("byok") } }
-                            .onSuccess { atClear.complete(it) }.onFailure { atClear.completeExceptionally(it) }
+                        runCatching {
+                            control.use { p ->
+                                val before = p.diagnostics().getJSONObject("byok")
+                                p.clearModelSource()
+                                before to p.diagnostics().getJSONObject("byok")
+                            }
+                        }.onSuccess { snaps.complete(it) }.onFailure { snaps.completeExceptionally(it) }
                     }
                 }
             }
-            val byokAtClear = kotlinx.coroutines.withTimeout(10_000) { atClear.await() }
+            val (byokBefore, byokAtClear) = kotlinx.coroutines.withTimeout(10_000) { snaps.await() }
             val clearToEndMs = if (tClearNs > 0) (run.endNs - tClearNs) / 1e6 else -1.0
             val follow = PromptRun()
             runPrompt(session, """{"chunks":3,"intervalMs":0}""", follow)
@@ -277,6 +283,7 @@ class ByokStoreScenarios(
             fun clean(m: String?) = m != null && !m.contains(key) && !m.contains(middle)
             val msg = run.error?.message
             val followMsg = follow.error?.message
+            val reqBefore = byokBefore.optJSONObject("requests") ?: JSONObject()
             val reqAt = byokAtClear.optJSONObject("requests") ?: JSONObject()
             val reqAfter = byokAfter.optJSONObject("requests") ?: JSONObject()
             val checks = JSONObject()
@@ -285,8 +292,9 @@ class ByokStoreScenarios(
                 .put("endedPromptly", clearToEndMs in 0.0..5_000.0)
                 .put("errorHasNoKey", clean(msg) && clean(followMsg))
                 .put("onlyOneKeyedRequest", requests.size == 1 && requests[0].optString("key") == "byok" && requests[0].optInt("round") == 0)
+                // 撤销之后 served 不可能再增加（清除后的快照与结束时相同）；denied 相对清除前增加（之后的请求被拒）
                 .put("noKeyServedAfterClear", reqAfter.optLong("served") == reqAt.optLong("served") &&
-                    reqAfter.optLong("denied") > reqAt.optLong("denied"))
+                    reqAfter.optLong("denied") > reqBefore.optLong("denied"))
                 .put("revoked", reqAfter.optLong("revocations") >= 1 && !byokAfter.optBoolean("keySet") &&
                     !byokAfter.optBoolean("credentialResolves") && byokAfter.optJSONObject("keystore")?.optBoolean("present") == false)
                 .put("nextTurnFails", follow.stopReason == null && followMsg != null && followMsg.contains("model_not_configured"))
@@ -294,7 +302,8 @@ class ByokStoreScenarios(
             return JSONObject().put("ok", ok)
                 .put("summary", "clearToEndMs=${"%.0f".format(clearToEndMs)} charsAfterClear=${run.chunkChars - charsAtClear} " +
                     "inFlightCompleted=${requests.firstOrNull()?.optBoolean("completed")} requests=${requests.size} " +
-                    "served ${reqAt.optLong("served")}→${reqAfter.optLong("served")} denied ${reqAt.optLong("denied")}→${reqAfter.optLong("denied")} " +
+                    "served ${reqBefore.optLong("served")}/${reqAt.optLong("served")}→${reqAfter.optLong("served")} " +
+                    "denied ${reqBefore.optLong("denied")}→${reqAfter.optLong("denied")} " +
                     "checks=${checks.keys().asSequence().count { checks.optBoolean(it) }}/${checks.length()}")
                 .put("checks", checks)
                 .put("error", if (clean(msg)) msg else "<contains key>")
@@ -302,7 +311,8 @@ class ByokStoreScenarios(
                 .put("clearToEndMs", clearToEndMs).put("charsAtClear", charsAtClear).put("charsAfterClear", run.chunkChars - charsAtClear)
                 // 第二层（中止传输中的响应）还没做：记录传输中的那一次是否照常结束
                 .put("inFlightResponseCompleted", requests.firstOrNull()?.optBoolean("completed") ?: JSONObject.NULL)
-                .put("requestsAtClear", reqAt).put("requestsAfter", reqAfter).put("fakeRequests", JSONArray(requests))
+                .put("requestsBeforeClear", reqBefore).put("requestsAtClear", reqAt).put("requestsAfter", reqAfter)
+                .put("fakeRequests", JSONArray(requests))
         } finally {
             c.dispose()
         }

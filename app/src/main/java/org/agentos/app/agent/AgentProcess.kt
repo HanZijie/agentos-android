@@ -247,9 +247,10 @@ class AgentProcess private constructor(val app: Context) {
 
     // ------------------------------------------------------------------ 诊断
 
-    fun runtimeStatus(): JSONObject {
+    fun runtimeStatus(): JSONObject = synchronized(lifecycle) {
+        // 同一把锁里一次取完（@Synchronized 锁的就是 lifecycle）：分开取会在空闲停服的瞬间拼出 foreground=true、serviceRunning=false
         val s = lifecycle.status()
-        return JSONObject()
+        JSONObject()
             .put("pid", Process.myPid())
             .put("phase", lifecycle.phase().name)
             .put("tasks", s.tasks)
