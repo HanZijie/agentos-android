@@ -61,6 +61,14 @@ class ControlClient(private val ctx: Context) {
         fun clearModelSource() {
             call("clearModelSource")
         }
+
+        // v3：电脑端接入（C6 的用例，与设置页同一组调用）
+        fun desktopAccess(): JSONObject = JSONObject(call("getDesktopAccess") as String)
+        fun setDesktopAccessEnabled(on: Boolean): JSONObject = try {
+            JSONObject(iface.javaClass.getMethod("setDesktopAccessEnabled", Boolean::class.javaPrimitiveType).invoke(iface, on) as String)
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            throw e.targetException
+        }
     }
 }
 
@@ -102,10 +110,94 @@ class AgentServiceScenarios(
         "supervisor-start" -> supervisorStart(args)
         "restart-exit-info" -> restartExitInfo(args)
         "server-stats-clean" -> serverStatsClean()
+        "desktop-access" -> desktopAccess(args)
+        "desktop-restart" -> desktopRestart(args)
         else -> null
     }
 
     private fun now() = SystemClock.elapsedRealtime()
+
+    // ------------------------------------------------------------------ C6：电脑端接入打开期间留在前台（F11 第 4 点）
+
+    private fun heldByDesktop(rt: JSONObject) =
+        rt.optBoolean("serviceRunning") && rt.optBoolean("foreground") && rt.optString("foregroundHold") == "desktop_access"
+
+    /**
+     * 像设置页一样（前台界面、IAgentControl v3）打开或关闭电脑端接入，再等 `:agent` 进入前台（打开）或在宽限期后退出前台（关闭）。
+     * 不返回配对码和令牌（getDesktopAccess 本来就不含）。
+     */
+    private suspend fun desktopAccess(args: JSONObject): JSONObject {
+        val on = args.getBoolean("on")
+        val t0 = now()
+        val access = control.use { it.setDesktopAccessEnabled(on) }
+        var rt = JSONObject()
+        var settled = false
+        val deadline = now() + 8_000
+        while (now() < deadline) {
+            rt = control.use { it.runtimeStatus() }
+            settled = if (on) heldByDesktop(rt) else !rt.optBoolean("serviceRunning") && !rt.optBoolean("foreground") && rt.isNull("foregroundHold")
+            if (settled) break
+            delay(100)
+        }
+        val settleMs = now() - t0
+        val checks = JSONObject()
+            .put("switchApplied", access.optBoolean("enabled") == on && (!on || access.optBoolean("listening")))
+            .put(if (on) "foregroundWithHold" else "leftForeground", settled)
+        return JSONObject().put("ok", checks.keys().asSequence().all { checks.optBoolean(it) })
+            .put("summary", "on=$on settleMs=$settleMs serviceRunning=${rt.optBoolean("serviceRunning")} fg=${rt.optBoolean("foreground")} " +
+                "hold=${rt.opt("foregroundHold")} listening=${access.optBoolean("listening")}")
+            .put("checks", checks).put("settleMs", settleMs).put("runtime", rt)
+            .put("access", JSONObject().put("enabled", access.optBoolean("enabled")).put("listening", access.optBoolean("listening"))
+                .put("pairings", access.optJSONArray("pairings")?.length() ?: 0))
+    }
+
+    /**
+     * 开关打开时 `:agent` 被杀，再被拉起：进程启动时读开关的持久状态，恢复结束后留在前台、重新监听。
+     * path=boot：像监督进程开机拉起那样发 SUPERVISOR_START（服务命令先到）；path=bind：由 IAgentControl 的 bind 冷启动。
+     */
+    private suspend fun desktopRestart(args: JSONObject): JSONObject {
+        val path = args.optString("path", "boot")
+        val before = control.use { it.runtimeStatus() }
+        check(heldByDesktop(before)) { "desktop access must be on and holding :agent in the foreground" }
+        val oldPid = AppTarget.agentPid(ctx)
+        check(killAgentAndWait()) { "could not kill :agent" }
+        val t0 = now()
+        if (path == "boot") {
+            ctx.startForegroundService(
+                Intent().setComponent(TestIds.APP_AGENT_SERVICE)
+                    .setAction("org.agentos.action.SUPERVISOR_START")
+                    .putExtra("org.agentos.extra.REASON", "boot")
+                    .putExtra("org.agentos.extra.ATTEMPT", 1)
+            )
+            delay(2_000) // 让服务命令先于任何 bind 到达
+        }
+        var rt = JSONObject()
+        var desktop = JSONObject()
+        var diag = JSONObject()
+        var settled = false
+        val deadline = now() + 20_000
+        while (now() < deadline) {
+            val d = control.use { it.diagnostics() }
+            diag = d
+            rt = d.getJSONObject("runtime")
+            desktop = d.optJSONObject("desktop") ?: JSONObject()
+            settled = heldByDesktop(rt) && rt.optString("phase") == "READY" && desktop.optBoolean("enabled") && desktop.optBoolean("listening")
+            if (settled) break
+            delay(200)
+        }
+        val newPid = AppTarget.agentPid(ctx)
+        val commands = diag.optJSONArray("startCommands")
+        val lastReason = commands?.let { if (it.length() > 0) it.getJSONObject(it.length() - 1).optString("reason") else null }
+        val checks = JSONObject()
+            .put("restarted", newPid != null && newPid != oldPid)
+            .put("foregroundWithHold", settled)
+            .put("startedAs", if (path == "boot") lastReason == "boot" else true)
+        return JSONObject().put("ok", checks.keys().asSequence().all { checks.optBoolean(it) })
+            .put("summary", "path=$path pid $oldPid→$newPid settleMs=${now() - t0} fg=${rt.optBoolean("foreground")} " +
+                "hold=${rt.opt("foregroundHold")} listening=${desktop.optBoolean("listening")} lastStartReason=$lastReason")
+            .put("checks", checks).put("runtime", rt)
+            .put("desktop", JSONObject().put("enabled", desktop.optBoolean("enabled")).put("listening", desktop.optBoolean("listening")))
+    }
 
     private suspend fun killAgentAndWait(): Boolean {
         val pid = AppTarget.agentPid(ctx) ?: return true

@@ -82,4 +82,22 @@ python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app --o
 
 `--only a,b` 只跑指定用例。结果写在 `results/raw/`（不进仓库），定稿的结果复制到 `results/` 提交。全部通过时退出码为 0。
 
+## 电脑端接入打开期间不被冻结（desktop_idle.py，C6）
+
+architecture F11 第 4 点：电脑端接入打开期间 `:agent` 以前台服务运行，否则空闲的 `:agent` 是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，抽象 socket `agentos-acp` 上的连接得不到服务（A6 查明）。`desktop_idle.py` 在 debug 包上从电脑端走一遍：
+
+1. 像设置页一样从前台界面打开开关（inapp `desktop-access`，IAgentControl v3），回到桌面；配对码从 debug 入口 `DesktopGatewayDebugReceiver` 的广播结果里取（不进设备日志、不上命令行）；检查前台服务和通知（渠道 `desktop_access`、“电脑端接入已开启”、“关闭”按钮）。
+2. 空闲 `--idle` 秒（默认 60），只用 `dumpsys` 旁观（`isFrozen`、进程状态、前台服务），不碰 App。
+3. 经 `tools/acp-bridge` 连接：配对握手、initialize、session/new、一轮对话（假模型端点，fake_model.py 经 adb reverse）。
+4. 连接不断再空闲同样久，同一会话再一轮；再测一次取消。
+5. 开关开着时杀掉 `:agent`，按“监督进程开机拉起”（inapp `desktop-restart` path=boot，SUPERVISOR_START）和“bind 冷启动”（path=bind）各拉起一次：恢复后留在前台、重新监听，空闲 20 秒不被冻结；用保存的令牌重新连上。
+6. 点通知上的“关闭”（uiautomator）：开关关闭、宽限期后退出前台、通知消失；反向对照：之后进程确实会被冻结（点通知按钮给 App 30 秒临时白名单，所以要等 40 秒左右）。
+
+```sh
+./gradlew :app:assembleDebug
+python3 tests/device/acp-channel/desktop_idle.py --serial $ANDROID_SERIAL [--idle 60] [--no-install]
+```
+
+脚本给 App 授予通知权限（首次引导里请求的），故意不给电池优化豁免：验证的是从前台界面打开开关这条正常路径。后台打开（例如 debug 入口的广播）时系统不允许进入前台（`Background started FGS: Disallowed`），有电池优化豁免时允许。
+
 app 用例要求 APK 里有 `assets/model-catalog.json`（BYOK 的厂商预设和自定义端点模板都来自它）：先在 `core/pi-runtime` 里 `npm ci`，构建时不加 `-Pagentos.skipPiBundle=true`，或者先单独跑一次 `node build.mjs`。
