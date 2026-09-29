@@ -117,7 +117,7 @@ class RuntimeEngine internal constructor(
                     },
                 ),
             )
-            Recovery.run(store, userStopped = host.environment.previousExitStoppedByUser)
+            Recovery.run(store, userStopped = host.environment.previousExitStoppedByUser, config = config.scheduler)
             cores = CoreSessions(deps.agentCoreFactory, store, host.log)
             scheduler = Scheduler(scope, store, host, cores, broker, config.scheduler)
             router = SessionRouter(store, config.jev, config.router, host.log)
