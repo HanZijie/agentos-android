@@ -30,7 +30,7 @@ AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=openai npm test   # OpenAI Chat Completio
 
 电脑上的运行时换成 B lane 的 PiAdapter（pi-agent.js 跑在 quickjs-kt-jvm 里，与 Android 同一个绑定），模型请求发往同一进程里的 FakeModelServer：它按同样的 `{"fake":…}` 指令回应（文字、thinking、工具调用、等待中止、max_tokens、各类失败），所以用例不用改。两种 core 的已知差别只有一处：模型调用一个从来没有声明过的工具时，FakeAgentCore 交给宿主层拒绝（`[agentos:tool_not_in_catalog]`），真实 Pi 不调 beforeToolCall、自己返回 `Tool <name> not found`；两者都没有执行它，状态都是 `failed`，用例按这个性质检查。
 
-`npm test` 第一次运行时会调用 `../../gradlew :core:runtime:acpConformanceClasspath`，生成 `core/runtime/build/acp-conformance/classpath.txt`。改了 `core/runtime` 的代码之后，重新运行这个 Gradle 任务（或设置 `AGENTOS_ACP_REBUILD=1`）。也可以用 `AGENTOS_ACP_CLASSPATH` 直接给出类路径。
+`npm test` 会先检查 `core/runtime/build/acp-conformance/classpath.txt`：文件不存在，或者 `core/runtime` 的 `src/main`、`src/testFixtures`、`build.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`settings.gradle.kts` 里有比它新的文件（改了代码、合了 main、切了分支），就调用 `../../gradlew :core:runtime:acpConformanceClasspath` 重新编译并生成它，输出里有一行 `rebuilding the desktop agent classpath (<原因>)`。`AGENTOS_ACP_REBUILD=1` 强制重建；也可以用 `AGENTOS_ACP_CLASSPATH` 直接给出类路径（这时不检查）。
 
 ### 手机（W9）
 
@@ -42,7 +42,7 @@ ANDROID_SERIAL=<serial> ../../gradlew -p ../.. :app:installDebug
 AGENTOS_ACP_DEVICE=<serial> npm run test:device
 ```
 
-设备用例开始前会执行 `adb shell dumpsys deviceidle whitelist +org.agentos.app`（`prepareDevice`），模拟 F2 首次引导里用户已允许“忽略电池优化”：这样 `:agent` 从后台也能进入前台服务（电脑端接入打开期间、有任务期间），不会被 cached-apps freezer 冻结。没有这一步（又没有 root 监督进程 promote）时，系统拒绝后台启动前台服务，空闲的 `:agent` 约 10 秒后被冻结，用例会卡住。
+设备用例开始前（`prepareDevice`）先清掉上次中断可能留下的状态：`revoke_all` 和 `disable`（关开关同时清空配对）、`adb reverse --remove tcp:18787`、移除这台设备上指向 `localabstract:agentos-acp` 的 `adb forward`。然后在还没有豁免时执行 `adb shell cmd deviceidle whitelist +org.agentos.app`，模拟 F2 首次引导里用户已允许“忽略电池优化”（M1 靠它）：这样 `:agent` 从后台（debug 广播打开开关、有任务时）也能进入前台服务，不会被 cached-apps freezer 冻结。没有这一步（又没有 root 监督进程 promote）时，系统拒绝后台启动前台服务（logcat：`Background started FGS: Disallowed … uidState: RCVR`），空闲的 `:agent` 约 10 秒后被冻结，用例会卡住。用例结束（或被中断）时恢复：移除 reverse 和指向 `agentos-acp` 的 forward、关开关，只移除测试加的豁免（设备上本来就有时保留；是不是测试加的记在电脑临时目录的 `agentos-acp-battery-exemption-<serial>` 里，强行结束后下次运行照样认得）。
 
 设了 `AGENTOS_ACP_DEVICE` 时，一致性用例的默认目标是 `device`：手机上 `:agent` 里的真实 Pi 经 `tools/acp-bridge`（`adb forward` → `localabstract:agentos-acp`）对外。模型是电脑上的 B 的 FakeModelServer（`FakeModelServerMain`，按同样的 `{"fake":…}` 指令回应），经 `adb reverse tcp:18787 tcp:<端口>` 映射到手机的 `127.0.0.1:18787`；手机上的模型来源是 C 的测试端点（`tests/device/acp-channel/inapp` 的 `ensureTestModel`：`http://127.0.0.1:18787`、`fake-model`、测试 key），不是时借 C 的 `AgentScenarioActivity` 设置（key 在它的代码里，不经 adb 命令行）。
 
@@ -60,6 +60,25 @@ AGENTOS_ACP_DEVICE=<serial> npm run test:device
 `test:device` 还跑 `device.test.mjs`（设备专属：连接身份是 adbd 的 uid 2000、70,000 字符的模型输出经网关完整送达、手机发出的每一行格式与大小）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。
 
 **cached-apps freezer**：`:agent` 空闲时是 cached 进程，约 10 秒后会被冻结，冻结期间电脑端的连接和请求都得不到服务（A6 发现）。C6 起电脑端接入打开期间 `:agent` 以前台服务运行并显示常驻通知；`gateway.test.mjs` 在手机上空闲 15 秒（期间没有任何广播）后检查新连接能配对、已建立的会话照常应答，握手超时用例的等待期间同样没有任何广播。
+
+#### 中断与残留状态
+
+`npm test` / `npm run test:device` 经 `test/run.mjs` 调用 `node --test`。测试被中断时（Ctrl-C，或外层工具超时发 SIGTERM / SIGHUP），node 只打印 `Interrupted while running: <文件>`，之后不再转出测试文件进程的输出；被中断的测试文件会把原因写进一份报告，`run.mjs` 在 runner 退出后打印出来，例如：
+
+```
+Interrupted while running:
+
+⚠ test/gateway.test.mjs (test/gateway.test.mjs:1:1)
+
+[acp-conformance] INTERRUPTED gateway.test.mjs by SIGINT while running "desktop gateway pairing (device emulator-5590) > a silent connection is closed after the handshake timeout" (for 8s)
+[acp-conformance]   device emulator-5590: org.agentos.app:agent pid 3872 frozen=false procState=4 (fg-service); foreground service=true; battery optimization exempt=true; desktop access enabled=true listening=true pairings=1 connections=0; adb reverse []; adb forward [tcp:58672 localabstract:agentos-acp]
+[acp-conformance]   stopping 0 child process(es), running 1 cleanup step(s)
+[acp-conformance] CLEANED UP gateway.test.mjs
+```
+
+第一行是哪一例、已经跑了多久（不在用例里时写“在 before/after 钩子里”和上一例的名字）；第二行是设备当时的状态：AgentOS 各进程是否被冻结（`frozen=true`、`cch-empty` 这类就是 freezer 的问题）、`:agent` 是否前台服务、是否有电池优化豁免、电脑端接入开关与配对和连接数、adb reverse / forward。随后结束子进程并恢复设备（同上）。一例跑了 90 秒还没结束时，也会先打印一行 `still running "<用例>" after 90s; device …`（之后每 90 秒一次），外层工具用 SIGKILL 结束时至少还能看到它。
+
+强行结束（SIGKILL）后设备上可能留着开关、配对、reverse、forward、测试加的豁免；下次 `test:device` 开始时会自动清掉，结束时移除豁免，不用手动处理。只给 `npm` 进程发 SIGTERM 时 npm 自己退出、不转给脚本，测试会在后台照常跑完并恢复设备；要中断就发给整个进程组（Ctrl-C 就是），或者直接运行 `node test/run.mjs --device`。
 
 debug 包的测试入口也可以手动用：
 

@@ -7,14 +7,19 @@
 //   开关和配对码经 debug 包的测试入口（DesktopGatewayDebugReceiver）操作。
 //
 // 类路径来自 Gradle 任务 :core:runtime:acpConformanceClasspath（core/runtime/build/acp-conformance/classpath.txt）；
-// 文件不存在时自动调用它。也可以用环境变量 AGENTOS_ACP_CLASSPATH 直接给出类路径。
+// 文件不存在、或 core/runtime 的源码和构建文件比它新（合 main、切分支之后）时自动调用它（也就重新编译了），
+// AGENTOS_ACP_REBUILD=1 强制调用。也可以用环境变量 AGENTOS_ACP_CLASSPATH 直接给出类路径。
 // Java 用 JAVA_HOME 下的（JDK 21），没有就用 PATH 里的 java。
+//
+// 设备模式开始前（prepareDevice）清掉上次中断留下的开关、配对、adb reverse / forward，加上电池优化豁免；结束时恢复。
+// 中断（SIGINT / SIGTERM / SIGHUP）时写明哪一例、跑了多久、设备状态（经 test/run.mjs 打印），然后结束子进程、恢复设备。
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
+import { afterEach, beforeEach } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as acp from "@agentclientprotocol/sdk";
 
@@ -24,6 +29,108 @@ const classpathFile = path.join(repoRoot, "core/runtime/build/acp-conformance/cl
 export const bridgeScript = path.join(repoRoot, "tools/acp-bridge/acp-bridge.mjs");
 
 export const deviceSerial = process.env.AGENTOS_ACP_DEVICE || null;
+
+// ------------------------------------------------------------------ 子进程与中断
+
+const children = new Set();
+const cleanups = [];
+
+/** 登记一个子进程：中断时一并结束；它先退出时往它的 stdin 写（EPIPE）不能把测试进程带走。 */
+function track(child, what) {
+  children.add(child);
+  child.once("exit", () => children.delete(child));
+  child.stdin?.on("error", (e) => console.error(`[acp-conformance] ${what}: stdin ${e.code ?? e.message}`));
+  return child;
+}
+
+/** 登记一个同步的清理动作（恢复设备状态等），中断或进程退出时执行；返回取消登记的函数。 */
+export function onCleanup(fn) {
+  cleanups.push(fn);
+  return () => {
+    const i = cleanups.indexOf(fn);
+    if (i >= 0) cleanups.splice(i, 1);
+  };
+}
+
+function cleanupNow(reason) {
+  for (const c of children) {
+    try {
+      c.kill("SIGTERM"); // acp-bridge 收到 SIGTERM 会移除自己的 adb forward
+    } catch {
+      // 已经退出
+    }
+  }
+  children.clear();
+  while (cleanups.length) {
+    const fn = cleanups.pop();
+    try {
+      fn();
+    } catch (e) {
+      console.error(`[acp-conformance] cleanup after ${reason} failed: ${e.message}`);
+    }
+  }
+}
+
+// 正在跑的用例（根上的钩子对每个文件里所有 describe 下的用例都生效）
+let currentTest = null;
+let lastFinished = null;
+beforeEach((t) => {
+  currentTest = { name: t.fullName ?? t.name, start: Date.now(), warned: 0 };
+});
+afterEach((t) => {
+  lastFinished = t.fullName ?? t.name;
+  currentTest = null;
+});
+
+function whereWeAre() {
+  if (currentTest) return `while running "${currentTest.name}" (for ${Math.round((Date.now() - currentTest.start) / 1000)}s)`;
+  return `outside a test (in a before/after hook${lastFinished ? `; last finished "${lastFinished}"` : ", before the first test"})`;
+}
+
+/** 写给 test/run.mjs：node --test 被中断后不再转出测试文件进程的 stderr，由它在 runner 退出后打印这份报告。 */
+function report(line) {
+  console.error(line);
+  if (process.env.AGENTOS_ACP_REPORT) {
+    try {
+      appendFileSync(process.env.AGENTOS_ACP_REPORT, line + "\n");
+    } catch {
+      // 报告只是辅助
+    }
+  }
+}
+
+const testFile = path.basename(process.argv[1] ?? "test");
+let interrupted = null;
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  // 用 on 不用 once：Ctrl-C 或按进程组发信号时，这个进程先直接收到一次，runner 随后再转发一次（SIGTERM）；
+  // once 的监听移除后第二个信号走默认动作，进程在清理中途被杀，设备状态恢复不了
+  process.on(sig, () => {
+    if (interrupted) return;
+    interrupted = sig;
+    // node:test 的“Interrupted while running: <文件>”只说明这个文件被中断，这里写明哪一例、跑了多久、设备当时的状态。
+    // 第一行马上写（run.mjs 据此知道要等清理）；设备诊断要跑几条 adb，放在后面
+    report(`[acp-conformance] INTERRUPTED ${testFile} by ${sig} ${whereWeAre()}`);
+    if (deviceSerial) report(`[acp-conformance]   device ${deviceSerial}: ${deviceDiagnostics(deviceSerial)}`);
+    report(`[acp-conformance]   stopping ${children.size} child process(es), running ${cleanups.length} cleanup step(s)`);
+    cleanupNow(sig);
+    report(`[acp-conformance] CLEANED UP ${testFile}`);
+    process.exit(sig === "SIGINT" ? 130 : 143);
+  });
+}
+process.once("exit", () => cleanupNow("exit"));
+
+// 一例跑得异常久（多半是在等设备）时先把状态打出来：中断后就看不到了，外层工具超时用 SIGKILL 时更是什么都留不下
+const SLOW_TEST_MS = 90_000;
+setInterval(() => {
+  if (!currentTest) return;
+  const secs = Math.round((Date.now() - currentTest.start) / 1000);
+  if (secs * 1000 < SLOW_TEST_MS * (currentTest.warned + 1)) return;
+  currentTest.warned++;
+  console.error(
+    `[acp-conformance] still running "${currentTest.name}" after ${secs}s` +
+      (deviceSerial ? `; device ${deviceSerial}: ${deviceDiagnostics(deviceSerial)}` : ""),
+  );
+}, 10_000).unref();
 
 /**
  * 这次要跑的目标（AGENTOS_ACP_TARGETS，逗号分隔）。默认：没设 AGENTOS_ACP_DEVICE 时 stdio 和 gateway（都不需要设备）；
@@ -74,12 +181,43 @@ function coreArgs() {
 
 let cachedClasspath;
 
+/** 类路径依赖的输入：core/runtime 的源码与构建文件。 */
+const CLASSPATH_INPUTS = [
+  "core/runtime/src/main",
+  "core/runtime/src/testFixtures",
+  "core/runtime/build.gradle.kts",
+  "gradle/libs.versions.toml",
+  "build.gradle.kts",
+  "settings.gradle.kts",
+];
+
+function newestMtime(p) {
+  if (!existsSync(p)) return 0;
+  const st = statSync(p);
+  if (!st.isDirectory()) return st.mtimeMs;
+  let newest = st.mtimeMs;
+  for (const name of readdirSync(p)) newest = Math.max(newest, newestMtime(path.join(p, name)));
+  return newest;
+}
+
+function classpathStale() {
+  if (!existsSync(classpathFile)) return "missing";
+  const built = statSync(classpathFile).mtimeMs;
+  const changed = CLASSPATH_INPUTS.find((p) => newestMtime(path.join(repoRoot, p)) > built);
+  return changed ? `${changed} changed` : null;
+}
+
 export function agentClasspath() {
   if (process.env.AGENTOS_ACP_CLASSPATH) return process.env.AGENTOS_ACP_CLASSPATH;
   if (cachedClasspath) return cachedClasspath;
-  if (!existsSync(classpathFile) || process.env.AGENTOS_ACP_REBUILD === "1") {
+  const why = process.env.AGENTOS_ACP_REBUILD === "1" ? "AGENTOS_ACP_REBUILD=1" : classpathStale();
+  if (why) {
+    console.error(`[acp-conformance] rebuilding the desktop agent classpath (${why})`);
     const gradlew = path.join(repoRoot, process.platform === "win32" ? "gradlew.bat" : "gradlew");
     execFileSync(gradlew, ["-q", ":core:runtime:acpConformanceClasspath"], { cwd: repoRoot, stdio: "inherit" });
+    // 任务是 up-to-date 时不重写文件：更新时间戳，免得下一个测试文件再构建一次
+    const now = new Date();
+    utimesSync(classpathFile, now, now);
   }
   cachedClasspath = readFileSync(classpathFile, "utf8").trim();
   return cachedClasspath;
@@ -87,9 +225,10 @@ export function agentClasspath() {
 
 function spawnJavaAgent(args) {
   const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, "bin", "java") : "java";
-  return spawn(java, ["-Dkotlin-logging-to-jul=true", "-cp", agentClasspath(), "org.agentos.runtime.testing.AcpStdioAgent", ...coreArgs(), ...args], {
+  const child = spawn(java, ["-Dkotlin-logging-to-jul=true", "-cp", agentClasspath(), "org.agentos.runtime.testing.AcpStdioAgent", ...coreArgs(), ...args], {
     stdio: ["pipe", "pipe", "pipe"],
   });
+  return track(child, "AcpStdioAgent");
 }
 
 export function tempStateFile() {
@@ -98,7 +237,7 @@ export function tempStateFile() {
 
 /** 启动 tools/acp-bridge（子进程），参数原样传入。 */
 export function spawnBridge(args) {
-  return spawn(process.execPath, [bridgeScript, ...args], { stdio: ["pipe", "pipe", "pipe"] });
+  return track(spawn(process.execPath, [bridgeScript, ...args], { stdio: ["pipe", "pipe", "pipe"] }), "acp-bridge");
 }
 
 /** 跑一次 acp-bridge 直到退出（pair、unpair 等），返回 { code, stderr }。 */
@@ -313,14 +452,139 @@ export async function ensureDeviceTestModel(serial) {
   return true;
 }
 
+const APP_PACKAGE = "org.agentos.app";
+
+function adbQuiet(serial, ...args) {
+  try {
+    return execFileSync(adbPath(), ["-s", serial, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000 });
+  } catch {
+    return "";
+  }
+}
+
 /**
- * 设备模式的前置条件：模拟 F2 首次引导里用户已允许“忽略电池优化”。这样 :agent 从后台（debug 广播打开开关、有任务时）
- * 也能进入前台服务（C6：电脑端接入打开期间；W6：有任务期间），不会被 cached-apps freezer 冻结。没有这一步时系统拒绝
- * 后台启动前台服务（logcat：Background started FGS: Disallowed），空闲的 :agent 约 10 秒后被冻结，用例会卡住。
- * 真机上还可以由 root 监督进程 promote（S2 契约 a）；模拟器上没有监督进程。幂等。
+ * 设备当时的状态，一行：AgentOS 各进程（pid、是否被冻结、进程状态）、:agent 是否前台服务、电池优化豁免、
+ * 电脑端接入开关（经 debug 入口，:agent 被冻结时可能拿不到）、这台设备上的 adb reverse / forward。每条 adb 命令最多 10 秒。
+ */
+export function deviceDiagnostics(serial) {
+  const state = adbQuiet(serial, "get-state").trim();
+  if (state !== "device") return `adb state ${state || "unknown (disconnected?)"}`;
+  const parts = [];
+  const procs = [];
+  let proc = null;
+  for (const line of adbQuiet(serial, "shell", "dumpsys", "activity", "processes", APP_PACKAGE).split("\n")) {
+    const app = /\*APP\* UID \d+ ProcessRecord\{\S+ (\d+):([^/\s]+)/.exec(line);
+    if (app) {
+      proc = { pid: app[1], name: app[2] };
+      procs.push(proc);
+      continue;
+    }
+    if (!proc) continue;
+    const frozen = /isFrozen=(\w+)/.exec(line);
+    if (frozen) proc.frozen = frozen[1];
+    const ps = /\bcurProcState=(\d+)/.exec(line);
+    if (ps) proc.procState = ps[1];
+    const why = new RegExp(`\\b${proc.pid}:${proc.name.replace(/[.:]/g, "\\$&")}/\\S+ \\(([^)]+)\\)`).exec(line);
+    if (why && !proc.why) proc.why = why[1];
+  }
+  const uniq = [...new Map(procs.map((p) => [p.pid, p])).values()];
+  parts.push(
+    uniq.length
+      ? uniq.map((p) => `${p.name} pid ${p.pid} frozen=${p.frozen ?? "?"} procState=${p.procState ?? "?"}${p.why ? ` (${p.why})` : ""}`).join(", ")
+      : "no AgentOS process",
+  );
+  parts.push(`foreground service=${/isForeground=true/.test(adbQuiet(serial, "shell", "dumpsys", "activity", "services", APP_PACKAGE))}`);
+  parts.push(`battery optimization exempt=${adbQuiet(serial, "shell", "cmd", "deviceidle", "whitelist").includes(APP_PACKAGE)}`);
+  const status = /data="(.*)"\s*$/m.exec(
+    adbQuiet(serial, "shell", "am", "broadcast", "-f", "32", "-n", `${APP_PACKAGE}/.agent.DesktopGatewayDebugReceiver`, "--es", "op", "status"),
+  );
+  try {
+    const s = JSON.parse(status?.[1] ?? "");
+    parts.push(
+      s.ok
+        ? `desktop access enabled=${s.enabled} listening=${s.listening} pairings=${s.pairings?.length ?? "?"} connections=${s.connections?.length ?? "?"}`
+        : `desktop access status failed: ${s.error}`,
+    );
+  } catch {
+    parts.push("desktop access status unavailable");
+  }
+  // reverse --list 已经限定在这台设备，第一列是传输名（host-16、UsbFfs…）；forward --list 列出所有设备，第一列是序列号
+  const reverses = adbQuiet(serial, "reverse", "--list")
+    .split("\n")
+    .map((l) => l.trim().split(/\s+/).slice(1).join(" "))
+    .filter(Boolean);
+  const forwards = adbQuiet(serial, "forward", "--list")
+    .split("\n")
+    .filter((l) => l.startsWith(`${serial} `))
+    .map((l) => l.slice(serial.length + 1).trim());
+  parts.push(`adb reverse [${reverses.join("; ")}]`);
+  parts.push(`adb forward [${forwards.join("; ")}]`);
+  return parts.join("; ");
+}
+
+/** 移除这台设备上指向手机网关（localabstract:agentos-acp）的 adb forward。 */
+function removeGatewayForwards(serial) {
+  for (const line of adbQuiet(serial, "forward", "--list").split("\n")) {
+    const [s, local, remote] = line.trim().split(/\s+/);
+    if (s === serial && remote === "localabstract:agentos-acp") adbQuiet(serial, "forward", "--remove", local);
+  }
+}
+
+/**
+ * 设备模式的准备，返回恢复函数（测试结束时调用；中断时由清理流程调用）。
+ *
+ * 1. 清掉上次中断可能留下的状态：电脑端接入开着、留着配对、adb reverse 18787、指向 agentos-acp 的 adb forward。
+ * 2. 模拟 F2 首次引导里用户已允许“忽略电池优化”（整合人定 M1 靠它）：`cmd deviceidle whitelist +org.agentos.app`。
+ *    这样 :agent 从后台（debug 广播打开开关、有任务时）也能进入前台服务（C6 / W6），不会被 cached-apps freezer 冻结。
+ *    没有这一步时系统拒绝后台启动前台服务（logcat：Background started FGS: Disallowed … uidState: RCVR），用例会卡住。
+ *    恢复时只移除测试加的（设备上本来就有这项豁免时保留）；是不是测试加的记在电脑的临时目录里，强行结束后下次运行照样认得。
  */
 export function prepareDevice(serial) {
-  execFileSync(adbPath(), ["-s", serial, "shell", "dumpsys", "deviceidle", "whitelist", "+org.agentos.app"], { encoding: "utf8" });
+  for (const op of ["revoke_all", "disable"]) {
+    try {
+      deviceControl(serial, op);
+    } catch (e) {
+      console.error(`[acp-conformance] setup: ${op} failed: ${e.message}`);
+    }
+  }
+  adbQuiet(serial, "reverse", "--remove", `tcp:${DEVICE_MODEL.port}`);
+  removeGatewayForwards(serial);
+  // 豁免是不是测试加的，记在电脑上（按设备）：上次运行加了豁免、没来得及移除就被强行结束时，这次仍然认作测试加的，结束时移除
+  const marker = path.join(os.tmpdir(), `agentos-acp-battery-exemption-${serial.replace(/[^\w.-]/g, "_")}`);
+  const exempt = adbQuiet(serial, "shell", "cmd", "deviceidle", "whitelist").includes(APP_PACKAGE);
+  const ours = !exempt || existsSync(marker);
+  if (ours) writeFileSync(marker, `added by tests/acp-conformance for ${serial}\n`);
+  if (!exempt) execFileSync(adbPath(), ["-s", serial, "shell", "cmd", "deviceidle", "whitelist", `+${APP_PACKAGE}`], { encoding: "utf8" });
+  let done = false;
+  const restore = () => {
+    if (done) return;
+    done = true;
+    adbQuiet(serial, "reverse", "--remove", `tcp:${DEVICE_MODEL.port}`);
+    // 用例自己建的转发（deviceForward）平时在 teardown 里移除，中断时 teardown 不会执行
+    removeGatewayForwards(serial);
+    try {
+      deviceControl(serial, "disable");
+    } catch {
+      // 设备已断开
+    }
+    if (ours) {
+      const removed = adbQuiet(serial, "shell", "cmd", "deviceidle", "whitelist", `-${APP_PACKAGE}`).includes("Removed");
+      const list = removed ? "" : adbQuiet(serial, "shell", "cmd", "deviceidle", "whitelist");
+      // 设备断开时 adb 什么都不返回，标记留着，下次再移除
+      if (removed || (list && !list.includes(APP_PACKAGE))) {
+        try {
+          unlinkSync(marker);
+        } catch {
+          // 已经没有了
+        }
+      }
+    }
+  };
+  const unregister = onCleanup(restore);
+  return () => {
+    unregister();
+    restore();
+  };
 }
 
 /**
@@ -328,11 +592,14 @@ export function prepareDevice(serial) {
  * `adb reverse tcp:18787 tcp:<端口>` 映射到手机，再确保手机上的模型来源指向它。返回 { port, stop() }。
  */
 export async function startDeviceModel(serial) {
-  prepareDevice(serial);
+  const restoreDevice = prepareDevice(serial);
   const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, "bin", "java") : "java";
-  const child = spawn(java, ["-cp", agentClasspath(), "org.agentos.runtime.testing.FakeModelServerMain", `--key=${DEVICE_MODEL.key}`], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const child = track(
+    spawn(java, ["-cp", agentClasspath(), "org.agentos.runtime.testing.FakeModelServerMain", `--key=${DEVICE_MODEL.key}`], {
+      stdio: ["pipe", "pipe", "pipe"],
+    }),
+    "FakeModelServerMain",
+  );
   const stderr = [];
   child.stderr.on("data", (d) => stderr.push(d.toString("utf8")));
   const port = await new Promise((resolve, reject) => {
@@ -350,11 +617,7 @@ export async function startDeviceModel(serial) {
     port,
     stderr,
     async stop() {
-      try {
-        execFileSync(adbPath(), ["-s", serial, "reverse", "--remove", `tcp:${DEVICE_MODEL.port}`]);
-      } catch {
-        // 已经没有了
-      }
+      restoreDevice();
       child.stdin.end();
       await new Promise((resolve) => {
         const timer = setTimeout(() => {
