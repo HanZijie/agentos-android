@@ -397,9 +397,9 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 #### W8 自带界面
 - [x] `LocalAcpClient`：官方 SDK 客户端 + `BinderAcpTransport`（D3a）
-- [ ] 对话界面、流式输出、取消（D3a：桌面入口、对话界面已完成，界面用平台 View、不引入界面库；Pixel_8a 与 API 35 上从桌面入口打开，经 Binder 到 `:agent` 跑通 initialize → session/new → prompt，未配置模型时提示“还没有配置模型”；流式与取消的端到端等设置页完成后补测）
-- [ ] 设置页：BYOK（厂商预设读 `model-catalog.json`，另有自定义兼容端点：URL、协议、模型名、key）、安全等级、运行与监督状态
-- [ ] 首次引导：BYOK、通知权限、默认助理、电池优化豁免、已发现的插件
+- [x] 对话界面、流式输出、取消（D3a / D3）。界面用平台 View，不引入界面库。整合人 2026-09-29 在 Pixel_8a 上用 MiniMax 国内平台的真实 key 走了一遍：从桌面入口打开，经首次引导进设置填 key，对话流式输出，点“停止”后当场停住并显示“已取消”；清除 key 后，logcat 和 App 私有数据里都搜不到 key。截图在工作区 `demo/2026-09-29-pixel8a-ui/`，不在仓库里。待改：回复里的 Markdown 还没有渲染
+- [x] 设置页：BYOK（厂商预设读 `model-catalog.json`，另有自定义兼容端点：URL、协议、模型名、key）、安全等级、运行与监督状态（D3；模型与 key 页设了 FLAG_SECURE；另含电脑端接入开关与配对，IAgentControl v3）
+- [x] 首次引导：BYOK、通知权限、默认助理、电池优化豁免、已发现的插件（D3；默认助理入口在 W13，插件发现在 M3a，这两步现在只做说明）
 
 #### W9 电脑端接入
 - [x] `DesktopGateway`：开发者开关、抽象 socket `agentos-acp`、一次性配对码（A4；`IAgentControl` v3）
