@@ -263,3 +263,33 @@ def last_tool_result(body):
                     txt = _text_of(inner) if not isinstance(inner, str) else inner
                     return ("error:" if b.get("is_error") else "ok:") + txt
     return "none"
+
+
+def main():
+    """Standalone: start the endpoint for one device and keep it running (for tests/acp-conformance device mode and
+    manual runs). The device test model (tests/device/acp-channel inapp ensureTestModel) uses the fixed test key."""
+    import argparse
+    import os
+    import shutil
+    import subprocess
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--serial", default=os.environ.get("ANDROID_SERIAL"), required=False)
+    a = ap.parse_args()
+    fm = FakeModel({"agtest-fake-model-key": "test"}).start()
+    adb = shutil.which("adb") or os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
+    if a.serial:
+        subprocess.run([adb, "-s", a.serial, "reverse", f"tcp:{DEVICE_PORT}", f"tcp:{fm.port}"], check=True)
+    print(f"fake model on 127.0.0.1:{fm.port}" + (f", device {a.serial} 127.0.0.1:{DEVICE_PORT}" if a.serial else ""), flush=True)
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if a.serial:
+            subprocess.run([adb, "-s", a.serial, "reverse", "--remove", f"tcp:{DEVICE_PORT}"])
+        fm.stop()
+
+
+if __name__ == "__main__":
+    main()
