@@ -39,7 +39,8 @@ object StatusText {
     /** getRuntimeStatus `foregroundDenied`: the system refused the last foreground start. */
     fun foregroundDenied(statusJson: String?): Boolean = parse(statusJson)?.b("foregroundDenied") == true
 
-    fun runtime(statusJson: String?): List<Line> {
+    /** [batteryExempt]: whether the App has the battery optimisation exemption (words the foregroundDenied line). */
+    fun runtime(statusJson: String?, batteryExempt: Boolean = false): List<Line> {
         val o = parse(statusJson) ?: return listOf(Line("运行时", "读不到状态", warn = true))
         val phase = when (o.s("phase")) {
             "STARTING" -> "启动中"
@@ -53,11 +54,16 @@ object StatusText {
             Line("进行中的任务", if (tasks == 0) "无" else "$tasks 个" + if (o.b("foreground") == true) "，前台运行" else ""),
         )
         if (o.s("foregroundHold") == "desktop_access") {
-            // no task, but kept in the foreground for desktop access (F11 item 4, RuntimeLifecycle rule 6)
-            lines += Line("保持前台", "为电脑端接入保持前台")
+            // no task, but kept in the foreground for desktop access (F11 item 4, RuntimeLifecycle rule 6);
+            // foregroundHold is the reason, "foreground" whether the service actually is in the foreground
+            lines += if (o.b("foreground") == true) {
+                Line("保持前台", "为电脑端接入保持前台")
+            } else {
+                Line("保持前台", "电脑端接入需要保持前台，但现在不在前台", warn = true)
+            }
         }
         if (o.b("foregroundDenied") == true) {
-            lines += Line("前台服务", "系统拒绝了前台启动，由监督进程代为拉起；建议允许 AgentOS 在后台运行（电池优化豁免）", warn = true)
+            lines += Line(BatteryText.DENIED_LABEL, BatteryText.denied(batteryExempt), warn = !batteryExempt)
         }
         return lines
     }

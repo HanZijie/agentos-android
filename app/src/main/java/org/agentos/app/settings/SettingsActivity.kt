@@ -45,6 +45,7 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        foregroundRetried = false
         scope = MainScope().also { it.launch { reload() } }
     }
 
@@ -81,7 +82,19 @@ class SettingsActivity : Activity() {
             Snapshot(0, null, null, null, null, null, "连不上 AgentOS 运行时（${e.javaClass.simpleName}）")
         }
         render(snap)
+        // Desktop access is on but the runtime's foreground start was refused (started in the background without
+        // the battery exemption): ask again now, while this page makes the App's UID foreground, which the
+        // system allows. Turning the switch "on" again changes nothing (same pairings, same code) but makes
+        // the runtime request the foreground once more (RuntimeLifecycle.onHoldChanged). Once per visit.
+        if (!foregroundRetried && snap.desktop?.enabled == true && StatusText.foregroundDenied(snap.runtime)) {
+            foregroundRetried = true
+            runCatching { control.use { it.setDesktopAccessEnabled(true) } }
+            reload()
+        }
     }
+
+    /** The foreground was asked for again in this visit (see [reload]). */
+    private var foregroundRetried = false
 
     private fun render(s: Snapshot) {
         column.removeAllViews()
@@ -131,12 +144,12 @@ class SettingsActivity : Activity() {
         val exempt = Battery.isExempt(this)
         column.addView(Ui.sectionTitle(this, "运行与监督"))
         column.addView(Ui.card(this).apply {
-            if (s.runtime != null) StatusText.runtime(s.runtime).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
+            if (s.runtime != null) StatusText.runtime(s.runtime, exempt).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
             StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount)
                 .forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
             val actions = mutableListOf<Pair<CharSequence, () -> Unit>>("刷新" to { reloadLater() })
             if (!exempt && StatusText.foregroundDenied(s.runtime)) {
-                actions.add(0, (Desktop.BATTERY_ACTION as CharSequence) to { Battery.request(this@SettingsActivity) })
+                actions.add(0, (BatteryText.ACTION as CharSequence) to { Battery.request(this@SettingsActivity) })
             }
             addView(Ui.buttons(context, *actions.toTypedArray()))
         })
@@ -161,7 +174,7 @@ class SettingsActivity : Activity() {
                             desktop { it.setDesktopAccessEnabled(true) }
                             // F11 item 4: without the exemption the runtime may not get back to the foreground
                             if (!Battery.isExempt(this@SettingsActivity)) {
-                                confirm(Desktop.BATTERY_DIALOG_TITLE, Desktop.BATTERY_DIALOG_MESSAGE, "去允许", cancelLabel = "暂不") {
+                                confirm(BatteryText.DESKTOP_DIALOG_TITLE, BatteryText.DESKTOP_DIALOG_MESSAGE, "去允许", cancelLabel = "暂不") {
                                     Battery.request(this@SettingsActivity)
                                 }
                             }
@@ -181,8 +194,8 @@ class SettingsActivity : Activity() {
             })
             addView(Ui.paragraph(context, Desktop.FOREGROUND_NOTE))
             if (Desktop.needsBatteryExemption(d.enabled, exempt)) {
-                addView(Ui.line(context, Desktop.BATTERY_LABEL, Desktop.BATTERY_WARNING, warn = true))
-                addView(Ui.buttons(context, Desktop.BATTERY_ACTION to { Battery.request(this@SettingsActivity) }))
+                addView(Ui.line(context, BatteryText.DENIED_LABEL, BatteryText.DESKTOP_WARNING, warn = true))
+                addView(Ui.buttons(context, BatteryText.ACTION to { Battery.request(this@SettingsActivity) }))
             }
             if (d.enabled) {
                 addView(Ui.paragraph(context, Desktop.HOW_TO))
@@ -276,9 +289,13 @@ class SettingsActivity : Activity() {
                 val code = Desktop.parseCode(control.use { it.newDesktopPairingCode() })
                 // round up: a 5-minute code read a moment later should still say 5, not 4
                 val minutes = ((code.expiresAtMs - System.currentTimeMillis() + 59_999) / 60_000).coerceAtLeast(1)
+                val command = Desktop.pairCommand(code.code)
                 AlertDialog.Builder(this@SettingsActivity)
-                    .setTitle("配对码")
-                    .setMessage("${code.code}\n\n在电脑端第一次连接时输入。约 $minutes 分钟内有效，配对成功或输错 5 次后作废。")
+                    .setTitle("配对码 ${code.code}")
+                    .setMessage(
+                        "电脑用 USB 连上手机，在 AgentOS 仓库目录里运行：\n\n$command\n\n" +
+                            "约 $minutes 分钟内有效，配对成功或输错 5 次后作废。配对之后，把 acp-bridge 设为 ACP 客户端的 Agent 命令即可。",
+                    )
                     .setPositiveButton("好", null)
                     .show()
             } catch (e: Exception) {

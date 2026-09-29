@@ -134,9 +134,19 @@ class SettingsLogicTest {
         assertTrue(held.any { it.value == "为电脑端接入保持前台" })
         val plain = StatusText.runtime("""{"pid":7,"phase":"READY","tasks":0,"foreground":false,"foregroundHold":null,"foregroundDenied":true,"uptimeMs":1000}""")
         assertFalse(plain.any { it.value == "为电脑端接入保持前台" })
-        assertTrue(plain.any { it.label == "前台服务" && it.warn })
+        // the hold is a reason, not the fact: held but refused is a warning, not "kept in the foreground"
+        val heldNotForeground = StatusText.runtime("""{"tasks":0,"foreground":false,"foregroundHold":"desktop_access","foregroundDenied":true}""")
+        assertTrue(heldNotForeground.single { it.label == "保持前台" }.let { it.warn && it.value.contains("不在前台") })
+        val denied = plain.single { it.label == BatteryText.DENIED_LABEL }
+        assertTrue(denied.warn)
+        assertTrue(denied.value.contains("任务可能被暂停") && denied.value.contains("忽略电池优化"))
+        val deniedButExempt = StatusText.runtime("""{"foregroundDenied":true}""", batteryExempt = true).single { it.label == BatteryText.DENIED_LABEL }
+        assertFalse(deniedButExempt.warn)
         assertTrue(StatusText.foregroundDenied("""{"foregroundDenied":true}"""))
         assertFalse(StatusText.foregroundDenied("""{"foregroundDenied":false}"""))
+        // acp-bridge pair is the way to connect; a bare adb forward is explained as not enough
+        assertTrue(Desktop.HOW_TO.indexOf("acp-bridge pair") in 0 until Desktop.HOW_TO.indexOf("adb forward"))
+        assertEquals("node tools/acp-bridge/acp-bridge.mjs pair 482913", Desktop.pairCommand("482913"))
         // F11 item 4: the note next to the switch must use the same words as C's foreground notification
         assertEquals("电脑端接入已开启", Desktop.NOTIFICATION_TITLE)
         assertEquals("关闭", Desktop.NOTIFICATION_ACTION)
@@ -179,5 +189,10 @@ class SettingsLogicTest {
         assertTrue(steps.first { it.id == Onboarding.Id.WELCOME }.detail.contains("best_effort"))
         // the supervisor is only mentioned as guarding the runtime when it reported this boot
         assertTrue(Onboarding.steps(fresh.copy(rooted = true)).first { it.id == Onboarding.Id.WELCOME }.detail.contains("监督进程"))
+        // the guide always asks for the battery exemption: the step, and once more on "开始使用" if skipped
+        assertEquals(BatteryText.GUIDE_STEP, steps.first { it.id == Onboarding.Id.BATTERY }.detail)
+        assertTrue(Onboarding.askBatteryOnFinish(fresh, alreadyAsked = false))
+        assertFalse(Onboarding.askBatteryOnFinish(fresh, alreadyAsked = true))
+        assertFalse(Onboarding.askBatteryOnFinish(fresh.copy(batteryExempt = true), alreadyAsked = false))
     }
 }

@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import org.agentos.app.R
 import org.agentos.app.settings.AgentControlClient
 import org.agentos.app.settings.Battery
+import org.agentos.app.settings.BatteryText
 import org.agentos.app.settings.Byok
 import org.agentos.app.settings.ModelSourceActivity
 import org.agentos.app.settings.StatusText
@@ -33,6 +34,8 @@ class OnboardingActivity : Activity() {
     private var scope: CoroutineScope? = null
     private var model: Byok.Source? = null
     private var rooted: Boolean? = null
+    /** The battery exemption was asked on "开始使用" in this visit (asked at most once). */
+    private var askedBattery = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,6 +123,16 @@ class OnboardingActivity : Activity() {
     }
 
     private fun finishGuide() {
+        if (Onboarding.askBatteryOnFinish(facts(), askedBattery)) {
+            askedBattery = true
+            android.app.AlertDialog.Builder(this)
+                .setTitle(BatteryText.GUIDE_DIALOG_TITLE)
+                .setMessage(BatteryText.GUIDE_DIALOG_MESSAGE)
+                .setPositiveButton("去允许") { _, _ -> Battery.request(this) } // back here afterwards; "开始使用" then leaves
+                .setNegativeButton("以后再说") { _, _ -> finishGuide() }
+                .show()
+            return
+        }
         markDone(this)
         finish()
     }

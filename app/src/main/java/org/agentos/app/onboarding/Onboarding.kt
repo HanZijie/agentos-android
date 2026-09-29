@@ -1,5 +1,6 @@
 package org.agentos.app.onboarding
 
+import org.agentos.app.settings.BatteryText
 import org.agentos.app.settings.SecurityText
 
 /**
@@ -57,8 +58,8 @@ object Onboarding {
             done = f.assistantHeld, action = if (f.assistantHeld) null else "打开系统设置",
         ),
         Step(
-            Id.BATTERY, "允许在后台运行",
-            "忽略电池优化后，任务在后台和灭屏时更不容易被系统中断。",
+            Id.BATTERY, "允许忽略电池优化",
+            BatteryText.GUIDE_STEP,
             done = f.batteryExempt, action = if (f.batteryExempt) null else "允许",
         ),
         Step(
@@ -73,4 +74,10 @@ object Onboarding {
 
     /** Steps still worth the user's attention (not done, and not informational). */
     fun pending(f: Facts): List<Id> = steps(f).filter { it.done == false }.map { it.id }
+
+    /**
+     * The guide always asks for the battery optimisation exemption (architecture F2 step 3, F11 item 4): if the
+     * step was skipped, "开始使用" asks once more before leaving; answering "later" there ends the guide.
+     */
+    fun askBatteryOnFinish(f: Facts, alreadyAsked: Boolean): Boolean = !f.batteryExempt && !alreadyAsked
 }

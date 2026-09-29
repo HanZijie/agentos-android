@@ -61,9 +61,17 @@ object Desktop {
         else -> "已打开：${a.pairings.size} 台已配对，${a.connections} 个连接"
     }
 
-    /** How to connect, shown under the switch (F11). */
-    const val HOW_TO = "在电脑上执行 adb forward tcp:8765 localabstract:agentos-acp，或直接用项目提供的 acp-bridge 命令；" +
-        "第一次连接时输入这里显示的配对码。手机上的确认照常出现，电脑端无法绕过。"
+    /**
+     * How to connect, shown under the switch (F11). acp-bridge first: it does the adb forward and the pairing
+     * handshake; an ordinary ACP client behind a bare `adb forward` never sends the handshake and gets no answer.
+     */
+    const val HOW_TO = "推荐用项目提供的 acp-bridge（仓库里的 tools/acp-bridge）：电脑用 USB 连上手机，点下面的“生成配对码”，" +
+        "在电脑上运行 acp-bridge pair <配对码> 完成第一次配对；之后把 acp-bridge 设为 ACP 客户端（如 Zed）的 Agent 命令即可。" +
+        "只执行 adb forward tcp:8765 localabstract:agentos-acp 的话，普通 ACP 客户端不会发配对握手，连不上。" +
+        "手机上的确认照常出现，电脑端无法绕过。"
+
+    /** The command to run on the computer for a pairing code (tools/acp-bridge/README.md). */
+    fun pairCommand(code: String): String = "node tools/acp-bridge/acp-bridge.mjs pair $code"
 
     /** Notification text and button of the foreground service while the switch is on (architecture F11 item 4, C6). */
     const val NOTIFICATION_TITLE = "电脑端接入已开启"
@@ -77,17 +85,9 @@ object Desktop {
      * F11 item 4 (M1): with desktop access on, the runtime relies on the battery optimisation exemption to
      * enter the foreground when it is started in the background; without it the system freezes the idle
      * process and computers stop getting answers. Asked when the switch is turned on, and kept as a
-     * warning on the card while it is on and still missing.
+     * warning on the card while it is on and still missing (wording in [BatteryText]).
      */
     fun needsBatteryExemption(enabled: Boolean, exempt: Boolean): Boolean = enabled && !exempt
-
-    const val BATTERY_LABEL = "后台运行"
-    const val BATTERY_WARNING = "还没有允许：运行时在后台被重新拉起后可能进不了前台、被系统冻结，电脑端会连不上"
-    const val BATTERY_ACTION = "允许在后台运行"
-    const val BATTERY_DIALOG_TITLE = "允许 AgentOS 在后台运行？"
-    const val BATTERY_DIALOG_MESSAGE =
-        "电脑端接入打开期间，AgentOS 的运行时要一直在后台待命。没有电池优化豁免时，运行时被系统重新拉起后可能进不了前台、" +
-            "被系统冻结，电脑端就连不上。\n\n在接下来的系统弹窗里选择“允许”即可，以后可以在系统设置里撤销。"
 
     fun errorText(message: String?): String = when {
         message?.startsWith("agentos.desktop.disabled") == true -> "请先打开电脑端接入"
