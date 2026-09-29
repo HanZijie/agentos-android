@@ -10,44 +10,44 @@
   "buildType": "user",
   "isEmulator": true
  },
- "time": "2026-09-29T13:41:52+0800",
+ "time": "2026-09-29T13:54:45+0800",
  "results": {
   "handshake": {
    "ok": true,
    "agent": "agentos",
    "protocolVersion": "1",
-   "sessionId": "ses_01M3NTMRZFPM0XMHWNWV90VYGK",
+   "sessionId": "ses_01M3NVCD61BJNQR2Y8Z59ECPC9",
    "timingsMs": {
-    "bound": 66.206041,
-    "opened": 170.308916,
-    "initialized": 271.925666,
-    "session": 303.563083
+    "bound": 20.96475,
+    "opened": 97.554875,
+    "initialized": 176.935292,
+    "session": 241.6365
    },
    "prompt": {
-    "chunks": 1,
+    "chunks": 2,
     "chars": 170,
-    "maxChunkChars": 170,
-    "outOfOrder": 1,
+    "maxChunkChars": 106,
+    "outOfOrder": 2,
     "toolCalls": 0,
     "toolStatuses": [],
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 377.833001,
-    "totalMs": 430.057792,
-    "chunksPerSec": 2.325268879211471,
+    "firstChunkMs": 404.43175,
+    "totalMs": 472.43625,
+    "chunksPerSec": 4.233375402501395,
     "latency": {
      "n": 0
     }
    },
    "closeCause": "local(transport closed)",
    "scenario": "handshake",
-   "run": "handshake-86cc98",
+   "run": "handshake-96f9f2",
    "args": {},
-   "wallMs": 1328.986917,
+   "wallMs": 1280.822459,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8732,
+    "pid": 13050,
     "uid": 10218,
     "debuggable": true
    },
@@ -68,22 +68,22 @@
     "message": "agentos.acp.not_open: this AgentOS version only accepts the AgentOS app itself; third-party apps are not enabled yet"
    },
    "reason": "agentos.acp.not_open",
-   "openMs": 22.652125,
+   "openMs": 10.194417,
    "client": {
-    "pid": 8811,
+    "pid": 13131,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
     "ackRetries": 0,
-    "threads": 25
+    "threads": 23
    },
    "scenario": "foreign-open",
-   "run": "foreign-uid-rejected-cba192",
+   "run": "foreign-uid-rejected-3d5b70",
    "args": {},
-   "wallMs": 65.448416,
+   "wallMs": 29.319417,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 8811,
+    "pid": 13131,
     "uid": 10214,
     "debuggable": true
    },
@@ -100,7 +100,7 @@
    "ok": true,
    "summary": "open=0 live=0 rejected=1",
    "acp": {
-    "pid": 8753,
+    "pid": 13072,
     "connectionsOpen": 0,
     "connectionsOpened": 1,
     "connectionsClosed": 1,
@@ -113,25 +113,25 @@
     "closeNotifyRetries": 0,
     "ackRetries": 0,
     "threads": 25,
-    "pssKb": 63256,
+    "pssKb": 63062,
     "open": [],
     "recentCloses": [
      {
       "id": 1,
       "peerUid": 10218,
       "cause": "remote(transport closed)",
-      "aliveMs": 653,
-      "closedAtNs": 2080592822408
+      "aliveMs": 667,
+      "closedAtNs": 2855015748236
      }
     ]
    },
    "scenario": "server-stats-clean",
-   "run": "foreign-no-leak-b30d13",
+   "run": "foreign-no-leak-d5d9d3",
    "args": {},
-   "wallMs": 145.268791,
+   "wallMs": 116.923917,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8732,
+    "pid": 13050,
     "uid": 10218,
     "debuggable": true
    },
@@ -152,7 +152,7 @@
      "class": "com.agentclientprotocol.protocol.JsonRpcException",
      "message": "binder-channel-v1: message of 66679 chars exceeds 65536"
     },
-    "ms": 13.476833
+    "ms": 15.082334
    },
    "B_nearLimitPrompt": {
     "ok": true,
@@ -166,9 +166,9 @@
      "stopReason": "END_TURN",
      "error": null,
      "errorData": null,
-     "firstChunkMs": 74.402583,
-     "totalMs": 520.187458,
-     "chunksPerSec": 19.223839110707665,
+     "firstChunkMs": 81.801625,
+     "totalMs": 597.147417,
+     "chunksPerSec": 16.7462836065487,
      "latency": {
       "n": 0
      }
@@ -189,9 +189,9 @@
      "stopReason": "END_TURN",
      "error": null,
      "errorData": null,
-     "firstChunkMs": 48.231792,
-     "totalMs": 76.234667,
-     "chunksPerSec": 118.05652669801783,
+     "firstChunkMs": 44.467,
+     "totalMs": 109.015291,
+     "chunksPerSec": 82.5572258482528,
      "latency": {
       "n": 0
      }
@@ -201,16 +201,16 @@
    "D_rawOversizeInjection": {
     "ok": true,
     "closeCause": "remote(message of 65537 chars exceeds 65536)",
-    "ms": 1.095334
+    "ms": 1.458875
    },
    "ok": true,
    "scenario": "oversize",
-   "run": "oversize-54f5bb",
+   "run": "oversize-d7ca3d",
    "args": {},
-   "wallMs": 644.110042,
+   "wallMs": 750.553667,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8732,
+    "pid": 13050,
     "uid": 10218,
     "debuggable": true
    },
@@ -225,51 +225,51 @@
   },
   "client-kill": {
    "ok": true,
-   "detectMs": 15.657209,
+   "detectMs": 10.862667,
    "closes": [
     {
      "id": 3,
      "peerUid": 10218,
      "cause": "peer_died(peer died)",
-     "aliveMs": 766,
-     "closedAtNs": 2084888302119
+     "aliveMs": 789,
+     "closedAtNs": 2859606357655
     }
    ],
    "dying": {
     "scenario": "client-kill",
     "phase": "dying",
-    "pid": 8732,
-    "dyingAtNs": 2084872644910,
+    "pid": 13050,
+    "dyingAtNs": 2859595494988,
     "chunks": 20
    },
    "server": {
-    "pid": 8753,
+    "pid": 13072,
     "connectionsOpen": 0,
     "liveChannels": 0,
     "hostJobChildren": 0,
     "promptsActive": 0,
     "promptOutcomes": null,
-    "threads": 28,
-    "pssKb": 53991
+    "threads": 27,
+    "pssKb": 54690
    },
-   "clientPidBefore": 8732,
-   "clientPidAfter": 8932,
+   "clientPidBefore": 13050,
+   "clientPidAfter": 13247,
    "statsPolls": 1,
-   "driverSec": 4.1
+   "driverSec": 4.2
   },
   "agent-kill-rebind": {
    "ok": true,
    "killedAfterChunks": 50,
    "closeCause": "peer_died(peer died)",
-   "detectMs": 7.008625,
+   "detectMs": 12.130083,
    "promptError": {
     "class": "java.util.concurrent.CancellationException",
     "message": "Protocol closed"
    },
-   "promptEndMs": 8.623583,
+   "promptEndMs": 15.096166,
    "promptHung": false,
-   "serviceRestartMs": 1183.154583,
-   "recoveredMs": 1405.402,
+   "serviceRestartMs": 1253.5855,
+   "recoveredMs": 1600.4555,
    "afterRestartPrompt": {
     "chunks": 1,
     "chars": 40,
@@ -280,28 +280,28 @@
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 116.81825,
-    "totalMs": 124.982584,
-    "chunksPerSec": 8.001114779319973,
+    "firstChunkMs": 176.66925,
+    "totalMs": 186.588375,
+    "chunksPerSec": 5.359390690872354,
     "latency": {
      "n": 0
     }
    },
    "clientLiveChannelsAfterDeath": 0,
    "serverBefore": {
-    "pid": 8753,
+    "pid": 13072,
     "connectionsOpen": 0,
     "connectionsOpened": 3,
     "connectionsClosed": 3,
     "liveChannels": 0,
     "hostJobChildren": 0,
     "promptsActive": 0,
-    "threads": 28,
-    "pssKb": 54077,
+    "threads": 27,
+    "pssKb": 54738,
     "mainThreadBinderCalls": 0
    },
    "serverAfter": {
-    "pid": 8992,
+    "pid": 13309,
     "connectionsOpen": 0,
     "connectionsOpened": 1,
     "connectionsClosed": 1,
@@ -309,11 +309,11 @@
     "hostJobChildren": 0,
     "promptsActive": 0,
     "threads": 25,
-    "pssKb": 53874,
+    "pssKb": 53674,
     "mainThreadBinderCalls": 0
    },
    "client": {
-    "pid": 8932,
+    "pid": 13247,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -321,14 +321,14 @@
     "threads": 29
    },
    "scenario": "server-kill",
-   "run": "agent-kill-rebind-69bafd",
+   "run": "agent-kill-rebind-c9f49b",
    "args": {
     "killAfterChunks": 50
    },
-   "wallMs": 4078.776335,
+   "wallMs": 4184.186419,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -339,7 +339,7 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 4.3
+   "driverSec": 5.4
   },
   "stream-realtime": {
    "ok": true,
@@ -366,32 +366,32 @@
     "cjk": false
    },
    "prompt": {
-    "chunks": 95,
+    "chunks": 100,
     "chars": 4800,
     "maxChunkChars": 64,
-    "outOfOrder": 95,
+    "outOfOrder": 100,
     "toolCalls": 0,
     "toolStatuses": [],
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 67.930917,
-    "totalMs": 3591.87846,
-    "chunksPerSec": 26.448556391298382,
+    "firstChunkMs": 60.681375,
+    "totalMs": 3977.572377,
+    "chunksPerSec": 25.14096301006165,
     "latency": {
      "n": 0
     }
    },
    "mainThread": {
-    "ticks": 326,
-    "maxLateMs": 15.243583,
+    "ticks": 348,
+    "maxLateMs": 15.676875,
     "lateOver16ms": 0,
     "lateOver50ms": 0,
     "lateOver100ms": 0
    },
    "clientTransport": {
     "state": "STARTED",
-    "decoded": 98,
+    "decoded": 103,
     "decodeErrors": 0,
     "droppedTooLarge": 0,
     "syntheticErrors": 0,
@@ -408,13 +408,13 @@
       "inFlightChars": 0
      },
      "in": {
-      "received": 98,
-      "consumed": 98,
+      "received": 103,
+      "consumed": 103,
       "unackedMessages": 0,
       "unackedChars": 0
      },
      "enqueued": 3,
-     "acksSent": 98,
+     "acksSent": 103,
      "acksReceived": 3,
      "windowWaits": 0,
      "windowWaitMsTotal": 0,
@@ -426,8 +426,8 @@
      "maxUnackedChars": 470,
      "rejectedTooLarge": 0,
      "uidRejects": 0,
-     "binderSendUsAvg": 20.388,
-     "binderSendUsMax": 23.291
+     "binderSendUsAvg": 21.777,
+     "binderSendUsMax": 30.542
     }
    },
    "serverConnections": [
@@ -447,8 +447,8 @@
        "state": "OPEN",
        "closeCause": null,
        "out": {
-        "sent": 98,
-        "acked": 98,
+        "sent": 103,
+        "acked": 103,
         "inFlightMessages": 0,
         "inFlightChars": 0
        },
@@ -458,9 +458,9 @@
         "unackedMessages": 0,
         "unackedChars": 0
        },
-       "enqueued": 98,
+       "enqueued": 103,
        "acksSent": 3,
-       "acksReceived": 98,
+       "acksReceived": 103,
        "windowWaits": 0,
        "windowWaitMsTotal": 0,
        "windowWaitMsMax": 0,
@@ -471,33 +471,33 @@
        "maxUnackedChars": 252,
        "rejectedTooLarge": 0,
        "uidRejects": 0,
-       "binderSendUsAvg": 57.53,
-       "binderSendUsMax": 156.458
+       "binderSendUsAvg": 52.269,
+       "binderSendUsMax": 131.084
       }
      }
     }
    ],
    "serverMainThreadBinderCalls": 0,
    "client": {
-    "pid": 8932,
+    "pid": 13247,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
     "ackRetries": 0,
-    "threads": 30
+    "threads": 29
    },
    "closeCause": "local(transport closed)",
    "scenario": "stream",
-   "run": "stream-realtime-895f6f",
+   "run": "stream-realtime-00c842",
    "args": {
     "chunks": 300,
     "chunkChars": 16,
     "intervalMs": 10
    },
-   "wallMs": 3640.898376,
+   "wallMs": 4013.895543,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -523,7 +523,7 @@
    },
    "cancelled": {
     "chunks": 101,
-    "chars": 19488,
+    "chars": 17408,
     "maxChunkChars": 256,
     "outOfOrder": 101,
     "toolCalls": 0,
@@ -531,14 +531,14 @@
     "stopReason": "CANCELLED",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 61.334833,
-    "totalMs": 3671.945668,
-    "chunksPerSec": 27.505853607853545,
+    "firstChunkMs": 79.118792,
+    "totalMs": 3776.246085,
+    "chunksPerSec": 26.74613828828372,
     "latency": {
      "n": 0
     }
    },
-   "cancelToStopMs": 29.108,
+   "cancelToStopMs": 20.9555,
    "chunksAfterCancel": 1,
    "followUp": {
     "chunks": 1,
@@ -550,24 +550,24 @@
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 42.099167,
-    "totalMs": 55.736084,
-    "chunksPerSec": 17.94169823628083,
+    "firstChunkMs": 25.621459,
+    "totalMs": 39.340834,
+    "chunksPerSec": 25.418881562093983,
     "latency": {
      "n": 0
     }
    },
    "closeCause": "local(transport closed)",
    "scenario": "cancel",
-   "run": "cancel-realtime-38eb7c",
+   "run": "cancel-realtime-31eec0",
    "args": {
     "intervalMs": 5,
     "cancelAfterChunks": 100
    },
-   "wallMs": 3771.287169,
+   "wallMs": 3878.931752,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -590,68 +590,68 @@
     {
      "i": 0,
      "ok": true,
-     "ms": 54.892541
+     "ms": 68.043583
     },
     {
      "i": 1,
      "ok": true,
-     "ms": 44.090417
+     "ms": 45.373625
     },
     {
      "i": 2,
      "ok": true,
-     "ms": 60.247417
+     "ms": 42.651375
     },
     {
      "i": 3,
      "ok": true,
-     "ms": 45.526083
+     "ms": 60.113876
     },
     {
      "i": 4,
      "ok": true,
-     "ms": 48.931875
+     "ms": 42.840458
     },
     {
      "i": 5,
      "ok": true,
-     "ms": 47.48275
+     "ms": 46.455
     },
     {
      "i": 6,
      "ok": true,
-     "ms": 59.544792
+     "ms": 52.050416
     },
     {
      "i": 7,
      "ok": true,
-     "ms": 54.416292
+     "ms": 70.285417
     },
     {
      "i": 8,
      "ok": true,
-     "ms": 40.759042
+     "ms": 101.74275
     },
     {
      "i": 9,
      "ok": true,
-     "ms": 51.0455
+     "ms": 56.591667
     }
    ],
    "serverBefore": {
-    "pid": 8992,
+    "pid": 13309,
     "connectionsOpen": 0,
     "connectionsOpened": 3,
     "connectionsClosed": 3,
     "liveChannels": 0,
     "hostJobChildren": 0,
     "promptsActive": 0,
-    "threads": 26,
-    "pssKb": 80778,
+    "threads": 27,
+    "pssKb": 46070,
     "mainThreadBinderCalls": 0
    },
    "serverAfter": {
-    "pid": 8992,
+    "pid": 13309,
     "connectionsOpen": 0,
     "connectionsOpened": 13,
     "connectionsClosed": 13,
@@ -659,11 +659,11 @@
     "hostJobChildren": 0,
     "promptsActive": 0,
     "threads": 27,
-    "pssKb": 46948,
+    "pssKb": 47196,
     "mainThreadBinderCalls": 0
    },
    "client": {
-    "pid": 8932,
+    "pid": 13247,
     "liveChannels": 0,
     "mainThreadBinderCalls": 0,
     "closeNotifyRetries": 0,
@@ -671,14 +671,14 @@
     "threads": 30
    },
    "scenario": "reconnect",
-   "run": "reconnect-502340",
+   "run": "reconnect-3a6eac",
    "args": {
     "iterations": 10
    },
-   "wallMs": 533.807167,
+   "wallMs": 621.343875,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -693,7 +693,7 @@
   },
   "window-violation": {
    "ok": true,
-   "injected": 9,
+   "injected": 11,
    "units": 30000,
    "sendError": {
     "class": "android.os.DeadObjectException",
@@ -701,15 +701,15 @@
    },
    "closeCause": "remote(window exceeded: 2 messages / 60000 chars unacked)",
    "scenario": "window-violation",
-   "run": "window-violation-257ffa",
+   "run": "window-violation-f0549a",
    "args": {
     "units": 30000,
     "n": 200
    },
-   "wallMs": 20.660416,
+   "wallMs": 19.821958,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -720,42 +720,44 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
    },
    "logcatWarnings": [
-    "09-29 13:37:09.935  8932  8982 E IPCThreadState: Process seems to be sending too many oneway calls.",
-    "09-29 13:37:09.935  8932  8982 W oneway spamming: CallStack::logStackInternal not linked",
-    "09-29 13:37:09.936  8932  8982 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 60084)"
+    "09-29 13:50:05.908 13247 13297 E IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 13:50:05.910 13247 13297 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 13:50:05.910 13247 13297 E IPCThreadState: Process seems to be sending too many oneway calls.",
+    "09-29 13:50:05.910 13247 13297 W oneway spamming: CallStack::logStackInternal not linked",
+    "09-29 13:50:05.910 13247 13297 E JavaBinder: !!! FAILED BINDER TRANSACTION !!!  (parcel size = 60084)"
    ],
-   "driverSec": 1.2
+   "driverSec": 0.2
   },
   "cold-task-foreground": {
    "ok": true,
-   "summary": "samples=52 recovering=true readyBusy=36 lostFg=0 idleOk=true idleStops+=1",
+   "summary": "samples=54 recovering=true readyBusy=38 lostFg=0 idleOk=true idleStops+=1",
    "cold": true,
    "recoveryDelayMs": 1500,
    "prompt": {
-    "chunks": 75,
+    "chunks": 76,
     "chars": 1390,
     "maxChunkChars": 20,
-    "outOfOrder": 75,
+    "outOfOrder": 76,
     "toolCalls": 0,
     "toolStatuses": [],
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 94.205667,
-    "totalMs": 3688.056793,
-    "chunksPerSec": 20.335912435608744,
+    "firstChunkMs": 108.699916,
+    "totalMs": 3976.21346,
+    "chunksPerSec": 19.113661971256445,
     "latency": {
      "n": 0
     }
    },
-   "promptEndMs": 5544,
+   "promptEndMs": 5843,
    "sawRecoveringWithTask": true,
-   "readyBusySamples": 36,
+   "readyBusySamples": 38,
    "lostForegroundSamples": [],
    "after": {
-    "t": 7503,
+    "t": 7875,
     "status": {
-     "pid": 9156,
+     "pid": 13478,
      "phase": "READY",
      "tasks": 0,
      "foreground": false,
@@ -763,7 +765,7 @@
      "serviceRunning": false,
      "foregroundHold": null,
      "foregroundDenied": false,
-     "uptimeMs": 7322
+     "uptimeMs": 7667
     },
     "service": {
      "running": false,
@@ -771,19 +773,19 @@
     },
     "hb": {
      "v": "1",
-     "pid": "9156",
-     "start": "2103852",
-     "at": "2111222",
+     "pid": "13478",
+     "start": "2878792",
+     "at": "2886527",
      "boot": "11",
      "tasks": "0",
      "fg": "0",
      "state": "idle",
-     "bytes": 70
+     "bytes": 71
     }
    },
    "idleStopsDelta": 1,
    "runtime": {
-    "pid": 9156,
+    "pid": 13478,
     "phase": "READY",
     "tasks": 0,
     "foreground": false,
@@ -791,10 +793,10 @@
     "serviceRunning": false,
     "foregroundHold": null,
     "foregroundDenied": false,
-    "uptimeMs": 7329,
+    "uptimeMs": 7670,
     "foregroundDeniedCount": 0,
     "idleStops": 1,
-    "recoveryMs": 1564,
+    "recoveryMs": 1582,
     "recoveryError": null,
     "userStopped": false,
     "wakeLockHeld": false,
@@ -819,14 +821,14 @@
      "attempt": 0,
      "startId": 1,
      "foregroundOk": true,
-     "atMs": 2104007
+     "atMs": 2879025
     }
    ],
    "samples": [
     {
-     "t": 220,
+     "t": 278,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "RECOVERING",
       "tasks": 0,
       "foreground": false,
@@ -834,7 +836,7 @@
       "serviceRunning": false,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 39
+      "uptimeMs": 70
      },
      "service": {
       "running": false,
@@ -842,20 +844,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2103955",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2878954",
       "boot": "11",
       "tasks": "0",
       "fg": "0",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 523,
+     "t": 589,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "RECOVERING",
       "tasks": 1,
       "foreground": true,
@@ -863,7 +865,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 341
+      "uptimeMs": 381
      },
      "service": {
       "running": true,
@@ -871,20 +873,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2104007",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2879025",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 829,
+     "t": 902,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "RECOVERING",
       "tasks": 1,
       "foreground": true,
@@ -892,7 +894,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 647
+      "uptimeMs": 693
      },
      "service": {
       "running": true,
@@ -900,20 +902,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2104007",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2879025",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 1131,
+     "t": 1214,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "RECOVERING",
       "tasks": 1,
       "foreground": true,
@@ -921,7 +923,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 950
+      "uptimeMs": 1005
      },
      "service": {
       "running": true,
@@ -929,20 +931,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2104007",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2879025",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 1443,
+     "t": 1528,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "RECOVERING",
       "tasks": 1,
       "foreground": true,
@@ -950,7 +952,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1261
+      "uptimeMs": 1320
      },
      "service": {
       "running": true,
@@ -958,20 +960,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2104007",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2879025",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 1752,
+     "t": 1838,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "RECOVERING",
       "tasks": 1,
       "foreground": true,
@@ -979,7 +981,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1570
+      "uptimeMs": 1629
      },
      "service": {
       "running": true,
@@ -987,20 +989,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2104007",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2879025",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 2056,
+     "t": 2146,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1008,7 +1010,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1874
+      "uptimeMs": 1942
      },
      "service": {
       "running": true,
@@ -1016,20 +1018,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2359,
+     "t": 2461,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1037,7 +1039,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2177
+      "uptimeMs": 2252
      },
      "service": {
       "running": true,
@@ -1045,20 +1047,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2669,
+     "t": 2780,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1066,7 +1068,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2487
+      "uptimeMs": 2571
      },
      "service": {
       "running": true,
@@ -1074,20 +1076,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2972,
+     "t": 3085,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1095,7 +1097,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2790
+      "uptimeMs": 2876
      },
      "service": {
       "running": true,
@@ -1103,20 +1105,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 3276,
+     "t": 3391,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1124,7 +1126,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 3094
+      "uptimeMs": 3182
      },
      "service": {
       "running": true,
@@ -1132,20 +1134,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 3584,
+     "t": 3697,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1153,7 +1155,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 3405
+      "uptimeMs": 3488
      },
      "service": {
       "running": true,
@@ -1161,20 +1163,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 3892,
+     "t": 4000,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1182,7 +1184,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 3711
+      "uptimeMs": 3792
      },
      "service": {
       "running": true,
@@ -1190,20 +1192,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 4197,
+     "t": 4307,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1211,7 +1213,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 4015
+      "uptimeMs": 4098
      },
      "service": {
       "running": true,
@@ -1219,20 +1221,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 4503,
+     "t": 4617,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1240,7 +1242,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 4321
+      "uptimeMs": 4408
      },
      "service": {
       "running": true,
@@ -1248,20 +1250,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 4807,
+     "t": 4921,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1269,7 +1271,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 4625
+      "uptimeMs": 4712
      },
      "service": {
       "running": true,
@@ -1277,20 +1279,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 5112,
+     "t": 5230,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1298,7 +1300,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 4930
+      "uptimeMs": 5021
      },
      "service": {
       "running": true,
@@ -1306,20 +1308,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 5421,
+     "t": 5536,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1327,7 +1329,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 5245
+      "uptimeMs": 5327
      },
      "service": {
       "running": true,
@@ -1335,26 +1337,26 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2105529",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2880550",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     }
    ],
    "scenario": "task-foreground",
-   "run": "cold-task-foreground-5472cd",
+   "run": "cold-task-foreground-18d563",
    "args": {
     "cold": true
    },
-   "wallMs": 7648.540379,
+   "wallMs": 8035.836713,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -1365,38 +1367,38 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 8.4
+   "driverSec": 8.5
   },
   "warm-task-foreground": {
    "ok": true,
-   "summary": "samples=35 recovering=false readyBusy=34 lostFg=0 idleOk=true idleStops+=1",
+   "summary": "samples=39 recovering=false readyBusy=38 lostFg=0 idleOk=true idleStops+=1",
    "cold": false,
    "recoveryDelayMs": 0,
    "prompt": {
-    "chunks": 75,
+    "chunks": 78,
     "chars": 1390,
-    "maxChunkChars": 20,
-    "outOfOrder": 75,
+    "maxChunkChars": 27,
+    "outOfOrder": 78,
     "toolCalls": 0,
     "toolStatuses": [],
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 53.466875,
-    "totalMs": 3513.106501,
-    "chunksPerSec": 21.34862691428551,
+    "firstChunkMs": 53.747375,
+    "totalMs": 3920.73346,
+    "chunksPerSec": 19.894236829860912,
     "latency": {
      "n": 0
     }
    },
-   "promptEndMs": 3571,
+   "promptEndMs": 4015,
    "sawRecoveringWithTask": false,
-   "readyBusySamples": 34,
+   "readyBusySamples": 38,
    "lostForegroundSamples": [],
    "after": {
-    "t": 5629,
+    "t": 6009,
     "status": {
-     "pid": 9156,
+     "pid": 13478,
      "phase": "READY",
      "tasks": 0,
      "foreground": false,
@@ -1404,7 +1406,7 @@
      "serviceRunning": false,
      "foregroundHold": null,
      "foregroundDenied": false,
-     "uptimeMs": 13889
+     "uptimeMs": 14254
     },
     "service": {
      "running": false,
@@ -1412,19 +1414,19 @@
     },
     "hb": {
      "v": "1",
-     "pid": "9156",
-     "start": "2103852",
-     "at": "2117720",
+     "pid": "13478",
+     "start": "2878792",
+     "at": "2893084",
      "boot": "11",
      "tasks": "0",
      "fg": "0",
      "state": "idle",
-     "bytes": 70
+     "bytes": 71
     }
    },
    "idleStopsDelta": 1,
    "runtime": {
-    "pid": 9156,
+    "pid": 13478,
     "phase": "READY",
     "tasks": 0,
     "foreground": false,
@@ -1432,10 +1434,10 @@
     "serviceRunning": false,
     "foregroundHold": null,
     "foregroundDenied": false,
-    "uptimeMs": 13892,
+    "uptimeMs": 14266,
     "foregroundDeniedCount": 0,
     "idleStops": 2,
-    "recoveryMs": 1564,
+    "recoveryMs": 1582,
     "recoveryError": null,
     "userStopped": false,
     "wakeLockHeld": false,
@@ -1460,7 +1462,7 @@
      "attempt": 0,
      "startId": 1,
      "foregroundOk": true,
-     "atMs": 2104007
+     "atMs": 2879025
     },
     {
      "action": "org.agentos.app.action.RUNTIME_TASK",
@@ -1468,14 +1470,14 @@
      "attempt": 0,
      "startId": 1,
      "foregroundOk": true,
-     "atMs": 2112202
+     "atMs": 2887159
     }
    ],
    "samples": [
     {
-     "t": 11,
+     "t": 3,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 0,
       "foreground": false,
@@ -1483,7 +1485,7 @@
       "serviceRunning": false,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 8271
+      "uptimeMs": 8248
      },
      "service": {
       "running": false,
@@ -1491,20 +1493,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2111222",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2886527",
       "boot": "11",
       "tasks": "0",
       "fg": "0",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 317,
+     "t": 309,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1512,7 +1514,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 8577
+      "uptimeMs": 8554
      },
      "service": {
       "running": true,
@@ -1520,20 +1522,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 623,
+     "t": 620,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1541,7 +1543,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 8884
+      "uptimeMs": 8865
      },
      "service": {
       "running": true,
@@ -1549,20 +1551,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 928,
+     "t": 926,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1570,7 +1572,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 9188
+      "uptimeMs": 9171
      },
      "service": {
       "running": true,
@@ -1578,20 +1580,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 1230,
+     "t": 1234,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1599,7 +1601,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 9490
+      "uptimeMs": 9480
      },
      "service": {
       "running": true,
@@ -1607,20 +1609,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 1534,
+     "t": 1540,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1628,7 +1630,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 9794
+      "uptimeMs": 9785
      },
      "service": {
       "running": true,
@@ -1636,20 +1638,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 1840,
+     "t": 1845,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1657,7 +1659,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 10100
+      "uptimeMs": 10090
      },
      "service": {
       "running": true,
@@ -1665,20 +1667,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2145,
+     "t": 2164,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1686,7 +1688,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 10405
+      "uptimeMs": 10409
      },
      "service": {
       "running": true,
@@ -1694,20 +1696,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2450,
+     "t": 2475,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1715,7 +1717,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 10711
+      "uptimeMs": 10720
      },
      "service": {
       "running": true,
@@ -1723,20 +1725,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2756,
+     "t": 2780,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1744,7 +1746,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 11016
+      "uptimeMs": 11025
      },
      "service": {
       "running": true,
@@ -1752,20 +1754,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 3060,
+     "t": 3088,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1773,7 +1775,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 11321
+      "uptimeMs": 11333
      },
      "service": {
       "running": true,
@@ -1781,20 +1783,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 3365,
+     "t": 3393,
      "status": {
-      "pid": 9156,
+      "pid": 13478,
       "phase": "READY",
       "tasks": 1,
       "foreground": true,
@@ -1802,7 +1804,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 11626
+      "uptimeMs": 11639
      },
      "service": {
       "running": true,
@@ -1810,26 +1812,55 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9156",
-      "start": "2103852",
-      "at": "2112206",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
       "boot": "11",
       "tasks": "1",
       "fg": "1",
       "state": "busy",
-      "bytes": 70
+      "bytes": 71
+     }
+    },
+    {
+     "t": 3705,
+     "status": {
+      "pid": 13478,
+      "phase": "READY",
+      "tasks": 1,
+      "foreground": true,
+      "state": "busy",
+      "serviceRunning": true,
+      "foregroundHold": null,
+      "foregroundDenied": false,
+      "uptimeMs": 11951
+     },
+     "service": {
+      "running": true,
+      "foreground": true
+     },
+     "hb": {
+      "v": "1",
+      "pid": "13478",
+      "start": "2878792",
+      "at": "2887160",
+      "boot": "11",
+      "tasks": "1",
+      "fg": "1",
+      "state": "busy",
+      "bytes": 71
      }
     }
    ],
    "scenario": "task-foreground",
-   "run": "warm-task-foreground-4c4dc4",
+   "run": "warm-task-foreground-c51f0f",
    "args": {
     "cold": false
    },
-   "wallMs": 5663.425878,
+   "wallMs": 6050.923795,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -1844,20 +1875,20 @@
   },
   "supervisor-start-idle": {
    "ok": true,
-   "summary": "cmd=true fgDuringRecovery=true stoppedDuringRecovery=false stoppedAt=3300",
+   "summary": "cmd=true fgDuringRecovery=true stoppedDuringRecovery=false stoppedAt=3277",
    "startCommand": {
     "action": "org.agentos.action.SUPERVISOR_START",
     "reason": "boot",
     "attempt": 1,
     "startId": 1,
     "foregroundOk": true,
-    "atMs": 2118784
+    "atMs": 2893813
    },
-   "stoppedAtMs": 3300,
+   "stoppedAtMs": 3277,
    "final": {
-    "t": 3300,
+    "t": 3277,
     "status": {
-     "pid": 9266,
+     "pid": 13586,
      "phase": "READY",
      "tasks": 0,
      "foreground": false,
@@ -1865,7 +1896,7 @@
      "serviceRunning": false,
      "foregroundHold": null,
      "foregroundDenied": false,
-     "uptimeMs": 3147
+     "uptimeMs": 3150
     },
     "service": {
      "running": false,
@@ -1873,18 +1904,18 @@
     },
     "hb": {
      "v": "1",
-     "pid": "9266",
-     "start": "2118684",
-     "at": "2121886",
+     "pid": "13586",
+     "start": "2893709",
+     "at": "2896886",
      "boot": "11",
      "tasks": "0",
      "fg": "0",
      "state": "idle",
-     "bytes": 70
+     "bytes": 71
     }
    },
    "runtime": {
-    "pid": 9266,
+    "pid": 13586,
     "phase": "READY",
     "tasks": 0,
     "foreground": false,
@@ -1892,10 +1923,10 @@
     "serviceRunning": false,
     "foregroundHold": null,
     "foregroundDenied": false,
-    "uptimeMs": 3153,
+    "uptimeMs": 3157,
     "foregroundDeniedCount": 0,
     "idleStops": 1,
-    "recoveryMs": 1098,
+    "recoveryMs": 1065,
     "recoveryError": null,
     "userStopped": false,
     "wakeLockHeld": false,
@@ -1915,9 +1946,9 @@
    },
    "timeline": [
     {
-     "t": 190,
+     "t": 174,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "RECOVERING",
       "tasks": 0,
       "foreground": true,
@@ -1925,7 +1956,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 38
+      "uptimeMs": 47
      },
      "service": {
       "running": true,
@@ -1933,20 +1964,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2118784",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2893813",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 393,
+     "t": 380,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "RECOVERING",
       "tasks": 0,
       "foreground": true,
@@ -1954,7 +1985,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 240
+      "uptimeMs": 253
      },
      "service": {
       "running": true,
@@ -1962,20 +1993,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2118784",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2893813",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 599,
+     "t": 584,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "RECOVERING",
       "tasks": 0,
       "foreground": true,
@@ -1983,7 +2014,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 446
+      "uptimeMs": 458
      },
      "service": {
       "running": true,
@@ -1991,20 +2022,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2118784",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2893813",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 802,
+     "t": 787,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "RECOVERING",
       "tasks": 0,
       "foreground": true,
@@ -2012,7 +2043,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 649
+      "uptimeMs": 660
      },
      "service": {
       "running": true,
@@ -2020,20 +2051,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2118784",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2893813",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 1008,
+     "t": 993,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "RECOVERING",
       "tasks": 0,
       "foreground": true,
@@ -2041,7 +2072,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 858
+      "uptimeMs": 867
      },
      "service": {
       "running": true,
@@ -2049,20 +2080,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2118784",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2893813",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 1224,
+     "t": 1197,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "RECOVERING",
       "tasks": 0,
       "foreground": true,
@@ -2070,7 +2101,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1071
+      "uptimeMs": 1070
      },
      "service": {
       "running": true,
@@ -2078,20 +2109,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2118784",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2893813",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "recovering",
-      "bytes": 76
+      "bytes": 77
      }
     },
     {
-     "t": 1432,
+     "t": 1407,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2099,7 +2130,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1279
+      "uptimeMs": 1280
      },
      "service": {
       "running": true,
@@ -2107,20 +2138,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 1644,
+     "t": 1615,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2128,7 +2159,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1492
+      "uptimeMs": 1488
      },
      "service": {
       "running": true,
@@ -2136,20 +2167,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 1849,
+     "t": 1825,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2157,7 +2188,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1696
+      "uptimeMs": 1699
      },
      "service": {
       "running": true,
@@ -2165,20 +2196,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2055,
+     "t": 2033,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2186,7 +2217,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 1902
+      "uptimeMs": 1906
      },
      "service": {
       "running": true,
@@ -2194,20 +2225,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2263,
+     "t": 2245,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2215,7 +2246,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2110
+      "uptimeMs": 2118
      },
      "service": {
       "running": true,
@@ -2223,20 +2254,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2472,
+     "t": 2449,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2244,7 +2275,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2320
+      "uptimeMs": 2322
      },
      "service": {
       "running": true,
@@ -2252,20 +2283,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2684,
+     "t": 2658,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2273,7 +2304,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2531
+      "uptimeMs": 2532
      },
      "service": {
       "running": true,
@@ -2281,20 +2312,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 2888,
+     "t": 2864,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2302,7 +2333,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2736
+      "uptimeMs": 2738
      },
      "service": {
       "running": true,
@@ -2310,20 +2341,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 3091,
+     "t": 3072,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": true,
@@ -2331,7 +2362,7 @@
       "serviceRunning": true,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 2939
+      "uptimeMs": 2945
      },
      "service": {
       "running": true,
@@ -2339,20 +2370,20 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2119879",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2894874",
       "boot": "11",
       "tasks": "0",
       "fg": "1",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     },
     {
-     "t": 3300,
+     "t": 3277,
      "status": {
-      "pid": 9266,
+      "pid": 13586,
       "phase": "READY",
       "tasks": 0,
       "foreground": false,
@@ -2360,7 +2391,7 @@
       "serviceRunning": false,
       "foregroundHold": null,
       "foregroundDenied": false,
-      "uptimeMs": 3147
+      "uptimeMs": 3150
      },
      "service": {
       "running": false,
@@ -2368,26 +2399,26 @@
      },
      "hb": {
       "v": "1",
-      "pid": "9266",
-      "start": "2118684",
-      "at": "2121886",
+      "pid": "13586",
+      "start": "2893709",
+      "at": "2896886",
       "boot": "11",
       "tasks": "0",
       "fg": "0",
       "state": "idle",
-      "bytes": 70
+      "bytes": 71
      }
     }
    ],
    "scenario": "supervisor-start",
-   "run": "supervisor-start-idle-511b97",
+   "run": "supervisor-start-idle-ad04bc",
    "args": {
     "reason": "boot"
    },
-   "wallMs": 3528.917127,
+   "wallMs": 3426.883377,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -2403,19 +2434,19 @@
   "restart-exit-info": {
    "ok": true,
    "summary": "lastExit=SIGNALED pidMatch=true userStopped=false",
-   "killedPid": 9266,
+   "killedPid": 13586,
    "lastExit": {
-    "pid": 9266,
+    "pid": 13586,
     "reason": 2,
     "reasonName": "SIGNALED",
     "status": 9,
     "importance": 400,
-    "timestamp": 1790660250346,
+    "timestamp": 1790661025424,
     "pssKb": 0,
     "rssKb": 0
    },
    "runtime": {
-    "pid": 9320,
+    "pid": 13638,
     "phase": "READY",
     "tasks": 0,
     "foreground": false,
@@ -2423,10 +2454,10 @@
     "serviceRunning": false,
     "foregroundHold": null,
     "foregroundDenied": false,
-    "uptimeMs": 2342,
+    "uptimeMs": 2212,
     "foregroundDeniedCount": 0,
     "idleStops": 1,
-    "recoveryMs": 204,
+    "recoveryMs": 170,
     "recoveryError": null,
     "userStopped": false,
     "wakeLockHeld": false,
@@ -2451,16 +2482,16 @@
      "attempt": 1,
      "startId": 1,
      "foregroundOk": true,
-     "atMs": 2123410
+     "atMs": 2898469
     }
    ],
    "scenario": "restart-exit-info",
-   "run": "restart-exit-info-dcf3f8",
+   "run": "restart-exit-info-165f12",
    "args": {},
-   "wallMs": 2868.835418,
+   "wallMs": 2711.476876,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 8932,
+    "pid": 13247,
     "uid": 10218,
     "debuggable": true
    },
@@ -2485,12 +2516,12 @@
     "message": "Not allowed to start service Intent { act=org.agentos.action.SUPERVISOR_START xflg=0x4 cmp=org.agentos.app/.agent.AgentService (has extras) } without permission not exported from uid 10218"
    },
    "scenario": "control-foreign",
-   "run": "control-foreign-rejected-2cb677",
+   "run": "control-foreign-rejected-93eec0",
    "args": {},
-   "wallMs": 28.166583,
+   "wallMs": 14.970042,
    "runner": {
     "package": "org.agentos.test.acp.client",
-    "pid": 9367,
+    "pid": 13684,
     "uid": 10214,
     "debuggable": true
    },
@@ -2501,7 +2532,7 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 0.9
+   "driverSec": 0.5
   },
   "user-stop-recovery": {
    "ok": true,
@@ -2517,12 +2548,12 @@
     "heartbeatIdle": true
    },
    "lastExit": {
-    "pid": 9320,
+    "pid": 13638,
     "reason": 10,
     "reasonName": "USER_REQUESTED",
     "status": 0,
     "importance": 100,
-    "timestamp": 1790660255725,
+    "timestamp": 1790661030493,
     "pssKb": 0,
     "rssKb": 0
    },
@@ -2543,9 +2574,9 @@
    },
    "heartbeat": {
     "v": "1",
-    "pid": "9464",
-    "start": "2130794",
-    "at": "2131338",
+    "pid": "13774",
+    "start": "2905613",
+    "at": "2906097",
     "boot": "11",
     "tasks": "0",
     "fg": "0",
@@ -2557,18 +2588,18 @@
     "cancelled"
    ],
    "scenario": "user-stop-check",
-   "run": "user-stop-recovery-check-5c6f4b",
+   "run": "user-stop-recovery-check-eb25be",
    "args": {
     "sessions": [
-     "ses_01M3NTP70177ZEW4783CGYQ0YS",
-     "ses_01M3NTP7A5HKGFAQERKDFQMVAQ",
-     "ses_01M3NTP7KNAD2GW7RTMT9AHQ94"
+     "ses_01M3NVDVKVX3QA4Q1W86AE9238",
+     "ses_01M3NVDVY501S4GRRPBF5QZX09",
+     "ses_01M3NVDW7N6XA2N7AYG0QWPPMG"
     ]
    },
-   "wallMs": 3559.518918,
+   "wallMs": 3531.847626,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -2584,9 +2615,9 @@
     "phase": "armed",
     "armed": true,
     "sessions": [
-     "ses_01M3NTP70177ZEW4783CGYQ0YS",
-     "ses_01M3NTP7A5HKGFAQERKDFQMVAQ",
-     "ses_01M3NTP7KNAD2GW7RTMT9AHQ94"
+     "ses_01M3NVDVKVX3QA4Q1W86AE9238",
+     "ses_01M3NVDVY501S4GRRPBF5QZX09",
+     "ses_01M3NVDW7N6XA2N7AYG0QWPPMG"
     ],
     "runState": {
      "activeTasks": 2,
@@ -2597,15 +2628,15 @@
     },
     "heartbeat": {
      "v": "1",
-     "pid": "9320",
-     "start": "2123298",
-     "at": "2127885",
+     "pid": "13638",
+     "start": "2898372",
+     "at": "2902672",
      "boot": "11",
-     "tasks": "2",
+     "tasks": "3",
      "fg": "1",
      "state": "busy"
     },
-    "agentPid": 9320
+    "agentPid": 13638
    },
    "driverSec": 8.1
   },
@@ -2630,8 +2661,8 @@
    ],
    "round1": {
     "sessions": [
-     "ses_01M3NTPF70EFZTYFN2TX7P8PNY",
-     "ses_01M3NTPFB49TJKP0PKSBS8F753"
+     "ses_01M3NVE3RYF7D55AAF00SF48TG",
+     "ses_01M3NVE3WD85AKH0Z5TP0Y011V"
     ],
     "prompts": [
      {
@@ -2644,15 +2675,15 @@
       "stopReason": "END_TURN",
       "error": null,
       "errorData": null,
-      "firstChunkMs": 110.163167,
-      "totalMs": 121.454459,
-      "chunksPerSec": 8.233538794981582,
+      "firstChunkMs": 89.929041,
+      "totalMs": 102.01175,
+      "chunksPerSec": 9.802792325393888,
       "latency": {
        "n": 0
       }
      }
     ],
-    "pid": 9547,
+    "pid": 13855,
     "store": {
      "path": "/data/user/0/org.agentos.app/databases/agentos-runtime.db",
      "storage": "ce",
@@ -2678,7 +2709,7 @@
    },
    "round2": {
     "sessions": [
-     "ses_01M3NTPFKZ2G0KRN0QXNB2W3PF"
+     "ses_01M3NVE44XETMP3PDTC1JRB90C"
     ],
     "prompts": [
      {
@@ -2691,15 +2722,15 @@
       "stopReason": "END_TURN",
       "error": null,
       "errorData": null,
-      "firstChunkMs": 92.495042,
-      "totalMs": 104.556042,
-      "chunksPerSec": 9.56424880735252,
+      "firstChunkMs": 86.070958,
+      "totalMs": 97.269792,
+      "chunksPerSec": 10.280684058623258,
       "latency": {
        "n": 0
       }
      }
     ],
-    "pid": 9574,
+    "pid": 13882,
     "store": {
      "path": "/data/user/0/org.agentos.app/databases/agentos-runtime.db",
      "storage": "ce",
@@ -2733,7 +2764,7 @@
     "systemEvents": 2,
     "systemLastSequence": 2,
     "sessions": {
-     "ses_01M3NTPF70EFZTYFN2TX7P8PNY": {
+     "ses_01M3NVE3RYF7D55AAF00SF48TG": {
       "exists": true,
       "owner": "uid:10218",
       "tasks": [
@@ -2745,7 +2776,7 @@
       "completed": 1,
       "piMessages": 1
      },
-     "ses_01M3NTPFB49TJKP0PKSBS8F753": {
+     "ses_01M3NVE3WD85AKH0Z5TP0Y011V": {
       "exists": true,
       "owner": "uid:10218",
       "tasks": [],
@@ -2767,7 +2798,7 @@
     "systemEvents": 4,
     "systemLastSequence": 4,
     "sessions": {
-     "ses_01M3NTPF70EFZTYFN2TX7P8PNY": {
+     "ses_01M3NVE3RYF7D55AAF00SF48TG": {
       "exists": true,
       "owner": "uid:10218",
       "tasks": [
@@ -2779,7 +2810,7 @@
       "completed": 1,
       "piMessages": 1
      },
-     "ses_01M3NTPFB49TJKP0PKSBS8F753": {
+     "ses_01M3NVE3WD85AKH0Z5TP0Y011V": {
       "exists": true,
       "owner": "uid:10218",
       "tasks": [],
@@ -2789,7 +2820,7 @@
       "completed": 0,
       "piMessages": 0
      },
-     "ses_01M3NTPFKZ2G0KRN0QXNB2W3PF": {
+     "ses_01M3NVE44XETMP3PDTC1JRB90C": {
       "exists": true,
       "owner": "uid:10218",
       "tasks": [
@@ -2804,14 +2835,14 @@
     }
    },
    "scenario": "store-restart",
-   "run": "store-restart-28695c",
+   "run": "store-restart-10896c",
    "args": {
     "fresh": true
    },
-   "wallMs": 1089.536542,
+   "wallMs": 1003.496917,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -2822,11 +2853,11 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 2.2
+   "driverSec": 1.2
   },
   "byok-roundtrip": {
    "ok": true,
-   "summary": "checks=15/15 errors=8/8 logcatHits=0/8319 resultHits=0",
+   "summary": "checks=15/15 errors=8/8 logcatHits=0/11054 resultHits=0",
    "checks": {
     "version2": true,
     "emptyAfterClear": true,
@@ -2902,7 +2933,7 @@
      "leaked": false
     }
    },
-   "masked": "agte…5FKi",
+   "masked": "agte…W5rL",
    "keyLength": 55,
    "presetProviders": 28,
    "byok": {
@@ -2920,7 +2951,7 @@
      "served": 0,
      "denied": 0,
      "revocations": 1,
-     "lastRevokedAtMs": 1790660267130,
+     "lastRevokedAtMs": 1790661041040,
      "signals": 1,
      "signalsDropped": 0,
      "subscribers": 0
@@ -2941,14 +2972,14 @@
     }
    },
    "scenario": "byok-roundtrip",
-   "run": "byok-roundtrip-c88162",
+   "run": "byok-roundtrip-1da19f",
    "args": {
     "apiKeyFile": "test/byok_key"
    },
-   "wallMs": 329.291042,
+   "wallMs": 844.053333,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -2960,7 +2991,7 @@
    },
    "logcatWarnings": [],
    "leakScan": {
-    "logcatLines": 8319,
+    "logcatLines": 11054,
     "logcatHits": 0,
     "resultHits": 0,
     "hitLines": []
@@ -2970,7 +3001,7 @@
   },
   "byok-restart": {
    "ok": true,
-   "summary": "pid 9645→9719 usable=true keystore=software files=8 hits=0 logcatHits=0/8346 resultHits=0",
+   "summary": "pid 13949→14022 usable=true keystore=software files=8 hits=0 logcatHits=0/11079 resultHits=0",
    "checks": {
     "newProcess": true,
     "usableAfterRestart": true,
@@ -2995,7 +3026,7 @@
      "/data/user_de/0/org.agentos.app"
     ],
     "files": 8,
-    "bytes": 3457202,
+    "bytes": 3440611,
     "hits": 0,
     "hitPaths": []
    },
@@ -3036,14 +3067,14 @@
    },
    "recoveryMs": -1,
    "scenario": "byok-restart",
-   "run": "byok-restart-8a509c",
+   "run": "byok-restart-fcc25b",
    "args": {
     "apiKeyFile": "test/byok_key"
    },
-   "wallMs": 998.473167,
+   "wallMs": 663.775792,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -3055,17 +3086,17 @@
    },
    "logcatWarnings": [],
    "leakScan": {
-    "logcatLines": 8346,
+    "logcatLines": 11079,
     "logcatHits": 0,
     "resultHits": 0,
     "hitLines": []
    },
-   "driverSec": 3.2,
+   "driverSec": 3.1,
    "keyPushAttempts": 1
   },
   "byok-clear-inflight": {
    "ok": true,
-   "summary": "clearToEndMs=30 (call 22) charsAfterClear=9 inFlight completed=false disconnected=true reason=key_revoked requests=1 served 1/1→1 signals 0→1 subscribers=1 checks=11/11 logcatHits=0/8391 resultHits=0",
+   "summary": "clearToEndMs=61 (call 47) charsAfterClear=9 inFlight completed=false disconnected=true reason=key_revoked requests=1 served 1/1→1 signals 0→1 subscribers=1 checks=11/11 logcatHits=0/11090 resultHits=0",
    "checks": {
     "streamedBeforeClear": true,
     "turnEndedWithError": true,
@@ -3083,18 +3114,18 @@
    "errorData": {
     "agentosCode": "model_not_configured",
     "retryable": false,
-    "taskId": "tsk_01M3NTPSATWX2CYHDQY9A6FC4T",
+    "taskId": "tsk_01M3NVECRRDFCGJNEN8D5YKYPC",
     "details": {
      "reason": "key_revoked"
     }
    },
    "followUpError": "model_not_configured: No model is configured. Choose a model and enter its key in AgentOS settings.",
-   "clearToEndMs": 30.194625,
-   "clearCallToEndMs": 21.785167,
+   "clearToEndMs": 61.3075,
+   "clearCallToEndMs": 47.387875,
    "charsAtClear": 206,
    "charsAfterClear": 9,
    "inFlightResponseCompleted": false,
-   "fakeSettleMs": 1062,
+   "fakeSettleMs": 1085,
    "requestsBeforeClear": {
     "served": 1,
     "denied": 0,
@@ -3108,7 +3139,7 @@
     "served": 1,
     "denied": 0,
     "revocations": 1,
-    "lastRevokedAtMs": 1790660274106,
+    "lastRevokedAtMs": 1790661047729,
     "signals": 1,
     "signalsDropped": 0,
     "subscribers": 1
@@ -3117,7 +3148,7 @@
     "served": 1,
     "denied": 0,
     "revocations": 1,
-    "lastRevokedAtMs": 1790660274106,
+    "lastRevokedAtMs": 1790661047729,
     "signals": 1,
     "signalsDropped": 0,
     "subscribers": 1
@@ -3125,36 +3156,36 @@
    "fakeRequests": [
     {
      "id": 26,
-     "t": 1790660273.589123,
+     "t": 1790661047.2003899,
      "key": "byok",
      "model": "fake-model",
-     "userText": "{\"chunks\":120,\"intervalMs\":20,\"tool\":\"fs_read\",\"n\":\"f369dfcb\"}",
+     "userText": "{\"chunks\":120,\"intervalMs\":20,\"tool\":\"fs_read\",\"n\":\"b9b7f5f3\"}",
      "userChars": 62,
      "round": 0,
      "messages": [
       {
        "role": "user",
-       "text": "{\"chunks\":120,\"intervalMs\":20,\"tool\":\"fs_read\",\"n\":\"f369dfcb\"}",
+       "text": "{\"chunks\":120,\"intervalMs\":20,\"tool\":\"fs_read\",\"n\":\"b9b7f5f3\"}",
        "blocks": [
         "text"
        ]
       }
      ],
      "status": 200,
-     "sent": 69,
+     "sent": 65,
      "completed": false,
      "disconnected": true
     }
    ],
    "scenario": "byok-clear-inflight",
-   "run": "byok-clear-inflight-2afc5f",
+   "run": "byok-clear-inflight-269909",
    "args": {
     "apiKeyFile": "test/byok_key"
    },
-   "wallMs": 1789.518001,
+   "wallMs": 1880.590918,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -3166,7 +3197,7 @@
    },
    "logcatWarnings": [],
    "leakScan": {
-    "logcatLines": 8391,
+    "logcatLines": 11090,
     "logcatHits": 0,
     "resultHits": 0,
     "hitLines": []
@@ -3176,7 +3207,7 @@
   },
   "byok-clear": {
    "ok": true,
-   "summary": "configured=false keystore={\"alias\":\"org.agentos.byok.v1\",\"present\":false} hits=0 logcatHits=0/8386 resultHits=0",
+   "summary": "configured=false keystore={\"alias\":\"org.agentos.byok.v1\",\"present\":false} hits=0 logcatHits=0/11113 resultHits=0",
    "checks": {
     "clearedNow": true,
     "clearedAfterRestart": true,
@@ -3219,19 +3250,19 @@
      "/data/user_de/0/org.agentos.app"
     ],
     "files": 7,
-    "bytes": 4058051,
+    "bytes": 4041460,
     "hits": 0,
     "hitPaths": []
    },
    "scenario": "byok-clear",
-   "run": "byok-clear-d1d5ce",
+   "run": "byok-clear-55ff3d",
    "args": {
     "apiKeyFile": "test/byok_key"
    },
-   "wallMs": 700.416708,
+   "wallMs": 661.609126,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -3243,7 +3274,7 @@
    },
    "logcatWarnings": [],
    "leakScan": {
-    "logcatLines": 8386,
+    "logcatLines": 11113,
     "logcatHits": 0,
     "resultHits": 0,
     "hitLines": []
@@ -3274,9 +3305,9 @@
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 63.798292,
-    "totalMs": 96.450667,
-    "chunksPerSec": 20.735989311509893,
+    "firstChunkMs": 79.1425,
+    "totalMs": 120.487541,
+    "chunksPerSec": 16.59922663705121,
     "latency": {
      "n": 0
     }
@@ -3285,16 +3316,16 @@
    "fakeRequests": [
     {
      "id": 27,
-     "t": 1790660279.127716,
+     "t": 1790661052.7756338,
      "key": "test",
      "model": "fake-model",
-     "userText": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"6e9b6ee5\"}",
+     "userText": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"489236c9\"}",
      "userChars": 59,
      "round": 0,
      "messages": [
       {
        "role": "user",
-       "text": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"6e9b6ee5\"}",
+       "text": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"489236c9\"}",
        "blocks": [
         "text"
        ]
@@ -3307,16 +3338,16 @@
     },
     {
      "id": 28,
-     "t": 1790660279.148632,
+     "t": 1790661052.800816,
      "key": "test",
      "model": "fake-model",
-     "userText": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"6e9b6ee5\"}",
+     "userText": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"489236c9\"}",
      "userChars": 59,
      "round": 1,
      "messages": [
       {
        "role": "user",
-       "text": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"6e9b6ee5\"}",
+       "text": "{\"chunks\":5,\"intervalMs\":0,\"tool\":\"fs_read\",\"n\":\"489236c9\"}",
        "blocks": [
         "text"
        ]
@@ -3344,12 +3375,12 @@
     }
    ],
    "scenario": "pi-tool-round",
-   "run": "pi-tool-round-4756de",
+   "run": "pi-tool-round-f68752",
    "args": {},
-   "wallMs": 158.883125,
+   "wallMs": 180.447417,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -3374,30 +3405,30 @@
    },
    "request": {
     "id": 30,
-    "t": 1790660280.8457448,
+    "t": 1790661054.4687119,
     "key": "test",
     "model": "fake-model",
-    "userText": "ctx-10a682ef second",
+    "userText": "ctx-66cda160 second",
     "userChars": 19,
     "round": 0,
     "messages": [
      {
       "role": "user",
-      "text": "ctx-10a682ef first",
+      "text": "ctx-66cda160 first",
       "blocks": [
        "text"
       ]
      },
      {
       "role": "assistant",
-      "text": "echo[0]: ctx-10a682ef first\necho[1]: ctx-10a682ef first\necho[2]: ctx-10a682ef first\necho[3]: ctx-10a682ef first\necho[4]: ctx-10a682ef first\necho[5]: ctx-10a682ef first\necho[6]: ctx-10a682ef first\necho[7]: ctx-10a682ef first\necho[8]: ctx-10a682ef first\necho[9]: ctx-10a682ef first\necho[10]: ctx-10a682",
+      "text": "echo[0]: ctx-66cda160 first\necho[1]: ctx-66cda160 first\necho[2]: ctx-66cda160 first\necho[3]: ctx-66cda160 first\necho[4]: ctx-66cda160 first\necho[5]: ctx-66cda160 first\necho[6]: ctx-66cda160 first\necho[7]: ctx-66cda160 first\necho[8]: ctx-66cda160 first\necho[9]: ctx-66cda160 first\necho[10]: ctx-66cda1",
       "blocks": [
        "text"
       ]
      },
      {
       "role": "user",
-      "text": "ctx-10a682ef second",
+      "text": "ctx-66cda160 second",
       "blocks": [
        "text"
       ]
@@ -3418,9 +3449,9 @@
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 51.907083,
-    "totalMs": 490.119458,
-    "chunksPerSec": 20.403189134351813,
+    "firstChunkMs": 62.874958,
+    "totalMs": 554.624791,
+    "chunksPerSec": 18.030207380326065,
     "latency": {
      "n": 0
     }
@@ -3435,20 +3466,20 @@
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 54.074167,
-    "totalMs": 491.281959,
-    "chunksPerSec": 20.354909877730723,
+    "firstChunkMs": 54.4865,
+    "totalMs": 558.417584,
+    "chunksPerSec": 17.907745541193417,
     "latency": {
      "n": 0
     }
    },
    "scenario": "pi-context",
-   "run": "pi-context-d20638",
+   "run": "pi-context-07c3be",
    "args": {},
-   "wallMs": 1045.349917,
+   "wallMs": 1134.297375,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -3459,7 +3490,7 @@
     "fingerprint": "google/sdk_gphone64_arm64/emu64a:16/BE2A.250530.026.D1/13818094:user/release-keys"
    },
    "logcatWarnings": [],
-   "driverSec": 1.3
+   "driverSec": 2.2
   },
   "recovery-context": {
    "ok": true,
@@ -3474,30 +3505,30 @@
    },
    "request": {
     "id": 34,
-    "t": 1790660282.67939,
+    "t": 1790661057.3216279,
     "key": "test",
     "model": "fake-model",
-    "userText": "rec-c409b1e5 after restart",
+    "userText": "rec-d33faeee after restart",
     "userChars": 26,
     "round": 0,
     "messages": [
      {
       "role": "user",
-      "text": "rec-c409b1e5 first",
+      "text": "rec-d33faeee first",
       "blocks": [
        "text"
       ]
      },
      {
       "role": "assistant",
-      "text": "echo[0]: rec-c409b1e5 first\necho[1]: rec-c409b1e5 first\necho[2]: rec-c409b1e5 first\necho[3]: rec-c409b1e5 first\necho[4]: rec-c409b1e5 first\necho[5]: rec-c409b1e5 first\necho[6]: rec-c409b1e5 first\necho[7]: rec-c409b1e5 first\necho[8]: rec-c409b1e5 first\necho[9]: rec-c409b1e5 first\necho[10]: rec-c409b1",
+      "text": "echo[0]: rec-d33faeee first\necho[1]: rec-d33faeee first\necho[2]: rec-d33faeee first\necho[3]: rec-d33faeee first\necho[4]: rec-d33faeee first\necho[5]: rec-d33faeee first\necho[6]: rec-d33faeee first\necho[7]: rec-d33faeee first\necho[8]: rec-d33faeee first\necho[9]: rec-d33faeee first\necho[10]: rec-d33fae",
       "blocks": [
        "text"
       ]
      },
      {
       "role": "user",
-      "text": "rec-c409b1e5 after restart",
+      "text": "rec-d33faeee after restart",
       "blocks": [
        "text"
       ]
@@ -3518,9 +3549,9 @@
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 59.281667,
-    "totalMs": 513.197709,
-    "chunksPerSec": 19.485667657179665,
+    "firstChunkMs": 51.662125,
+    "totalMs": 552.08625,
+    "chunksPerSec": 18.113111855258122,
     "latency": {
      "n": 0
     }
@@ -3538,12 +3569,12 @@
    },
    "diagStaleWhenFound": false,
    "scenario": "recovery-context",
-   "run": "recovery-context-4f0fd3",
+   "run": "recovery-context-4edc7d",
    "args": {},
-   "wallMs": 1768.773209,
+   "wallMs": 1832.514043,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -3558,7 +3589,7 @@
   },
   "desktop-access": {
    "ok": true,
-   "summary": "checks=20/20 bridge=True samples=36 frozen=0 handshakeMs=189 offToBackgroundSec=1.3 frozenAfterOffSec=41.2",
+   "summary": "checks=20/20 bridge=True samples=36 frozen=0 handshakeMs=184 offToBackgroundSec=1.3 frozenAfterOffSec=41.0",
    "checks": {
     "testModelReady": true,
     "enabledFromUi": true,
@@ -3582,7 +3613,7 @@
     "frozenAfterOff": true
    },
    "info": {
-    "enabledFromUi": "on=true settleMs=29 serviceRunning=true fg=true hold=desktop_access listening=true",
+    "enabledFromUi": "on=true settleMs=11 serviceRunning=true fg=true hold=desktop_access listening=true",
     "notificationShown": {
      "title": "电脑端接入已开启",
      "subText": null,
@@ -3592,11 +3623,11 @@
      ]
     },
     "handshakeAfterIdle": {
-     "msFromBridgeStart": 189,
-     "initMs": 186,
+     "msFromBridgeStart": 184,
+     "initMs": 162,
      "timeout": false,
      "stderr": [
-      "acp-bridge: paired with adb:emulator-5572 (dp_c5300af3749f); token stored in /var/folders/cn/2j_k5rf92b941kl2cxx2hlm00000gn/T/c6-bridge-nnxt7p_t/acp-bridge.json",
+      "acp-bridge: paired with adb:emulator-5572 (dp_c6b5fb2cb964); token stored in /var/folders/cn/2j_k5rf92b941kl2cxx2hlm00000gn/T/c6-bridge-erreadc8/acp-bridge.json",
       "acp-bridge: connected to adb:emulator-5572"
      ]
     },
@@ -3605,8 +3636,8 @@
      "error": null,
      "timeout": false,
      "closed": false,
-     "ms": 151,
-     "firstChunkMs": 61,
+     "ms": 201,
+     "firstChunkMs": 99,
      "chars": 40,
      "cancelSent": false
     },
@@ -3615,8 +3646,8 @@
      "error": null,
      "timeout": false,
      "closed": false,
-     "ms": 187,
-     "firstChunkMs": 94,
+     "ms": 205,
+     "firstChunkMs": 83,
      "chars": 40,
      "cancelSent": false
     },
@@ -3625,9 +3656,9 @@
      "error": null,
      "timeout": false,
      "closed": false,
-     "ms": 845,
-     "firstChunkMs": 70,
-     "chars": 305,
+     "ms": 870,
+     "firstChunkMs": 77,
+     "chars": 278,
      "cancelSent": true
     },
     "busyShownWithDesktopOn": {
@@ -3637,12 +3668,12 @@
     "bridgeClosedCleanly": {
      "exit": 0
     },
-    "restart-boot": "path=boot pid 9962→10338 settleMs=2168 fg=true hold=desktop_access listening=true lastStartReason=boot",
-    "restart-bind": "path=bind pid 10338→10439 settleMs=1320 fg=true hold=desktop_access listening=true lastStartReason=null",
+    "restart-boot": "path=boot pid 14252→14673 settleMs=2095 fg=true hold=desktop_access listening=true lastStartReason=boot",
+    "restart-bind": "path=bind pid 14673→14774 settleMs=1156 fg=true hold=desktop_access listening=true lastStartReason=null",
     "reconnectWithTokenAfterRestart": {
-     "initMs": 132,
+     "initMs": 123,
      "stderr": [
-      "acp-bridge: adb -s emulator-5572 forward tcp:64993 localabstract:agentos-acp",
+      "acp-bridge: adb -s emulator-5572 forward tcp:58801 localabstract:agentos-acp",
       "acp-bridge: connected to adb:emulator-5572"
      ]
     },
@@ -3682,7 +3713,7 @@
      "pairings": 0
     },
     "frozenAfterOff": {
-     "sec": 41.2
+     "sec": 41.0
     }
    },
    "samples": [
@@ -3690,7 +3721,7 @@
      "t": 2.9,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -3700,107 +3731,107 @@
      "t": 8.0,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 13.1,
+     "t": 13.0,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 18.2,
+     "t": 18.1,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 23.3,
+     "t": 23.2,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 28.4,
+     "t": 28.2,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 33.5,
+     "t": 33.3,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 38.5,
+     "t": 38.4,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 43.6,
+     "t": 43.4,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 48.7,
+     "t": 48.5,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 53.8,
+     "t": 53.6,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 58.8,
+     "t": 58.6,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -3810,7 +3841,7 @@
      "t": 62.9,
      "phase": "idle-before-connect",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -3820,7 +3851,7 @@
      "t": 63.3,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -3830,157 +3861,157 @@
      "t": 68.4,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 73.6,
+     "t": 73.5,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 78.7,
+     "t": 78.6,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 83.8,
+     "t": 83.7,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 88.9,
+     "t": 88.8,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 94.1,
+     "t": 93.9,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 99.2,
+     "t": 99.0,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 104.3,
+     "t": 104.0,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 109.4,
+     "t": 109.1,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 114.4,
+     "t": 114.2,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 119.5,
+     "t": 119.2,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 123.3,
+     "t": 123.4,
      "phase": "idle-connected",
      "alive": true,
-     "pid": 9962,
+     "pid": 14252,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 128.6,
+     "t": 128.5,
      "phase": "idle-after-restart-boot",
      "alive": true,
-     "pid": 10338,
+     "pid": 14673,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 133.8,
+     "t": 133.5,
      "phase": "idle-after-restart-boot",
      "alive": true,
-     "pid": 10338,
+     "pid": 14673,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 138.9,
+     "t": 138.6,
      "phase": "idle-after-restart-boot",
      "alive": true,
-     "pid": 10338,
+     "pid": 14673,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 144.0,
+     "t": 143.6,
      "phase": "idle-after-restart-boot",
      "alive": true,
-     "pid": 10338,
+     "pid": 14673,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -3990,7 +4021,7 @@
      "t": 148.5,
      "phase": "idle-after-restart-boot",
      "alive": true,
-     "pid": 10338,
+     "pid": 14673,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -4000,17 +4031,17 @@
      "t": 151.2,
      "phase": "idle-after-restart-bind",
      "alive": true,
-     "pid": 10439,
+     "pid": 14774,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 156.2,
+     "t": 156.3,
      "phase": "idle-after-restart-bind",
      "alive": true,
-     "pid": 10439,
+     "pid": 14774,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -4020,17 +4051,17 @@
      "t": 161.3,
      "phase": "idle-after-restart-bind",
      "alive": true,
-     "pid": 10439,
+     "pid": 14774,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     },
     {
-     "t": 166.3,
+     "t": 166.4,
      "phase": "idle-after-restart-bind",
      "alive": true,
-     "pid": 10439,
+     "pid": 14774,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
@@ -4040,51 +4071,51 @@
      "t": 171.1,
      "phase": "idle-after-restart-bind",
      "alive": true,
-     "pid": 10439,
+     "pid": 14774,
      "isFrozen": false,
      "procState": 4,
      "oomAdj": 200,
      "fgService": true
     }
    ],
-   "driverSec": 219.1
+   "driverSec": 218.9
   },
   "live-minimax": {
    "ok": true,
-   "summary": "model=minimax-cn/MiniMax-M2.7 stop=END_TURN chars=4 firstChunkMs=3391 totalMs=3645 text=  你好 logcatHits=0/8954 resultHits=0",
+   "summary": "model=minimax-cn/MiniMax-M2.7 stop=END_TURN chars=2 firstChunkMs=4884 totalMs=4964 text=你好 logcatHits=0/11672 resultHits=0",
    "checks": {
     "endTurn": true,
     "gotText": true,
     "keyRemovedAfter": true
    },
    "model": "minimax-cn/MiniMax-M2.7",
-   "text": "\n\n你好",
+   "text": "你好",
    "prompt": {
     "chunks": 1,
-    "chars": 4,
-    "maxChunkChars": 4,
+    "chars": 2,
+    "maxChunkChars": 2,
     "outOfOrder": 1,
     "toolCalls": 0,
     "toolStatuses": [],
     "stopReason": "END_TURN",
     "error": null,
     "errorData": null,
-    "firstChunkMs": 3391.40096,
-    "totalMs": 3644.783751,
-    "chunksPerSec": 0.27436469988806206,
+    "firstChunkMs": 4883.538753,
+    "totalMs": 4963.796878,
+    "chunksPerSec": 0.20145868668238442,
     "latency": {
      "n": 0
     }
    },
    "scenario": "live-minimax",
-   "run": "live-minimax-1dd02b",
+   "run": "live-minimax-11483c",
    "args": {
     "keyFile": "test/live_key"
    },
-   "wallMs": 4065.451544,
+   "wallMs": 5236.24017,
    "runner": {
     "package": "org.agentos.app",
-    "pid": 9445,
+    "pid": 13755,
     "uid": 10218,
     "debuggable": true
    },
@@ -4096,12 +4127,12 @@
    },
    "logcatWarnings": [],
    "leakScan": {
-    "logcatLines": 8954,
+    "logcatLines": 11672,
     "logcatHits": 0,
     "resultHits": 0,
     "hitLines": []
    },
-   "driverSec": 7.8,
+   "driverSec": 8.2,
    "keyPushAttempts": 1
   }
  }
