@@ -95,7 +95,7 @@
 
 - **JS 里不做 I/O**。Pi 发出的网络请求一律经宿主层提供的 `fetch`（底层是 OkHttp）；模型 key 由宿主层按目标 endpoint 注入请求头，JS 运行时里看不到 key。工具只有目录里的 MCP 工具和内置的 `read_skill`，执行一律回到 Kotlin 的 Broker。
 - **模型调用走混合方案：协议适配用 `pi-ai`，网络和 key 留在 Kotlin。**
-  - 只打包 `pi-ai` 的 `anthropic-messages` 和 `openai-completions` 两个协议族及其官方 SDK（`@anthropic-ai/sdk`、`openai`）；Google、Bedrock、Azure 等不进包。MiniMax 用 `pi-ai` 自带的 `minimax` / `minimax-cn` 预设（Anthropic 协议），DeepSeek、Kimi、Qwen、智谱等国内厂商都落在这两个协议族上。
+  - 只打包 `pi-ai` 的 `anthropic-messages` 和 `openai-completions` 两个协议族及其官方 SDK（`@anthropic-ai/sdk`、`openai`）；Google、Bedrock、Azure 等不进包。MiniMax 用 `pi-ai` 自带的 `minimax` / `minimax-cn` 预设（Anthropic 协议，MiniMax 官方推荐的路线）。用户也可以用 OpenAI 兼容路线接 MiniMax（`https://api.minimax.cn/v1`，B7 已实测），但 M2.x 的思考内容会以 `<think>…</think>` 混在正文里：在请求里带 `reasoning_split: true` 才会拆到 `reasoning_content` 字段，由 B8 通过模型的 compat 设置解决，响应侧另加开头 `<think>` 段的兜底解析。DeepSeek、Kimi、Qwen、智谱等国内厂商都落在这两个协议族上。
   - 调用 `pi-ai` 时一律传入宿主层的 `fetch`、占位 key 和 `maxRetries: 0`：真 key 在请求经过 `fetch` 时由 Kotlin 注入；重试、deadline、取消和“不重放”统一由宿主层负责，不让 SDK 或 `pi-ai` 自己重试。
   - 官方 SDK 和 `pi-ai` 里引用 Node 内置模块（`node:fs`、`node:child_process` 等）的文件，打包时用 esbuild 替换成空实现。
   - 退路：如果 S8 证明官方 SDK 在 QuickJS 里跑不通，就由宿主层实现这两个协议族，经自定义的 `streamFn` 推给 Pi；Agent 循环仍然是 Pi 的，模型目录仍然直接读 `pi-ai` 的数据文件，不自己维护。
@@ -390,7 +390,7 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
    - **清除**：立即作废（整合人 2026-09-29 决定）：删除文件和 Keystore 主密钥，之后的模型请求（包括同一轮里的下一次）一律拿不到 key，以 `model_not_configured` 结束，不再用旧 key 跑完这一轮（C3.1 已实现）。正在传输的那一次 HTTP 响应也要中止，分三处实现，不阻塞 M1：
      - `SecretPort` 追加 `revocations: Flow<Credential>`，默认空流（A，已完成）。清除时发出被撤销的 Credential，按对象身份比较；更换不发。
      - HostFetch 在构造时订阅撤销流，按对象身份找到携带该 Credential 的在途调用，等响应头和读流两个阶段都会中止，抛 `NetErrorKind.KEY_REVOKED`，不重试（B5，已完成）。它还记下最近撤销的 32 个 Credential，所以“刚取到 key、还没登记请求”这几毫秒里撤销的，请求也不会发出去。
-     - `KeystoreSecrets.revoke()` 发出撤销信号（C，进行中）。发出的必须是 `credentialFor` 当初返回的那个对象，包括换下来但还留在内存里的旧 key。
+     - `KeystoreSecrets.revoke()` 发出撤销信号（C5，已完成）。设备实测（API 35 / 36 / 37 × debug / releaseTest，66/66）：从调用清除到这一轮结束 10–135 ms（只有第一层时约 930 ms），假端点看到在途连接被断开。发出的必须是 `credentialFor` 当初返回的那个对象，包括换下来但还留在内存里的旧 key。
      被中止的这一轮同样以 `model_not_configured` 结束，`details.reason=key_revoked`（整合人 2026-09-29 决定，不归入 `model_auth_failed`）。
    - 错误以 `agentos.byok.<code>` 返回，错误消息里不含 key。
 3. key 只在 Kotlin 宿主层里使用：Pi 发出的模型请求经过宿主层的 `fetch` 时才注入请求头，QuickJS 里的 Pi Agent core 看不到 key。

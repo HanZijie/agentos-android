@@ -48,7 +48,7 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | store-restart | inapp | 删库 → ACP 冷启动建两个会话、跑一轮 → SIGKILL 后直接读数据库文件（只读）：会话、已完成的任务、事件、Pi messages 都在，库在 CE、WAL；再冷启动：`runtime.started` / `runtime.recovered` 各加 1、系统流 sequence 连续 |
 | byok-roundtrip | inapp + run.py | IAgentControl v2：设置预设 → 读取只有首尾 4 位 → 同厂商换模型沿用 key → 8 种拒绝（换端点要 key、http、换行、Bearer、未知厂商、key 填错字段、坏 JSON）且消息里没有 key → 自定义端点 → 诊断里连掩码都没有；全程不重启 `:agent` |
 | byok-restart | inapp + run.py | SIGKILL 后冷启动：key 仍能解密、按端点匹配（`credentialResolves`），Keystore 主密钥在；`model-source.json` 在 CE、只有密文；App 的 CE / DE 私有目录下所有文件里没有明文 key |
-| byok-clear-inflight | inapp + run.py | 清除 = 立即作废（C3.1，C4 起走真正的 Pi）：模型来源是假端点 + BYOK 测试 key，模型第一轮流式后要调用工具、Pi 随后要发第二个请求；第一轮流式中清除 → 第二个请求拿不到 key、HostFetch 不发，本轮以 `model_not_configured` 结束、错误消息里没有 key；假端点只见到一个带 key 的请求；清除后 `served` 不变、`denied` 增加；下一轮同样失败。传输中的那一次响应照常结束（中止它是第二层，要网络出口配合），记录在 `inFlightResponseCompleted` |
+| byok-clear-inflight | inapp + run.py | 清除 = 立即作废（F9 两层；C5 起第二层也接上）：模型来源是假端点 + BYOK 测试 key，模型流式约 2.4 s；流式中清除 → 第一层：KeystoreSecrets 立即丢掉 key，清除后 `served` 不再增加；第二层：KeystoreSecrets 在 `revocations` 上发出被撤销的 Credential，HostFetch 中止在途调用，假端点看到连接在流完之前断开（`completed=false`、`disconnected=true`），本轮 1 s 内以 `model_not_configured` 结束，错误 data 里 `details.reason=key_revoked`，错误消息和 data 里没有 key；撤销信号有订阅者且 `signalsDropped=0`；假端点只见到一个带 key 的请求；下一轮同样失败 |
 | byok-clear | inapp + run.py | 清除 → 重启后仍未配置，文件已删，Keystore 主密钥已删 |
 | pi-tool-round | inapp | 模型第一轮末尾要调用工具 `fs_read`（M1 工具目录为空）。按实际行为核对：客户端看到 tool_call，状态 FAILED；Pi 把错误结果（“Tool fs_read not found”）交回模型、发出第二个请求（带 tool_result）；两轮文字都送达，本轮 end_turn；两个请求的 key 都是宿主层注入的测试 key |
 | pi-context | inapp | 同一会话两轮：第二个请求带着第一轮的 user 和 assistant 消息，assistant 文字与客户端收到的一致 |
@@ -81,5 +81,23 @@ python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app --o
 ```
 
 `--only a,b` 只跑指定用例。结果写在 `results/raw/`（不进仓库），定稿的结果复制到 `results/` 提交。全部通过时退出码为 0。
+
+## 电脑端接入打开期间不被冻结（desktop_idle.py，C6）
+
+architecture F11 第 4 点：电脑端接入打开期间 `:agent` 以前台服务运行，否则空闲的 `:agent` 是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，抽象 socket `agentos-acp` 上的连接得不到服务（A6 查明）。`desktop_idle.py` 在 debug 包上从电脑端走一遍：
+
+1. 像设置页一样从前台界面打开开关（inapp `desktop-access`，IAgentControl v3），回到桌面；配对码从 debug 入口 `DesktopGatewayDebugReceiver` 的广播结果里取（不进设备日志、不上命令行）；检查前台服务和通知（渠道 `desktop_access`、“电脑端接入已开启”、“关闭”按钮）。
+2. 空闲 `--idle` 秒（默认 60），只用 `dumpsys` 旁观（`isFrozen`、进程状态、前台服务），不碰 App。
+3. 经 `tools/acp-bridge` 连接：配对握手、initialize、session/new、一轮对话（假模型端点，fake_model.py 经 adb reverse）。
+4. 连接不断再空闲同样久，同一会话再一轮；再测一次取消。
+5. 开关开着时杀掉 `:agent`，按“监督进程开机拉起”（inapp `desktop-restart` path=boot，SUPERVISOR_START）和“bind 冷启动”（path=bind）各拉起一次：恢复后留在前台、重新监听，空闲 20 秒不被冻结；用保存的令牌重新连上。
+6. 点通知上的“关闭”（uiautomator）：开关关闭、宽限期后退出前台、通知消失；反向对照：之后进程确实会被冻结（点通知按钮给 App 30 秒临时白名单，所以要等 40 秒左右）。
+
+```sh
+./gradlew :app:assembleDebug
+python3 tests/device/acp-channel/desktop_idle.py --serial $ANDROID_SERIAL [--idle 60] [--no-install]
+```
+
+脚本给 App 授予通知权限（首次引导里请求的），故意不给电池优化豁免：验证的是从前台界面打开开关这条正常路径。后台打开（例如 debug 入口的广播）时系统不允许进入前台（`Background started FGS: Disallowed`），有电池优化豁免时允许。
 
 app 用例要求 APK 里有 `assets/model-catalog.json`（BYOK 的厂商预设和自定义端点模板都来自它）：先在 `core/pi-runtime` 里 `npm ci`，构建时不加 `-Pagentos.skipPiBundle=true`，或者先单独跑一次 `node build.mjs`。

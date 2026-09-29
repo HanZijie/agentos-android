@@ -41,7 +41,7 @@
             android:process=":agent">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="On-device AI agent runtime: keeps an agent task (model call and tool calls) running after the requesting app goes to the background" />
+                android:value="On-device AI agent runtime: keeps an agent task (model call and tool calls) running after the requesting app goes to the background, and keeps the desktop (adb) access endpoint reachable while the user has turned it on" />
         </service>
 
         <!--
@@ -109,6 +109,12 @@
 
         <!-- DesktopGateway（:agent）在抽象 socket agentos-acp 上接受电脑端连接，开关默认关闭，不需要 Manifest 条目；
              debug 包的测试入口 DesktopGatewayDebugReceiver 在 app/src/debug/AndroidManifest.xml（release 包里没有） -->
+
+        <!-- C6（F11 第 4 点）：开关打开期间 AgentService 的通知上的“关闭”按钮。不导出，只有通知的 PendingIntent 能发 -->
+        <receiver
+            android:name=".agent.DesktopAccessOffReceiver"
+            android:exported="false"
+            android:process=":agent" />
 
     </application>
 

@@ -81,6 +81,13 @@ class AgentProcess private constructor(val app: Context) {
     @Volatile private var recoveryMs = -1L
     @Volatile private var recoveryError: String? = null
 
+    /**
+     * 电脑端接入（W9，A lane 的 DesktopGateway.kt）：开关默认关闭，打开后监听抽象 socket agentos-acp。
+     * 开关打开期间 :agent 留在前台（architecture F11 第 4 点，[RuntimeLifecycle] 规则 6）：放在 [lifecycle] 之前构造，
+     * 它的 Port 现读开关状态。
+     */
+    val desktop = DesktopGateway(this)
+
     private val wakeLock: PowerManager.WakeLock =
         app.getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "agentos:runtime-task")
@@ -118,12 +125,12 @@ class AgentProcess private constructor(val app: Context) {
                 lifecycle.onIdleCheck()
             }
         }
+
+        // 开关状态在 DesktopPairing 的内存里（构造时从 DE 存储读出），不做 I/O；进程启动时恢复结束的那次判断就会用到它
+        override fun holdForeground(): Boolean = desktop.isEnabled()
     }, idleGraceMillis = IDLE_GRACE_MS)
 
     val acp = AcpConnections(this)
-
-    /** 电脑端接入（W9，A lane 的 DesktopGateway.kt）：开关默认关闭，打开后监听抽象 socket agentos-acp。 */
-    val desktop = DesktopGateway(this)
 
     init {
         AcpAndroid.ensureInitialized()
@@ -155,6 +162,12 @@ class AgentProcess private constructor(val app: Context) {
     internal fun onServiceDestroyed(s: AgentService) {
         if (service === s) service = null
         lifecycle.onServiceDestroyed()
+    }
+
+    /** 电脑端接入的开关变了（DesktopGateway.setEnabled 之后调用，不在主线程）：前台理由、通知。 */
+    internal fun onDesktopAccessChanged() {
+        lifecycle.onHoldChanged()
+        service?.refreshNotification(desktop.isEnabled(), lifecycle.status().tasks)
     }
 
     // ------------------------------------------------------------------ 恢复
@@ -257,6 +270,8 @@ class AgentProcess private constructor(val app: Context) {
             .put("foreground", s.foreground)
             .put("state", s.state)
             .put("serviceRunning", lifecycle.isServiceRunning())
+            // 没有任务时仍留在前台的理由（RuntimeLifecycle 规则 6）
+            .put("foregroundHold", if (lifecycle.holdingForeground()) "desktop_access" else JSONObject.NULL)
             .put("foregroundDenied", lifecycle.foregroundDenied)
             .put("uptimeMs", SystemClock.elapsedRealtime() - startedAtElapsed)
     }

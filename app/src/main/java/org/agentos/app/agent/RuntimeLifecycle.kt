@@ -21,6 +21,10 @@ package org.agentos.app.agent
  * 5. **空闲宽限期**（[idleGraceMillis]）：任务数归零后要持续这么久才停止服务。宿主层从收到 session/new 起就计入
  *    任务数，session/new 返回到客户端发来 prompt 之间有几毫秒是 0；没有宽限期的话每次对话都会退出前台再进入一次
  *    （后台时再次进入还可能被系统拒绝）。宽限期内心跳照常写 tasks=0 state=idle，监督进程按“没有任务”处理。
+ * 6. **保持前台的其他理由**（[Port.holdForeground]，现读）：电脑端接入打开期间（architecture F11 第 4 点）即使没有任务
+ *    也留在前台，否则空闲的 `:agent` 是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，抽象 socket 上的连接得不到
+ *    服务。规则 1～5 里的“有任务”都换成“有任务或有保持理由”：理由出现时要求前台（[onHoldChanged]），理由消失且没有
+ *    任务时照常走宽限期再停止。心跳格式不变（tasks=0 fg=1 state=idle），wake lock 仍只在有任务时持有。
  *
  * 所有方法都在同一把锁里执行；[Port] 的方法会在锁内被调用，实现里不能反过来等待本类。
  */
@@ -47,6 +51,12 @@ class RuntimeLifecycle(private val port: Port, private val idleGraceMillis: Long
 
         /** [delayMillis] 之后调用一次 [RuntimeLifecycle.onIdleCheck]（宽限期到点）。新的请求可以取代未到点的旧请求。 */
         fun scheduleIdleCheck(delayMillis: Long) = Unit
+
+        /**
+         * 没有任务时是否也要留在前台（规则 6：电脑端接入已打开）。每次判断都现读，不缓存；会在本类的锁里被调用，
+         * 实现只能读内存状态，不能反过来等待本类。
+         */
+        fun holdForeground(): Boolean = false
     }
 
     enum class Phase { STARTING, RECOVERING, READY }
@@ -80,11 +90,29 @@ class RuntimeLifecycle(private val port: Port, private val idleGraceMillis: Long
 
     @Synchronized fun isServiceRunning(): Boolean = serviceRunning
 
+    /** 当前是否有保持前台的其他理由（诊断用）。 */
+    @Synchronized fun holdingForeground(): Boolean = port.holdForeground()
+
     /** 宿主层的任务数变了（runState 的收集者调用；可能晚于实际变化，所以本类总是现读 [Port.taskCount]）。 */
     @Synchronized
     fun onTasksChanged() {
         val n = port.taskCount()
         if (n > 0) ensureForeground(n) else deniedThisBusyPeriod = false
+        publish(n)
+        maybeStop(n)
+    }
+
+    /**
+     * 保持前台的理由变了（[Port.holdForeground]，例如电脑端接入的开关）。出现：要求前台（之前被系统拒绝过也再试一次，
+     * 这是一次新的请求，通常来自用户在设置页的操作）；消失：没有任务就走宽限期再停止。
+     */
+    @Synchronized
+    fun onHoldChanged() {
+        val n = port.taskCount()
+        if (port.holdForeground()) {
+            deniedThisBusyPeriod = false
+            ensureForeground(n)
+        }
         publish(n)
         maybeStop(n)
     }
@@ -147,8 +175,11 @@ class RuntimeLifecycle(private val port: Port, private val idleGraceMillis: Long
         maybeStop(n)
     }
 
+    /** 有任务，或有保持前台的其他理由（规则 6）。 */
+    private fun wantsForeground(n: Int): Boolean = n > 0 || port.holdForeground()
+
     private fun ensureForeground(n: Int) {
-        if (n <= 0 || foreground || startRequested || deniedThisBusyPeriod) return
+        if (!wantsForeground(n) || foreground || startRequested || deniedThisBusyPeriod) return
         if (port.requestServiceStart()) {
             startRequested = true
             foregroundDenied = false
@@ -160,7 +191,7 @@ class RuntimeLifecycle(private val port: Port, private val idleGraceMillis: Long
     }
 
     private fun maybeStop(n: Int) {
-        if (n > 0) {
+        if (wantsForeground(n)) {
             idleSince = null
             return
         }

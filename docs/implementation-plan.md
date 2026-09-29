@@ -50,7 +50,7 @@ agentos-android/
 │   │   ├── skills/SkillPrompt.kt                                  [W20] 新写：把 Skill 目录写进系统提示；内置 read_skill 工具
 │   │   ├── ports/{HostPort,AgentCore}.kt                          [W2] 新写：HostPort 是宿主层对 Android 的全部依赖（工具、Skill、Hook、确认、存储、密钥、时钟）；AgentCore 是宿主层对 Agent 循环的依赖，由 Pi 适配层实现，测试时用假实现
 │   │   ├── memory/MemoryProvider.kt                               [M6] 接口占位
-│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer（`FakeModelServerMain` 可单独运行，A6）、`RevocableSecrets`（带撤销信号的 SecretPort 测试替身，B5）
+│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer（`FakeModelServerMain` 可单独运行，A6）、`RevocableSecrets`（带撤销信号的 SecretPort 测试替身，B5）、`OpenAiCompatibleTargets`（OpenAI 兼容路线的实时测试目标，B7）
 │   │   └── src/test/                                              [W2] JUnit，在电脑上运行；[W3] 含可以编排 tool_use 的假模型端点
 │   ├── pi-runtime/                                  # 打包进 APK 的 Pi Agent core（JavaScript）
 │   │   ├── package.json · package-lock.json         [W3] 固定 @earendil-works/pi-agent-core、pi-ai 0.86.1；只引入 anthropic-messages、openai-completions 两个协议族
@@ -249,7 +249,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 | S1 | 不需要设备的部分完成；root 模拟器（adb root，API 35 / 37）上 M1–M7 通过 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降级、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁；`pm install` 的输入方式按 tmp → pipe → path → stdin → session 依次回退（模拟器上 path 被 SELinux 拒） | Magisk / KernelSU 真机（M1–M8，含 Play Protect） |
 | S2 | 监督契约 v0.1；root 模拟器（adb root，API 35 / 37）上 B0、K1、K2、K4、K5、T1、P1、B1（缩短为 10 分钟）通过 | [spikes/S2.md](spikes/S2.md)：判活看进程，心跳记录任务状态并用来发现短命进程（`boot` 字段必须等于 `Settings.Global.BOOT_COUNT`）；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起，包处于 stopped 时不拉起。**root 拉起前台服务按 `SYSTEM_UID` 豁免后台启动限制**，App 自己在后台被拒时由监督进程 1.9 s 内代为提升 | Magisk / KernelSU 真机（SELinux 上下文与 adb root 不同）；灭屏 30 分钟、24 小时驻留与内存；K3、K5b |
 | S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑） | 可用；通道参数已定 | API 35 / 36 / 37 真机 |
-| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；MiniMax 国际预设（需要国际 key）；OpenAI 兼容端点 |
+| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort；OpenAI 兼容端点用 MiniMax 的 `https://api.minimax.cn/v1`（B7）在电脑和 Pixel_8a 的 `:agent` 上跑通对话、跨轮回忆、工具调用、abort，思考内容以 `<think>` 混在正文里（B8 处理） | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；MiniMax 国际预设（需要国际 key） |
 | S4–S7 | 未开始 | — | — |
 
 **S2、S3、S4、S6 验证的是四段不同的连接，不能互相替代：**
@@ -384,7 +384,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
 - [x] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接（B3；字节码缓存在 `codeCacheDir/pi`，key 为 bundle SHA-256 + quickjs-kt 版本 + ABI + 协议版本，读取时校验；`:agent` 进程里首启中位 72 ms、字节码 12 ms；Pixel_8a 上 `:agent` 进程内经国内 key 的真实端点对话、工具调用、abort 通过）
 - [x] `AndroidStore`（BundledSQLiteDriver，CE 目录 `databases/agentos-runtime.db`）、`KeystoreSecrets`（只实现 `SecretPort`）、`HostPortImpl`（工具、Skill、Hook、确认暂为“未开放”实现）、`IAgentControl` v2（BYOK）
-- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 25 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束；C3.1 时 API 35 / 36 / 37 与 Pixel_8a 均 21/21，C4 后的 25 项见本节“Agent 核心换成 Pi”一条；logcat 与私有文件里搜不到 key）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 25 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束，在途响应被中止（details.reason=key_revoked，C5）；C3.1 时 API 35 / 36 / 37 与 Pixel_8a 均 21/21，C4 后的 25 项见本节“Agent 核心换成 Pi”一条；logcat 与私有文件里搜不到 key）
 - [x] 换成真的 `AgentRuntime`（A3 的 `RuntimeEngine`，C3）；空闲后前台服务保留 2 s 宽限期
 - [x] Agent 核心换成 Pi（`PiAgentCores`：PiAdapter + QuickJsEngine，C4；`ScriptedAgentCore` 已删除）。`--suite app` 现为 25 项，新增假模型端点（`fake_model.py`，经 `adb reverse`）上的工具轮次、多轮上下文、`:agent` 被杀后恢复的上下文，以及 MiniMax 国内平台的真实对话 `live-minimax`（key 只从环境变量读、经 stdin 投递，对话后清除）。另有 `releaseTest` 构建：与 release 相同的 R8 规则、不可调试，调试证书签名并带测试执行器，只用于测试。API 35 / 36 / 37 上 debug 与 releaseTest 各 25/25；Pixel_8a 上 releaseTest 25/25，真实对话首字约 2 s，logcat 里搜不到 key。R8 下 quickjs-kt 按名字访问 `kotlin.UByteArray`，`app/proguard-rules.pro` 要 keep 它，否则 `:agent` 收到第一次模型响应时 JNI abort
 
@@ -431,7 +431,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] 诊断页：版本、健康状态、上次错误、监督进程状态；不输出 key 和完整 prompt
 
 #### W12 断网与升级
-- [ ] 断网处理：错误分类、退避重试、任务 deadline
+- [ ] 断网处理：错误分类、退避重试、任务 deadline（退避重试已由 B6 提前完成：响应头之前重试，1–30 s 退避，每个请求最多 2 分钟，retry-after 优先；断网的端到端与 deadline 的精确收紧仍在 W12）
 - [ ] Store 的 schema 迁移：只向前迁移，迁移前备份，失败就回滚并停在 safe mode
 - [ ] OTA：开机时重新检查 API 和 fingerprint，超出支持范围就进入 safe mode
 - [ ] `tests/device/`：覆盖连续重启、断网、杀 App 各进程、杀监督进程

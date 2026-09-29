@@ -140,11 +140,16 @@ class PromptRun {
         const val TEXT_CAP = 65_536
     }
 
+    /** JSON-RPC 错误的 data（AgentOS 放 agentosCode、retryable、details）；不是 JSON-RPC 错误或没有 data 时为 null。 */
+    fun errorData(): JSONObject? = (error as? com.agentclientprotocol.protocol.JsonRpcException)?.data
+        ?.let { runCatching { JSONObject(it.toString()) }.getOrNull() }
+
     fun json(): JSONObject = JSONObject()
         .put("chunks", chunks).put("chars", chunkChars).put("maxChunkChars", maxChunkChars).put("outOfOrder", outOfOrder)
         .put("toolCalls", toolCalls).put("toolStatuses", org.json.JSONArray(toolStatuses))
         .put("stopReason", stopReason ?: JSONObject.NULL)
         .put("error", errJson(error))
+        .put("errorData", errorData() ?: JSONObject.NULL)
         .put("firstChunkMs", if (firstChunkNs > 0) (firstChunkNs - startNs) / 1e6 else -1.0)
         .put("totalMs", (endNs - startNs) / 1e6)
         .put("chunksPerSec", if (endNs > startNs) chunks / ((endNs - startNs) / 1e9) else 0.0)

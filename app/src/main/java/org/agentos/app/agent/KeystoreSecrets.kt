@@ -3,6 +3,9 @@ package org.agentos.app.agent
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.runBlocking
 import org.agentos.runtime.net.BaseUrlCredentials
 import org.agentos.runtime.ports.Credential
@@ -29,8 +32,10 @@ import javax.crypto.spec.GCMParameterSpec
  * - **更换 = 热加载**（[activate]）：下一个请求就用新 key。换下来的 key 只服务它自己绑定的端点，留到运行时空闲
  *   （[retire]）再丢弃，所以进行中的这一轮不被打断。
  * - **清除 = 立即作废**（[revoke]，architecture F9）：当前的和换下来的 key 一起丢掉，不等空闲；此后 [credentialFor]
- *   一律返回 null，之后的模型请求（包括同一轮里工具调用之后的下一次请求）都拿不到 key，以 model_not_configured 结束。
- *   已经在传输中的那一次 HTTP 响应要由网络出口中止（需要 SecretPort 的撤销信号，见 C3.1 报告），不在本类。
+ *   一律返回 null，之后的模型请求（包括同一轮里工具调用之后的下一次请求）都拿不到 key，以 model_not_configured 结束
+ *   （第一层）。随后在 [revocations] 上发出这两个 [Credential] 对象（第二层）：HostFetch 按对象身份中止携带它们的
+ *   在途调用，正在传输的那一次响应也就此结束（KEY_REVOKED → model_not_configured、details.reason=key_revoked）。
+ *   更换和空闲时丢弃换下来的 key（[retire]）都不发：那时没有要中止的调用。
  * - key 不进日志、诊断、心跳、异常消息：本类的 toString 不含 key，[redact] 是日志的最后一道防线。
  *
  * 持久化由 [ModelSources] 负责（与模型来源写在同一个文件里，一次 rename 原子替换）；本类只做加解密和匹配。
@@ -61,6 +66,15 @@ class KeystoreSecrets(
     // 计数器；不能叫 revocations：那是 SecretPort 的撤销信号（Flow<Credential>，A 追加，发送由 C 实现）
     private val revokedCount = AtomicLong()
     @Volatile private var lastRevokedAtMs = 0L
+
+    // 撤销信号：热流、不重放（HostFetch 构造时就订阅）。buffer 足够大，[revoke] 在锁里用 tryEmit 不挂起；
+    // 没有订阅者时 tryEmit 直接成功（没有人要中止），发不出去的计入 signalsDropped（诊断里应当一直是 0）。
+    private val signal = MutableSharedFlow<Credential>(extraBufferCapacity = SIGNAL_BUFFER)
+    private val signalsSent = AtomicLong()
+    private val signalsDropped = AtomicLong()
+
+    /** 清除时被撤销的 key（当前的和换下来的），按对象身份比较；更换不发。 */
+    override val revocations: Flow<Credential> = signal.asSharedFlow()
 
     /** 用主密钥加密 [key]，绑定到 [bindings]。不改变当前生效的 key。 */
     fun seal(key: String, bindings: List<String>): SealedKey {
@@ -98,12 +112,16 @@ class KeystoreSecrets(
      */
     @Synchronized
     fun revoke() {
-        val had = current != null || retired != null
+        val withdrawn = listOfNotNull(current, retired).map { it.credential }.distinct()
+        // 第一层：先让 credentialFor 拿不到（信号晚到的窗口由 HostFetch 的 recentlyRevoked 兜住）
         current = null
         retired = null
-        if (had) {
-            revokedCount.incrementAndGet()
-            lastRevokedAtMs = System.currentTimeMillis()
+        if (withdrawn.isEmpty()) return
+        revokedCount.incrementAndGet()
+        lastRevokedAtMs = System.currentTimeMillis()
+        // 第二层：中止携带这些 key 的在途调用
+        for (c in withdrawn) {
+            if (signal.tryEmit(c)) signalsSent.incrementAndGet() else signalsDropped.incrementAndGet()
         }
     }
 
@@ -131,10 +149,15 @@ class KeystoreSecrets(
         return found
     }
 
-    /** 请求计数（诊断、设备用例用，不含任何 key 内容）：交出 key 的次数、找不到 key 的次数、撤销次数。 */
+    /**
+     * 请求计数（诊断、设备用例用，不含任何 key 内容）：交出 key 的次数、找不到 key 的次数、撤销次数；
+     * 撤销信号发出 / 发不出去的条数，以及当前订阅者数（每个 HostFetch 一个）。
+     */
     fun stats(): Map<String, Any?> = mapOf(
         "served" to served.get(), "denied" to denied.get(),
         "revocations" to revokedCount.get(), "lastRevokedAtMs" to lastRevokedAtMs,
+        "signals" to signalsSent.get(), "signalsDropped" to signalsDropped.get(),
+        "subscribers" to signal.subscriptionCount.value.toLong(),
     )
 
     /** 只判断能否匹配（ModelSources 判断“可用”、诊断用），不计入 [stats]；匹配本身不挂起、不做 I/O。 */
@@ -158,6 +181,9 @@ class KeystoreSecrets(
     companion object {
         /** 太短的 key（本地测试端点的 "x" 之类）替换了反而破坏日志，也没有保密意义。 */
         private const val MIN_REDACT_LENGTH = 6
+
+        /** 一次清除最多发 2 条（当前的和换下来的）；订阅者（HostFetch）在锁里处理，几乎不积压。 */
+        private const val SIGNAL_BUFFER = 64
 
         /** GCM 的 AAD：格式版本 + 绑定的 baseUrl，逐行。 */
         fun aad(bindings: List<String>): ByteArray =
