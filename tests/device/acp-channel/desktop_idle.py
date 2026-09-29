@@ -32,6 +32,7 @@ import sys
 import tempfile
 import threading
 import time
+import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -228,41 +229,107 @@ def prompt(bridge, sid, script, timeout=30, cancel_after_first_chunk=False, at_f
 
 # ---------------------------------------------------------------------- 通知上的“关闭”（uiautomator）
 
-def tap_off_in_shade(adb):
+ROW_ID = "com.android.systemui:id/expandableNotificationRow"
+EXPAND_IDS = ("android:id/expand_button", "android:id/expand_button_touch_container")
+COLLAPSE_DESC = ("Collapse", "收起")
+
+
+def _ui_tree(adb):
+    adb.sh("uiautomator dump /sdcard/c6_ui.xml", check=False, timeout=60)
+    xml = adb.sh("cat /sdcard/c6_ui.xml", check=False)
+    i = xml.find("<hierarchy")
+    if i < 0:
+        return None, {}
+    try:
+        root = ET.fromstring(xml[i:])
+    except ET.ParseError:
+        return None, {}
+    parents = {c: p for p in root.iter() for c in p}
+    return root, parents
+
+
+def _bounds(n):
+    b = re.match(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", n.get("bounds", ""))
+    return tuple(map(int, b.groups())) if b else None
+
+
+def _center(n):
+    x1, y1, x2, y2 = _bounds(n)
+    return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def _labels(n):
+    return {n.get("text") or "", n.get("content-desc") or ""}
+
+
+STACK_ID = "com.android.systemui:id/notification_stack_scroller"
+
+
+def _open_shade(adb, reopen=False):
+    if reopen:
+        adb.sh("cmd statusbar collapse", check=False)
+        time.sleep(1)
     adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
     adb.sh("wm dismiss-keyguard", check=False)
+    time.sleep(0.5)
     adb.sh("cmd statusbar expand-notifications", check=False)
-    time.sleep(2)
-    found = None
-    for attempt in range(2):
-        adb.sh("uiautomator dump /sdcard/c6_ui.xml", check=False, timeout=60)
-        xml = adb.sh("cat /sdcard/c6_ui.xml", check=False)
-        nodes = re.findall(r"<node [^>]*>", xml)
-        has_title = any(f'text="{TITLE}"' in n for n in nodes)
-        for n in nodes:
-            if f'text="{OFF}"' in n and "action" in n and has_title:
-                b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
-                if b:
-                    x1, y1, x2, y2 = map(int, b.groups())
-                    found = ((x1 + x2) // 2, (y1 + y2) // 2)
-                    break
-        if found:
+    time.sleep(2.5)
+
+
+def tap_off_in_shade(adb, open_shade=True):
+    """
+    在通知栏里点本 App 通知上的“关闭”。先按标题找到这条通知所在的行，只在这一行里找按钮：IMPORTANCE_LOW 的通知在
+    有的配置上（Pixel_8a）落在“静音”分组里、是折叠的，按钮要展开后才出现——点这一行的展开按钮，不行就对标题向下滑。
+    界面树里没有通知列表（通知栏没展开好）就收起再重新下拉；有通知列表但看不到标题，只在列表范围内滚动，
+    不做盲目的全屏手势。返回 (点击坐标或 None, 每一步的动作和看到的通知标题)。
+    """
+    if open_shade:  # 测试驱动本身时可以传 False：在已经展开、并且手动折叠了这条通知的通知栏上直接找
+        _open_shade(adb)
+    found, tried = None, []
+    for _ in range(6):
+        root, parents = _ui_tree(adb)
+        stack = next((n for n in root.iter("node") if n.get("resource-id") == STACK_ID), None) if root is not None else None
+        titles = [n.get("text") for n in root.iter("node") if n.get("resource-id") == "android:id/title"][:6] if root is not None else []
+        title = next((n for n in root.iter("node") if n.get("text") == TITLE), None) if root is not None else None
+        if title is None:
+            if stack is None:
+                tried.append({"do": "reopen", "stack": False, "titles": titles})
+                _open_shade(adb, reopen=True)
+            else:
+                tried.append({"do": "scroll-stack", "stack": True, "titles": titles})
+                x1, y1, x2, y2 = _bounds(stack)
+                x = (x1 + x2) // 2
+                adb.sh(f"input swipe {x} {y1 + (y2 - y1) * 3 // 4} {x} {y1 + (y2 - y1) // 3} 400", check=False)
+                time.sleep(1.5)
+            continue
+        row, p = None, title
+        while p is not None:
+            if p.get("resource-id") == ROW_ID:
+                row = p
+                break
+            p = parents.get(p)
+        scope = row if row is not None else root
+        off = next((n for n in scope.iter("node") if OFF in _labels(n) and n is not title and _bounds(n)), None)
+        if off is not None:
+            found = _center(off)
+            tried.append({"do": "tap-off"})
+            adb.sh(f"input tap {found[0]} {found[1]}", check=False)
             break
-        # 通知折叠着：点它的展开按钮再找
-        for n in nodes:
-            if 'resource-id="android:id/expand_button"' in n:
-                b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
-                if b:
-                    x1, y1, x2, y2 = map(int, b.groups())
-                    adb.sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}", check=False)
-                    time.sleep(1.5)
-                    break
-    if found:
-        adb.sh(f"input tap {found[0]} {found[1]}", check=False)
+        exp = next((n for n in scope.iter("node") if n.get("resource-id") in EXPAND_IDS and _bounds(n)
+                    and not (_labels(n) & set(COLLAPSE_DESC))), None) if row is not None else None
+        if exp is not None and not any(t.get("do") == "expand" for t in tried):
+            tried.append({"do": "expand"})
+            x, y = _center(exp)
+            adb.sh(f"input tap {x} {y}", check=False)
+        else:
+            tried.append({"do": "swipe-down"})
+            x, y = _center(title)
+            adb.sh(f"input swipe {x} {y} {x} {y + 400} 300", check=False)
+        time.sleep(1.5)
     time.sleep(1)
     adb.sh("cmd statusbar collapse", check=False)
     adb.sh("rm -f /sdcard/c6_ui.xml", check=False)
-    return found
+    return found, tried
 
 
 # ---------------------------------------------------------------------- 主流程
@@ -270,6 +337,8 @@ def tap_off_in_shade(adb):
 def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
     """前提：debug 或 releaseTest 包已装好，fake_model 已经 adb reverse 到手机（认测试 key）。返回一个用例结果。"""
     adb.sh(f"pm grant {R.APP_PKG} android.permission.POST_NOTIFICATIONS", check=False)
+    # 故意不带电池优化豁免（验证从前台界面打开这条路径）；设备上原来有的话，跑完还原
+    had_exemption = f"{R.APP_PKG}," in adb.sh("cmd deviceidle whitelist", check=False)
     adb.sh(f"cmd deviceidle whitelist -{R.APP_PKG}", check=False)
     adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
     adb.sh("wm dismiss-keyguard", check=False)
@@ -332,14 +401,21 @@ def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
                 busy_note = {}
 
                 def at_first_chunk():
-                    time.sleep(0.5)
-                    busy_note.update(agent_notification(adb))
+                    # 通知更新合并 0.5 秒（AgentProcess.NOTICE_DEBOUNCE_MS），慢设备上 dumpsys 也要一两秒：轮询到出现为止
+                    deadline = time.time() + 6
+                    while time.time() < deadline:
+                        busy_note.clear()
+                        busy_note.update(agent_notification(adb))
+                        if busy_note.get("subText") == BUSY:
+                            break
+                        time.sleep(0.3)
 
                 p3 = prompt(bridge, sid, {"chunks": 400, "intervalMs": 20, "n": "c6-cancel"},
                             cancel_after_first_chunk=True, at_first_chunk=at_first_chunk)
                 step("cancel", p3["stopReason"] == "cancelled" and p3["cancelSent"] and p3["ms"] < 5_000, p3)
                 after = {}
-                for _ in range(10):
+                deadline = time.time() + 8
+                while time.time() < deadline:
                     after = agent_notification(adb)
                     if not after.get("subText"):
                         break
@@ -373,7 +449,7 @@ def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
              {"procStates": sorted({x.get("procState") for x in samples}), "oomAdj": sorted({x.get("oomAdj") for x in samples})})
 
         # 通知上的“关闭”
-        tapped = tap_off_in_shade(adb)
+        tapped, tap_path = tap_off_in_shade(adb)
         t_off = time.time()
         if bridge:
             try:
@@ -396,7 +472,7 @@ def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
         if with_bridge:
             st = debug_op(adb, "status")
             step("offViaNotification", bool(tapped) and st.get("enabled") is False and st.get("listening") is False,
-                 {"tapped": tapped, "enabled": st.get("enabled"), "pairings": len(st.get("pairings", []))})
+                 {"tapped": tapped, "path": tap_path, "enabled": st.get("enabled"), "pairings": len(st.get("pairings", []))})
         # 反向对照：关掉之后没有别的东西让进程保持解冻（点通知按钮给 App 30 秒临时白名单，之后应当被冻结）
         frozen_at = None
         while time.time() - t_off < 90:
@@ -409,7 +485,7 @@ def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
         if not with_bridge:
             r = R.run_one(adb, "c6-off-check", R.INAPP_ACTIVITY, "desktop-status", {}, 60)
             step("offViaNotification", bool(tapped) and r and r.get("enabled") is False and r.get("listening") is False,
-                 {"tapped": tapped, "check": r and r.get("summary")})
+                 {"tapped": tapped, "path": tap_path, "check": r and r.get("summary")})
     finally:
         if bridge:
             bridge.close()
@@ -418,6 +494,13 @@ def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
                 debug_op(adb, "disable")
             except Exception:  # noqa: BLE001
                 pass
+        else:
+            try:
+                R.run_one(adb, "c6-off-final", R.INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
+            except Exception:  # noqa: BLE001
+                pass
+        if had_exemption:
+            adb.sh(f"cmd deviceidle whitelist +{R.APP_PKG}", check=False)
         state_dir.cleanup()
 
     ok = bool(checks) and all(checks.values())

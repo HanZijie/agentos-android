@@ -94,6 +94,7 @@ class AgentProcess private constructor(val app: Context) {
             .apply { setReferenceCounted(false) }
     @Volatile private var ticker: Job? = null
     @Volatile private var idleCheck: Job? = null
+    @Volatile private var noticeRefresh: Job? = null
 
     val lifecycle: RuntimeLifecycle = RuntimeLifecycle(object : RuntimeLifecycle.Port {
         override fun taskCount(): Int = runtime.runState.value.let { it.activeTasks + it.queuedTasks }
@@ -246,7 +247,19 @@ class AgentProcess private constructor(val app: Context) {
             secrets.retire()
         }
         // 电脑端接入打开时，通知的副标题跟着忙闲变（“正在运行任务”）
-        if (desktop.isEnabled()) service?.refreshNotification(true, if (busy) 1 else 0)
+        scheduleNoticeRefresh()
+    }
+
+    /**
+     * 合并 [NOTICE_DEBOUNCE_MS] 内的忙闲变化，只按最后的状态更新一次通知。系统对每个 App 的通知更新限速（约每秒 5 次），
+     * 超出的直接丢掉；session/new 与 prompt 前后忙闲切换很密，不合并的话最后一次（真实状态）可能被丢。
+     */
+    private fun scheduleNoticeRefresh() {
+        noticeRefresh?.cancel()
+        noticeRefresh = scope.launch(CoroutineName("notice-refresh")) {
+            delay(NOTICE_DEBOUNCE_MS)
+            if (desktop.isEnabled()) service?.refreshNotification(true, if (runtime.runState.value.busy) 1 else 0)
+        }
     }
 
     private fun installCrashHandler() {
@@ -361,6 +374,9 @@ class AgentProcess private constructor(val app: Context) {
 
         /** 任务数归零后等这么久才退出前台（RuntimeLifecycle 规则 5：接住 session/new 与 prompt 之间的空档）。 */
         const val IDLE_GRACE_MS = 2_000L
+
+        /** 通知跟着忙闲变时合并这么久内的变化（系统对通知更新限速）。 */
+        const val NOTICE_DEBOUNCE_MS = 500L
 
         /** BYOK 模型来源（明文部分 + key 的密文），CE 存储 files/ 下。 */
         const val BYOK_DIR = "byok"
