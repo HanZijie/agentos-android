@@ -26,9 +26,9 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | window-violation | 绕过流控连发，服务端以 `window exceeded` 关闭 |
 | stream-noflow（负向） | 关掉流控打满：允许写爆，但必须在超时内结束，不能挂住（S3 问题 1） |
 
-**`--suite app`（W6）**：AgentOS 的 `:agent`（`AcpService`、`AgentService`、`AgentControlService`）。执行器是注入 debug 包的 `inapp/`（AgentOS 自己的 UID，`:acptest` 进程），第三方身份的用例由 `client/` 跑。宿主层是真正的 `RuntimeEngine`（A3：ACP、Store、调度、恢复），Agent core 在 B2 之前是 `ScriptedAgentCore`（app 主代码，按同样的 JSON 指令流式输出，不调模型）。
+**`--suite app`（W6）**：AgentOS 的 `:agent`（`AcpService`、`AgentService`、`AgentControlService`）。执行器是注入 debug 包（或 releaseTest 包，见下）的 `inapp/`（AgentOS 自己的 UID，`:acptest` 进程），第三方身份的用例由 `client/` 跑。宿主层是真正的 `RuntimeEngine`（A3：ACP、Store、调度、恢复），Agent core 是真正的 Pi（B3 的 `PiAgentCores`：PiAdapter + QuickJsEngine）。Pi 的模型请求经 HostFetch 发到 run.py 在电脑上起的**假模型端点** `fake_model.py`（Anthropic Messages 流式，经 `adb reverse` 映射到设备的 `127.0.0.1:18787`）：它按 prompt 里的同一套 JSON 脚本出字（chunks、chunkChars、intervalMs、burst、cjk、bigChunkChars，`tool` 让第一轮以 tool_use 结束），不是 JSON 时回显 20 行；只认测试 key，记录每个请求（只记 key 的类别），`GET /_log` 给执行器核对。
 
-与 SDK 回归的差别（`AcpTarget.hostRuntime`）：宿主层按 32 ms 合并文字增量、把长文字切成不超过 8,192 字符的块、不带 `_meta.seq / t`，所以通道用例按**文字总字符数**校验，不按条数和顺序号，也测不出端到端延迟；连接断开不取消任务（F7）。宿主层没有配置模型时拒绝任务（`model_not_configured`），所以执行器在每个非 BYOK 用例之前配置一个回环地址上的自定义端点（`ScriptedAgentCore` 不会去连它）。
+与 SDK 回归的差别（`AcpTarget.hostRuntime`）：宿主层按 32 ms 合并文字增量、把长文字切成不超过 8,192 字符的块、不带 `_meta.seq / t`，所以通道用例按**文字总字符数**校验，不按条数和顺序号，也测不出端到端延迟；连接断开不取消任务（F7）。宿主层没有配置模型时拒绝任务（`model_not_configured`），所以执行器在每个非 BYOK / live 用例之前把模型来源设成假模型端点（自定义端点 `http://127.0.0.1:18787`，固定的测试 key）。
 
 | 用例 | 执行器 | 通过标准 |
 |---|---|---|
@@ -48,10 +48,14 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | store-restart | inapp | 删库 → ACP 冷启动建两个会话、跑一轮 → SIGKILL 后直接读数据库文件（只读）：会话、已完成的任务、事件、Pi messages 都在，库在 CE、WAL；再冷启动：`runtime.started` / `runtime.recovered` 各加 1、系统流 sequence 连续 |
 | byok-roundtrip | inapp + run.py | IAgentControl v2：设置预设 → 读取只有首尾 4 位 → 同厂商换模型沿用 key → 8 种拒绝（换端点要 key、http、换行、Bearer、未知厂商、key 填错字段、坏 JSON）且消息里没有 key → 自定义端点 → 诊断里连掩码都没有；全程不重启 `:agent` |
 | byok-restart | inapp + run.py | SIGKILL 后冷启动：key 仍能解密、按端点匹配（`credentialResolves`），Keystore 主密钥在；`model-source.json` 在 CE、只有密文；App 的 CE / DE 私有目录下所有文件里没有明文 key |
-| byok-clear-inflight | inapp + run.py | 清除 = 立即作废（C3.1）：长流式进行中（ScriptedAgentCore 每 5 条前取一次 key，模拟每次模型请求经网络出口取 key）清除模型来源 → 本轮很快以 `model_not_configured` 结束、错误消息里没有 key；清除之后没有请求再拿到 key（`served` 不变、`denied` 增加）；同一会话下一轮也以 `model_not_configured` 失败。已经在传输中的那一次 HTTP 响应的中止要等网络出口支持（不在本用例） |
+| byok-clear-inflight | inapp + run.py | 清除 = 立即作废（C3.1，C4 起走真正的 Pi）：模型来源是假端点 + BYOK 测试 key，模型第一轮流式后要调用工具、Pi 随后要发第二个请求；第一轮流式中清除 → 第二个请求拿不到 key、HostFetch 不发，本轮以 `model_not_configured` 结束、错误消息里没有 key；假端点只见到一个带 key 的请求；清除后 `served` 不变、`denied` 增加；下一轮同样失败。传输中的那一次响应照常结束（中止它是第二层，要网络出口配合），记录在 `inFlightResponseCompleted` |
 | byok-clear | inapp + run.py | 清除 → 重启后仍未配置，文件已删，Keystore 主密钥已删 |
+| pi-tool-round | inapp | 模型第一轮末尾要调用工具 `fs_read`（M1 工具目录为空）。按实际行为核对：客户端看到 tool_call，状态 FAILED；Pi 把错误结果（“Tool fs_read not found”）交回模型、发出第二个请求（带 tool_result）；两轮文字都送达，本轮 end_turn；两个请求的 key 都是宿主层注入的测试 key |
+| pi-context | inapp | 同一会话两轮：第二个请求带着第一轮的 user 和 assistant 消息，assistant 文字与客户端收到的一致 |
+| recovery-context | inapp | 恢复后上下文一致（F8）：会话 A 完成一轮；另两个会话占满本调用方的并发，A 的第二轮排队；SIGKILL `:agent`。冷启动后恢复流程把排队的任务交还调度器，Pi 用 Store 里的 messages 重建会话 A，发给模型的请求带着崩溃前的那一轮（与客户端当时收到的一致）；另两个运行中的任务标为结果未知。M1 没有 `session/load`，所以在模型端核对 |
+| live-minimax | inapp + run.py | 真实对话：MiniMax 国内平台（`minimax-cn` 预设），key 只从 run.py 的环境变量 `MINIMAX_API_KEY` 读、经 stdin 投递；一轮 end_turn、有文字；对话后清除模型来源，key 不留在设备上；整个 logcat 和结果里搜这把 key 为 0。没有设置环境变量时跳过 |
 
-BYOK 用例的 key 由 run.py 每次随机生成（`agtest-` + 48 字符，不是真实 key），经 stdin 写进 App 私有目录的 `files/test/byok_key`（`adb exec-in run-as …`），执行器读完立即删除。**不要把 key 放在 `adb shell` 的命令行里**：API 37 的 adbd 会把整条命令行写进 logcat（`adbd service requested 'shell,v2,…:am start … --es args …'`），C3 就是在 API 37 上这样发现的。执行器基类回显参数时也会把 `apiKey` 换成 `<redacted>`。每个 BYOK 用例结束后 run.py 在整个 logcat（`-b all`）和结果 JSON 里搜 key 的全文和中段，命中就判失败，命中的行（key 已替换）记在 `leakScan.hitLines`。
+BYOK 用例的 key 由 run.py 每次随机生成（`agtest-` + 48 字符，不是真实 key），live 用例的 key 来自环境变量；两者都经 stdin 写进 App 私有目录的 `files/test/`（`adb shell content write --uri content://org.agentos.test.acp.inapp.keydrop/<槽位>`，inapp 的 `KeyDropProvider`，要求 DUMP、只写不读），执行器读完立即删除，全部用例结束后 run.py 再跑一次 `drop-keys` 兜底。用 `adb shell` 而不是 `adb exec-in`：后者不等设备上的命令结束就返回，key 会晚于用例落盘。**不要把 key 放在 `adb shell` 的命令行里**：API 37 的 adbd 会把整条命令行写进 logcat（`adbd service requested 'shell,v2,…:am start … --es args …'`），C3 就是在 API 37 上这样发现的。执行器基类回显参数时也会把 `apiKey` 换成 `<redacted>`。每个 BYOK / live 用例结束后 run.py 在整个 logcat（`-b all`）和结果 JSON 里搜 key 的全文和中段，命中就判失败，命中的行（key 已替换）记在 `leakScan.hitLines`。
 
 `inapp/` 的 Activity 导出但要求 `android.permission.DUMP`，只有 shell 和系统能启动；它只在 debug 包里。
 
@@ -66,6 +70,14 @@ python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite sdk --b
 
 ./gradlew :app:assembleDebug :tests:device:acp-channel:client:assembleDebug
 python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app
+
+# R8 下再跑一遍：releaseTest（与 release 同样的 R8 规则、不可调试，调试证书签名，带 in-app 执行器，放行回环明文）
+./gradlew :app:assembleReleaseTest
+python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app --app-build releaseTest
+
+# 真实对话（live-minimax）：key 只从环境变量读，不要写在命令行上
+set -a; . ../.secrets/minimax.env; set +a
+python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app --only live-minimax
 ```
 
 `--only a,b` 只跑指定用例。结果写在 `results/raw/`（不进仓库），定稿的结果复制到 `results/` 提交。全部通过时退出码为 0。

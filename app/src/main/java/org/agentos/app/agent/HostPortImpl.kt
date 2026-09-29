@@ -5,12 +5,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.agentos.runtime.errors.ErrorCode
-import org.agentos.runtime.ports.AgentCore
-import org.agentos.runtime.ports.AgentCoreFactory
-import org.agentos.runtime.ports.AgentCoreSession
-import org.agentos.runtime.ports.AgentCoreState
-import org.agentos.runtime.ports.AgentCoreUnavailableException
-import org.agentos.runtime.ports.AgentSessionConfig
 import org.agentos.runtime.ports.Clock
 import org.agentos.runtime.ports.ConsentDecision
 import org.agentos.runtime.ports.ConsentPort
@@ -20,7 +14,6 @@ import org.agentos.runtime.ports.HookOutcome
 import org.agentos.runtime.ports.HookPort
 import org.agentos.runtime.ports.HookRequest
 import org.agentos.runtime.ports.HostPort
-import org.agentos.runtime.ports.PiMessages
 import org.agentos.runtime.ports.RuntimeLog
 import org.agentos.runtime.ports.SafeModeState
 import org.agentos.runtime.ports.SkillCatalog
@@ -120,30 +113,5 @@ class AndroidRuntimeLog(private val redact: (String) -> String) : RuntimeLog {
         }
         val text = if (error == null) message else message + "\n" + Log.getStackTraceString(error)
         Log.println(priority, "AgentOS.$tag", redact(text))
-    }
-}
-
-/**
- * Pi Agent core 在 Android 上不可用时的 factory（诊断、测试用）：start 就失败，任务以 agent_core_failed 结束，不会挂住。
- * 正常接线用 [ScriptedAgentCore]（B2 之前）或 PiAdapter（B2 之后）。
- */
-object UnwiredAgentCore : AgentCoreFactory {
-    const val MESSAGE = "the Pi agent core is not wired on Android yet (QuickJsEngine, B2)"
-
-    override fun create(): AgentCore = object : AgentCore {
-        private val s = MutableStateFlow<AgentCoreState>(AgentCoreState.Idle)
-        override val state: StateFlow<AgentCoreState> = s.asStateFlow()
-
-        override suspend fun start() {
-            s.value = AgentCoreState.Failed(ErrorCode.AGENT_CORE_FAILED.info(MESSAGE))
-            throw AgentCoreUnavailableException(MESSAGE)
-        }
-
-        override suspend fun openSession(sessionId: String, config: AgentSessionConfig, restore: PiMessages?): AgentCoreSession =
-            throw AgentCoreUnavailableException(MESSAGE)
-
-        override suspend fun close() {
-            s.value = AgentCoreState.Closed
-        }
     }
 }

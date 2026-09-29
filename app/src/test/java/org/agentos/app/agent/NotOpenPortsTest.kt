@@ -3,8 +3,6 @@ package org.agentos.app.agent
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import org.agentos.runtime.errors.ErrorCode
-import org.agentos.runtime.ports.AgentCoreState
-import org.agentos.runtime.ports.AgentCoreUnavailableException
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.ConsentDecision
@@ -49,19 +47,5 @@ class NotOpenPortsTest {
             assertTrue(e.message!!.contains("not open"))
         }
         assertEquals(HookDecision.NO_OPINION, NotOpen.HOOKS.dispatch(HookRequest("PreToolUse", "s", null, JsonObject(emptyMap()))).decision)
-    }
-
-    @Test
-    fun unwiredAgentCoreFailsFast() = runBlocking {
-        val core = UnwiredAgentCore.create()
-        try {
-            core.start()
-            fail("start should fail")
-        } catch (e: AgentCoreUnavailableException) {
-            // expected
-        }
-        assertTrue(core.state.value is AgentCoreState.Failed)
-        core.close()
-        assertEquals(AgentCoreState.Closed, core.state.value)
     }
 }

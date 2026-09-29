@@ -13,5 +13,16 @@
             android:launchMode="singleTask"
             android:permission="android.permission.DUMP"
             android:process=":acptest" />
+
+        <!--
+          测试 key 的投递点（C4）：run.py 经 stdin 写入（adb shell content write，URI 见 KeyDropProvider），key 不上命令行。
+          同样要求 DUMP，只写不读。
+        -->
+        <provider
+            android:name="org.agentos.test.acp.inapp.KeyDropProvider"
+            android:authorities="org.agentos.test.acp.inapp.keydrop"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":acptest" />
     </application>
 </manifest>

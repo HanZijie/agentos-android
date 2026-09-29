@@ -31,7 +31,8 @@ internal suspend fun killAgentAndWait(ctx: Context): Boolean {
  * C3 的设备用例：BYOK（IAgentControl v2、KeystoreSecrets）、Store（AndroidStore + RuntimeEngine）、
  * 用户主动停止后的恢复（HostPort.environment.previousExitStoppedByUser）。
  *
- * BYOK 用例的测试 key 由主机端 run.py 生成（随机，不是任何真实 key），经 stdin 写进 App 私有目录的文件传入（见 [testKey]）。
+ * BYOK 用例的测试 key 由主机端 run.py 生成（随机，不是任何真实 key），经 stdin 写进 App 私有目录的文件传入
+ * （KeyDropProvider，见 [testKey]）。
  * 本执行器检查返回值、诊断、心跳、监督状态和 App 私有目录里的所有文件都没有 key；run.py 再检查整个 logcat（-b all）。
  */
 class ByokStoreScenarios(
@@ -237,12 +238,15 @@ class ByokStoreScenarios(
     }
 
     /**
-     * 清除 = 立即作废（C3.1）：长流式进行中（ScriptedAgentCore 每 5 条前取一次 key，模拟每次模型请求经网络出口取 key）
-     * 清除模型来源 → 这一轮很快以 model_not_configured 结束、错误消息里没有 key；清除之后再没有请求拿到 key
-     * （served 不再增加，denied 增加）；同一会话的下一轮也以 model_not_configured 失败。
+     * 清除 = 立即作废（C3.1，C4 起走真正的 Pi）：模型来源是电脑上的假端点，key 是 BYOK 测试 key。模型第一轮流式输出后
+     * 要调用工具（fs_read，未开放），Pi 随后要发第二个请求。第一轮流式进行中清除模型来源：
+     * - 已经在传输中的第一轮照常结束（中止它是第二层，要网络出口配合，见 C3.1 报告）；
+     * - 第二个请求拿不到 key，HostFetch 不发（NO_CREDENTIAL），本轮以 model_not_configured 结束、错误消息里没有 key；
+     * - 假端点只见到一个带 key 的请求；KeystoreSecrets 清除后 served 不再增加、denied 增加；同一会话下一轮同样失败。
      */
     private suspend fun clearInflight(key: String): JSONObject {
-        control.use { p -> p.setModelSource(preset("minimax-cn", providerModels(p, "minimax-cn").first()), key) }
+        control.use { p -> p.setModelSource(FakeModel.source(), key) }
+        val n = java.util.UUID.randomUUID().toString().take(8)
         val c = AcpConn(ctx, TestIds.APP_ACP, ChannelConfig.DEFAULT, scope, "clear-inflight")
         try {
             c.connect()
@@ -251,8 +255,8 @@ class ByokStoreScenarios(
             var tClearNs = 0L
             var charsAtClear = 0L
             val atClear = kotlinx.coroutines.CompletableDeferred<JSONObject>()
-            runPrompt(session, """{"chunks":1000000,"intervalMs":20,"keyEvery":5}""", run, status) { r ->
-                if (tClearNs == 0L && r.chunkChars >= 400) {
+            runPrompt(session, """{"chunks":60,"intervalMs":20,"tool":"fs_read","n":"$n"}""", run, status) { r ->
+                if (tClearNs == 0L && r.chunkChars >= 200) {
                     tClearNs = SystemClock.elapsedRealtimeNanos()
                     charsAtClear = r.chunkChars
                     scope.launch {
@@ -267,6 +271,7 @@ class ByokStoreScenarios(
             runPrompt(session, """{"chunks":3,"intervalMs":0}""", follow)
             val byokAfter = control.use { it.diagnostics().getJSONObject("byok") }
             c.closeAndWait()
+            val requests = fakeRequests().filter { it.optString("userText").contains(n) }
 
             val middle = key.substring(4, key.length - 4)
             fun clean(m: String?) = m != null && !m.contains(key) && !m.contains(middle)
@@ -275,10 +280,11 @@ class ByokStoreScenarios(
             val reqAt = byokAtClear.optJSONObject("requests") ?: JSONObject()
             val reqAfter = byokAfter.optJSONObject("requests") ?: JSONObject()
             val checks = JSONObject()
-                .put("streamedBeforeClear", charsAtClear >= 400)
+                .put("streamedBeforeClear", charsAtClear >= 200)
                 .put("turnEndedWithError", run.stopReason == null && msg != null && msg.contains("model_not_configured"))
-                .put("endedPromptly", clearToEndMs in 0.0..3_000.0)
+                .put("endedPromptly", clearToEndMs in 0.0..5_000.0)
                 .put("errorHasNoKey", clean(msg) && clean(followMsg))
+                .put("onlyOneKeyedRequest", requests.size == 1 && requests[0].optString("key") == "byok" && requests[0].optInt("round") == 0)
                 .put("noKeyServedAfterClear", reqAfter.optLong("served") == reqAt.optLong("served") &&
                     reqAfter.optLong("denied") > reqAt.optLong("denied"))
                 .put("revoked", reqAfter.optLong("revocations") >= 1 && !byokAfter.optBoolean("keySet") &&
@@ -287,15 +293,29 @@ class ByokStoreScenarios(
             val ok = checks.keys().asSequence().all { checks.optBoolean(it) }
             return JSONObject().put("ok", ok)
                 .put("summary", "clearToEndMs=${"%.0f".format(clearToEndMs)} charsAfterClear=${run.chunkChars - charsAtClear} " +
+                    "inFlightCompleted=${requests.firstOrNull()?.optBoolean("completed")} requests=${requests.size} " +
                     "served ${reqAt.optLong("served")}→${reqAfter.optLong("served")} denied ${reqAt.optLong("denied")}→${reqAfter.optLong("denied")} " +
                     "checks=${checks.keys().asSequence().count { checks.optBoolean(it) }}/${checks.length()}")
                 .put("checks", checks)
                 .put("error", if (clean(msg)) msg else "<contains key>")
                 .put("followUpError", if (clean(followMsg)) followMsg else "<contains key>")
                 .put("clearToEndMs", clearToEndMs).put("charsAtClear", charsAtClear).put("charsAfterClear", run.chunkChars - charsAtClear)
-                .put("requestsAtClear", reqAt).put("requestsAfter", reqAfter)
+                // 第二层（中止传输中的响应）还没做：记录传输中的那一次是否照常结束
+                .put("inFlightResponseCompleted", requests.firstOrNull()?.optBoolean("completed") ?: JSONObject.NULL)
+                .put("requestsAtClear", reqAt).put("requestsAfter", reqAfter).put("fakeRequests", JSONArray(requests))
         } finally {
             c.dispose()
+        }
+    }
+
+    /** 电脑上假模型端点记录的请求（只有 key 的类别，没有 key）。 */
+    private suspend fun fakeRequests(): List<JSONObject> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val conn = java.net.URL(FakeModel.BASE_URL + "/_log").openConnection() as java.net.HttpURLConnection
+        try {
+            val arr = JSONObject(conn.inputStream.bufferedReader().readText()).getJSONArray("requests")
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+        } finally {
+            conn.disconnect()
         }
     }
 

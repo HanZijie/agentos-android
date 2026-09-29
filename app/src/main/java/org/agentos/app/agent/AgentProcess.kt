@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import org.agentos.acp.AcpAndroid
+import org.agentos.app.BuildConfig
 import org.agentos.app.agent.supervisor.SupervisorStatus
 import org.agentos.app.agent.supervisor.SupervisorStatusReceiver
 import org.agentos.runtime.AgentRuntime
@@ -42,8 +43,8 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * [RuntimeLifecycle]（前台服务、心跳、wake lock），执行每个进程一次的恢复流程（`runtime.start()`），持有 ACP 连接。
  * 由 `:agent` 里任何一个服务第一次创建时初始化（AgentService、AcpService、AgentControlService，谁先谁后都一样）。
  *
- * 宿主层是 A 的 RuntimeEngine（ACP、Store、调度、恢复都是真的），HostPort 是 [HostPortImpl]。Pi Agent core 在 B2 之前
- * 用 [ScriptedAgentCore] 占位；B2 进 main 后只换 [engine] 的 factory。
+ * 宿主层是 A 的 RuntimeEngine（ACP、Store、调度、恢复），HostPort 是 [HostPortImpl]，Agent core 是 B 的 Pi
+ * （[PiAgentCores]：PiAdapter + QuickJsEngine，模型请求经 HostFetch，key 来自 [KeystoreSecrets]）。
  */
 class AgentProcess private constructor(val app: Context) {
 
@@ -69,7 +70,7 @@ class AgentProcess private constructor(val app: Context) {
     val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog)
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
-    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, ScriptedAgentCore(secrets))
+    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, PiAgentCores.create(app, hostPort))
     val runtime: AgentRuntime = engine
     @Volatile private var engineStarted = false
 
@@ -201,9 +202,9 @@ class AgentProcess private constructor(val app: Context) {
             .also { lastExit = it }
     }
 
-    /** 只在 debug 包里生效：设备用例用它把恢复流程拉长，复现“恢复中登记任务”的先后顺序。 */
+    /** 只在带测试入口的构建里生效（debug、releaseTest，BuildConfig.TEST_HOOKS）：设备用例用它把恢复流程拉长，复现“恢复中登记任务”的先后顺序。 */
     private suspend fun testRecoveryDelay() {
-        if (!debuggable) return
+        if (!BuildConfig.TEST_HOOKS) return
         val f = File(app.createDeviceProtectedStorageContext().filesDir, TEST_RECOVERY_DELAY_FILE)
         val ms = runCatching { f.readText().trim().toLong() }.getOrNull() ?: return
         runCatching { f.delete() }
@@ -273,7 +274,8 @@ class AgentProcess private constructor(val app: Context) {
                 .put("wakeLockHeld", wakeLock.isHeld)
                 .put("debuggable", debuggable)
                 .put("implementation", runtime.javaClass.simpleName)
-                .put("agentCore", ScriptedAgentCore.MODEL_NAME)
+                .put("agentCore", "pi")
+                .put("testHooks", BuildConfig.TEST_HOOKS)
                 .put("engineStarted", engineStarted)
                 .put("idleGraceMs", IDLE_GRACE_MS)
                 .put("runState", JSONObject().put("activeTasks", rs.activeTasks).put("queuedTasks", rs.queuedTasks)
