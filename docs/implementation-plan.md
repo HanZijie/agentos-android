@@ -403,7 +403,11 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 #### W9 电脑端接入
 - [x] `DesktopGateway`：开发者开关、抽象 socket `agentos-acp`、一次性配对码（A4；`IAgentControl` v3）
 - [x] `tools/acp-bridge/`（A4）
-- [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机（A4：Pixel_8a 模拟器上 `npm run test:device` 24/24；真机待测）
+- [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机。
+  - A4：Pixel_8a 模拟器上 `npm run test:device` 24/24。
+  - A6：设备模式跑完整的一致性用例。手机上是真实 Pi，模型端点是电脑上的 `FakeModelServerMain`（经 `adb reverse`）。14 例中 10 例通过、4 例跳过：3 例依赖工具（W14 / W15，其中 1 例还要确认，W16），1 例依赖只有电脑上才有的 `--jev` 开关。
+  - 真机待测。
+- [ ] 电脑端接入打开期间 `:agent` 以前台服务运行并显示通知，避免空闲时被 cached-apps freezer 冻结（architecture F11 第 4 点；A6 发现，C 实现）
 
 **M1 验收**：
 - [ ] 找 10 名极客内测
