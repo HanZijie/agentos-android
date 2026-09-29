@@ -17,7 +17,12 @@
  * - only the very start of the answer counts: a <think> later in the text, a first block that is
  *   not text, or a provider that already streams thinking deltas leaves everything untouched;
  * - the thinking block has no signature, so pi-ai does not send it back on the next request
- *   (openai-completions replays only thinking it can map to a reasoning field).
+ *   (openai-completions replays only thinking it can map to a reasoning field). It is marked
+ *   `agentosThinkTags: true`; with `compat.agentosThinkTagsReplay: "keep"` the next request
+ *   gets it back in its original place instead ([restoreThinkTags]), as MiniMax-M2 requires for
+ *   inline reasoning ("passed back in its original format", MiniMax-M2 model card). Other
+ *   reasoning models want no reasoning in the history (Qwen3 model card: "No Thinking Content in
+ *   History"), which is the default.
  */
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 
@@ -37,9 +42,41 @@ export function splitLeadingThink(message) {
   // Unclosed (cut off by max tokens or an abort): all of it is reasoning.
   const thinking = end >= 0 ? body.slice(0, end) : body;
   const rest = end >= 0 ? body.slice(end + CLOSE.length).trimStart() : "";
-  const blocks = [{ type: "thinking", thinking }];
+  const blocks = [{ type: "thinking", thinking, agentosThinkTags: true }];
   if (rest.length > 0) blocks.push({ ...first, text: rest });
   return { ...message, content: [...blocks, ...content.slice(1)] };
+}
+
+/** The inverse for replay: a marked leading thinking block goes back into the text as <think>…</think>. */
+export function restoreLeadingThink(message) {
+  const content = message?.content;
+  if (message?.role !== "assistant" || !Array.isArray(content) || content.length === 0) return message;
+  const first = content[0];
+  if (first?.type !== "thinking" || first.agentosThinkTags !== true) return message;
+  const tagged = `${OPEN}${first.thinking}${CLOSE}`;
+  const next = content[1];
+  const restored = next?.type === "text"
+    ? [{ ...next, text: `${tagged}\n\n${next.text}` }, ...content.slice(2)]
+    : [{ type: "text", text: tagged }, ...content.slice(1)];
+  return { ...message, content: restored };
+}
+
+/**
+ * `context` with the marked assistant messages of `model` restored (same object when there is
+ * none). Messages of another model are left to pi-ai, which turns any thinking of another model
+ * into plain text (transform-messages.js, same provider + api + model test as here).
+ */
+export function restoreThinkTags(context, model) {
+  const messages = context?.messages;
+  if (!Array.isArray(messages)) return context;
+  let changed = false;
+  const restored = messages.map((m) => {
+    const sameModel = m?.provider === model?.provider && m?.api === model?.api && m?.model === model?.id;
+    const r = sameModel ? restoreLeadingThink(m) : m;
+    if (r !== m) changed = true;
+    return r;
+  });
+  return changed ? { ...context, messages: restored } : context;
 }
 
 /** Length of the longest suffix of `s` that is a proper prefix of </think>. */

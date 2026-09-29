@@ -156,9 +156,22 @@ Pi 0.86.1 在 abort 后仍会对已完成的工具调用 `afterToolCall`；`befo
 
 ## 模型兼容设置（AgentOS 扩展）
 
-`pi-ai` 0.86.1 没有的兼容开关，放在模型对象的 `compat` 里、和 `pi-ai` 自己的键并列（`pi-ai` 忽略不认识的键），统一带 `agentos` 前缀，实现在 `src/compat.js`、`src/think-tags.js`，挂在 `src/stream-fn.js`：
+`pi-ai` 0.86.1 没有的兼容开关，放在模型对象的 `compat` 里、和 `pi-ai` 自己的键并列（`pi-ai` 忽略不认识的键），统一带 `agentos` 前缀，实现在 `src/compat.js`、`src/think-tags.js`，挂在 `src/stream-fn.js`。胶水层不认识任何厂商，只按这三个键做事；哪个模型带哪些键，由生成模型的地方决定：
 
 | 键 | 作用 | 默认 |
 |---|---|---|
-| `agentosExtraBody` | 对象；它的键补进请求体里**还没有**的位置（经 `pi-ai` 的 `onPayload`），不覆盖 `pi-ai` 已经构造的字段 | MiniMax 的 OpenAI 兼容端点（host 为 `minimax.io` / `minimaxi.com` / `minimax.cn` 及其子域）自动带 `{"reasoning_split": true}`：思考改由 `reasoning_content` / `reasoning_details` 返回（MiniMax Chat Completions API 文档），`pi-ai` 原生按 thinking 处理并在下一轮回传 `reasoning_details`。显式设置优先，例如 `{"reasoning_split": false}` 关掉 |
-| `agentosThinkTags` | 布尔；openai-completions 路线上，回答**开头**的 `<think>…</think>` 转成 thinking 块：流式增量按 chunk 边界正确切分，只认第一个内容块的开头，正文中间出现的不动，模型自己已经发 thinking 时不动；这个 thinking 块不带签名，下一轮不回传 | 自定义端点（`provider: "custom"`）开，目录里的预设关 |
+| `agentosExtraBody` | 对象；它的键补进请求体里**还没有**的位置（经 `pi-ai` 的 `onPayload` 钩子），不覆盖 `pi-ai` 已经构造的字段（`model`、`messages`、`tools`…） | 无 |
+| `agentosThinkTags` | 布尔；openai-completions 路线上，回答**开头**的 `<think>…</think>` 转成 thinking 块：流式增量按 chunk 边界正确切分，只认第一个内容块的开头，正文中间出现的不动，模型自己已经发 thinking 时不动。这个块带标记 `agentosThinkTags: true`、不带签名 | 自定义端点（`provider: "custom"`）开，目录里的预设关 |
+| `agentosThinkTagsReplay` | `"drop"` 或 `"keep"`；上面那种 thinking 块在下一轮请求里怎么处理。`drop`：不回传（`pi-ai` 对不带签名的 thinking 块本来就不回传）；`keep`：放回回答开头，还原成 `<think>…</think>\n\n回答`。只还原同一模型（provider + api + id 相同）的消息，换过模型的历史仍按 `pi-ai` 的规则转成纯文本 | `"drop"` |
+
+回放默认 `drop`，依据是多数推理模型要求历史里不带思考（Qwen3 模型卡 “No Thinking Content in History”）；MiniMax-M2 相反，要求交错思考“以原格式回传，不要删掉 `<think>...</think>`”（MiniMax-M2 模型卡），所以 MiniMax 用 `keep`。
+
+**MiniMax 的设置由 `ModelCatalog.customModel`（Kotlin，`core/runtime/.../pi/ModelCatalog.kt`）写入**：自定义模型的 api 为 `openai-completions`、baseUrl 的 host 恰好是 `api.minimax.io` / `api.minimaxi.com` / `api.minimax.cn` 时，`compat` 合并进
+
+```json
+{ "agentosExtraBody": { "reasoning_split": true }, "agentosThinkTagsReplay": "keep" }
+```
+
+`reasoning_split: true` 让思考改由 `reasoning_content` / `reasoning_details` 返回（MiniMax Chat Completions API 文档：只拆分字段，不开关思考；M2.x 的思考关不掉），`pi-ai` 原生按 thinking 处理，并在下一轮回传 `reasoning_details`。`keep` 只在兜底路径上起作用：服务端没有拆分、思考仍内联在 `content` 开头时。调用方显式给的同名键优先。目录里的 MiniMax 预设走 anthropic-messages，不受影响。
+
+升级 `pi-ai` 时核对：`streamSimple` 的选项仍支持 `onPayload(params, model)` 并使用其返回值；`getCompat` 仍忽略不认识的 `compat` 键；`AssistantMessageEventStream` 的事件类型和 thinking 块的回放规则（`convertMessages` / `transformMessages`）没变。然后跑 `npm test`（`test/think-tags.mjs` 直接用 `pi-ai` 的 `convertMessages` 断言 drop / keep 下的请求历史）、JVM 契约测试和 `MiniMaxLiveSmokeTest` 的假端点用例。

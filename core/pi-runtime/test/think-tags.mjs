@@ -3,8 +3,9 @@
 //   node test/think-tags.mjs        (part of npm test)
 import assert from "node:assert/strict";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
-import { splitLeadingThink, splitLeadingThinkStream } from "../src/think-tags.js";
-import { addMissing, extraBody, thinkTagsEnabled } from "../src/compat.js";
+import { convertMessages } from "@earendil-works/pi-ai/api/openai-completions";
+import { restoreLeadingThink, restoreThinkTags, splitLeadingThink, splitLeadingThinkStream } from "../src/think-tags.js";
+import { addMissing, extraBody, thinkTagsEnabled, thinkTagsReplay } from "../src/compat.js";
 
 let passed = 0;
 const tests = [];
@@ -77,7 +78,7 @@ test("a leading think segment becomes a thinking block, across chunk boundaries 
       const r = await run(cut(full, i, j));
       assert.equal(r.thinking, "reason about it", `cuts ${i},${j}`);
       assert.equal(r.text(1), "pong", `cuts ${i},${j}`);
-      assert.deepEqual(r.result.content, [{ type: "thinking", thinking: "reason about it" }, { type: "text", text: "pong" }], `cuts ${i},${j}`);
+      assert.deepEqual(r.result.content, [{ type: "thinking", thinking: "reason about it", agentosThinkTags: true }, { type: "text", text: "pong" }], `cuts ${i},${j}`);
       assert.ok(!r.events.some((e) => (e.delta ?? "").includes("<") && e.type === "text_delta"), `no tag text at cuts ${i},${j}`);
     }
   }
@@ -113,7 +114,7 @@ test("reasoning, answer text and a tool call: the tool call moves to index 2", a
 test("unclosed think (max tokens, abort): everything is reasoning, no answer block", async () => {
   const r = await run(["<think>abc</th"]);
   assert.equal(r.thinking, "abc</th");
-  assert.deepEqual(r.result.content, [{ type: "thinking", thinking: "abc</th" }]);
+  assert.deepEqual(r.result.content, [{ type: "thinking", thinking: "abc</th", agentosThinkTags: true }]);
 });
 
 test("untouched: plain text, lookalike prefixes, a think later in the text", async () => {
@@ -135,28 +136,34 @@ test("untouched: the provider already streams thinking (reasoning_content)", asy
 
 test("splitLeadingThink on messages", () => {
   const m = (content) => ({ role: "assistant", content });
-  assert.deepEqual(splitLeadingThink(m([{ type: "text", text: "<think>a</think>\nb" }])).content, [{ type: "thinking", thinking: "a" }, { type: "text", text: "b" }]);
-  assert.deepEqual(splitLeadingThink(m([{ type: "text", text: "<think>a</think>" }, { type: "toolCall", id: "1" }])).content, [{ type: "thinking", thinking: "a" }, { type: "toolCall", id: "1" }]);
+  assert.deepEqual(splitLeadingThink(m([{ type: "text", text: "<think>a</think>\nb" }])).content, [{ type: "thinking", thinking: "a", agentosThinkTags: true }, { type: "text", text: "b" }]);
+  assert.deepEqual(splitLeadingThink(m([{ type: "text", text: "<think>a</think>" }, { type: "toolCall", id: "1" }])).content, [{ type: "thinking", thinking: "a", agentosThinkTags: true }, { type: "toolCall", id: "1" }]);
   const same = m([{ type: "text", text: "no <think>here</think>" }]);
   assert.equal(splitLeadingThink(same), same);
   const thinkingFirst = m([{ type: "thinking", thinking: "t" }, { type: "text", text: "<think>x</think>" }]);
   assert.equal(splitLeadingThink(thinkingFirst), thinkingFirst);
 });
 
-test("compat: reasoning_split for MiniMax OpenAI hosts, explicit extra body wins, only missing keys are added", () => {
+test("compat: extra body comes only from compat.agentosExtraBody (the glue knows no provider)", () => {
   const oai = (baseUrl, compat) => ({ api: "openai-completions", provider: "custom", baseUrl, compat });
-  for (const u of ["https://api.minimax.cn/v1", "https://api.minimaxi.com/v1", "https://api.minimax.io/v1", "https://API.MINIMAX.CN/v1/"]) {
-    assert.deepEqual(extraBody(oai(u)), { reasoning_split: true }, u);
-  }
-  for (const u of ["https://evil-minimax.cn/v1", "https://api.minimax.cn.evil.com/v1", "https://api.deepseek.com/v1", "http://127.0.0.1:8080/v1", "https://user@x.com/minimax.cn"]) {
+  for (const u of ["https://api.minimax.cn/v1", "https://api.minimaxi.com/v1", "https://api.minimax.io/v1", "http://127.0.0.1:8080/v1"]) {
     assert.deepEqual(extraBody(oai(u)), {}, u);
   }
-  assert.deepEqual(extraBody({ api: "anthropic-messages", baseUrl: "https://api.minimax.cn/anthropic" }), {});
-  assert.deepEqual(extraBody(oai("https://api.minimax.cn/v1", { agentosExtraBody: { reasoning_split: false } })), { reasoning_split: false });
+  assert.deepEqual(extraBody(oai("https://api.minimax.cn/v1", { agentosExtraBody: { reasoning_split: true } })), { reasoning_split: true });
   assert.deepEqual(extraBody(oai("http://127.0.0.1/v1", { agentosExtraBody: { foo: 1 } })), { foo: 1 });
+  for (const bad of [null, "x", 1, ["a"]]) assert.deepEqual(extraBody(oai("http://127.0.0.1/v1", { agentosExtraBody: bad })), {}, JSON.stringify(bad));
+  assert.deepEqual(extraBody(undefined), {});
   assert.deepEqual(addMissing({ model: "m", stream: true }, { model: "x", reasoning_split: true }), { model: "m", stream: true, reasoning_split: true });
   const p = { a: 1 };
   assert.equal(addMissing(p, {}), p);
+});
+
+test("compat: think-tag replay is drop unless the model says keep", () => {
+  assert.equal(thinkTagsReplay({ api: "openai-completions", provider: "custom" }), "drop");
+  assert.equal(thinkTagsReplay({ compat: { agentosThinkTagsReplay: "keep" } }), "keep");
+  assert.equal(thinkTagsReplay({ compat: { agentosThinkTagsReplay: "KEEP" } }), "drop");
+  assert.equal(thinkTagsReplay({ compat: { agentosThinkTagsReplay: true } }), "drop");
+  assert.equal(thinkTagsReplay(undefined), "drop");
 });
 
 test("compat: think-tag split defaults on for custom OpenAI endpoints only", () => {
@@ -165,6 +172,50 @@ test("compat: think-tag split defaults on for custom OpenAI endpoints only", () 
   assert.equal(thinkTagsEnabled({ api: "openai-completions", provider: "deepseek", compat: { agentosThinkTags: true } }), true);
   assert.equal(thinkTagsEnabled({ api: "openai-completions", provider: "custom", compat: { agentosThinkTags: false } }), false);
   assert.equal(thinkTagsEnabled({ api: "anthropic-messages", provider: "custom" }), false);
+});
+
+const MODEL = { api: "openai-completions", provider: "custom", id: "m1", input: ["text"] };
+const said = (content, model = MODEL) => ({ role: "assistant", api: model.api, provider: model.provider, model: model.id, content, stopReason: "stop" });
+
+test("restoreLeadingThink is the inverse of the split for marked blocks only", () => {
+  for (const text of ["<think>a\nb</think>\n\nanswer", "<think>x</think>"]) {
+    const split = splitLeadingThink(said([{ type: "text", text }]));
+    const back = restoreLeadingThink(split).content;
+    assert.equal(back[0].type, "text");
+    assert.ok(back[0].text.startsWith("<think>") && back[0].text.includes("</think>"), back[0].text);
+    assert.deepEqual(splitLeadingThink({ ...split, content: back }).content, split.content, text);
+  }
+  const withTool = splitLeadingThink(said([{ type: "text", text: "<think>t</think>" }, { type: "toolCall", id: "1", name: "add", arguments: {} }]));
+  assert.deepEqual(restoreLeadingThink(withTool).content, [{ type: "text", text: "<think>t</think>" }, { type: "toolCall", id: "1", name: "add", arguments: {} }]);
+  const native = said([{ type: "thinking", thinking: "r", thinkingSignature: "reasoning_content" }, { type: "text", text: "a" }]);
+  assert.equal(restoreLeadingThink(native), native);
+  const user = { role: "user", content: [{ type: "thinking", thinking: "x", agentosThinkTags: true }] };
+  assert.equal(restoreLeadingThink(user), user);
+});
+
+test("restoreThinkTags touches only marked messages of the same model", () => {
+  const mine = splitLeadingThink(said([{ type: "text", text: "<think>mine</think>ok" }]));
+  const other = splitLeadingThink(said([{ type: "text", text: "<think>theirs</think>ok" }], { ...MODEL, id: "m2" }));
+  const ctx = { systemPrompt: "s", messages: [{ role: "user", content: "hi", timestamp: 1 }, mine, other] };
+  const r = restoreThinkTags(ctx, MODEL);
+  assert.notEqual(r, ctx);
+  assert.equal(r.messages[1].content[0].text, "<think>mine</think>\n\nok");
+  assert.equal(r.messages[2], other);
+  assert.equal(r.systemPrompt, "s");
+  const plain = { messages: [{ role: "user", content: "hi" }, said([{ type: "text", text: "ok" }])] };
+  assert.equal(restoreThinkTags(plain, MODEL), plain);
+  assert.equal(restoreThinkTags({}, MODEL).messages, undefined);
+});
+
+test("pi-ai request history: drop leaves the reasoning out, keep sends it back as <think>", () => {
+  const turn = splitLeadingThink(said([{ type: "text", text: "<think>the user wants pong</think>\n\npong" }]));
+  const ctx = { messages: [{ role: "user", content: "ping", timestamp: 1 }, turn, { role: "user", content: "again", timestamp: 2 }] };
+  const assistantOf = (c) => convertMessages(MODEL, c, {}, {}).find((m) => m.role === "assistant");
+  const dropped = assistantOf(ctx);
+  assert.equal(dropped.content, "pong");
+  assert.ok(!JSON.stringify(dropped).includes("the user wants pong"), JSON.stringify(dropped));
+  const kept = assistantOf(restoreThinkTags(ctx, MODEL));
+  assert.equal(kept.content, "<think>the user wants pong</think>\n\npong");
 });
 
 for (const [name, fn] of tests) {
