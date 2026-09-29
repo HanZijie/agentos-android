@@ -95,7 +95,7 @@
 
 - **JS 里不做 I/O**。Pi 发出的网络请求一律经宿主层提供的 `fetch`（底层是 OkHttp）；模型 key 由宿主层按目标 endpoint 注入请求头，JS 运行时里看不到 key。工具只有目录里的 MCP 工具和内置的 `read_skill`，执行一律回到 Kotlin 的 Broker。
 - **模型调用走混合方案：协议适配用 `pi-ai`，网络和 key 留在 Kotlin。**
-  - 只打包 `pi-ai` 的 `anthropic-messages` 和 `openai-completions` 两个协议族及其官方 SDK（`@anthropic-ai/sdk`、`openai`）；Google、Bedrock、Azure 等不进包。MiniMax 用 `pi-ai` 自带的 `minimax` / `minimax-cn` 预设（Anthropic 协议），DeepSeek、Kimi、Qwen、智谱等国内厂商都落在这两个协议族上。
+  - 只打包 `pi-ai` 的 `anthropic-messages` 和 `openai-completions` 两个协议族及其官方 SDK（`@anthropic-ai/sdk`、`openai`）；Google、Bedrock、Azure 等不进包。MiniMax 用 `pi-ai` 自带的 `minimax` / `minimax-cn` 预设（Anthropic 协议，MiniMax 官方推荐的路线）。用户也可以用 OpenAI 兼容路线接 MiniMax（`https://api.minimax.cn/v1`，B7 已实测），但 M2.x 的思考内容会以 `<think>…</think>` 混在正文里：在请求里带 `reasoning_split: true` 才会拆到 `reasoning_content` 字段，由 B8 通过模型的 compat 设置解决，响应侧另加开头 `<think>` 段的兜底解析。DeepSeek、Kimi、Qwen、智谱等国内厂商都落在这两个协议族上。
   - 调用 `pi-ai` 时一律传入宿主层的 `fetch`、占位 key 和 `maxRetries: 0`：真 key 在请求经过 `fetch` 时由 Kotlin 注入；重试、deadline、取消和“不重放”统一由宿主层负责，不让 SDK 或 `pi-ai` 自己重试。
   - 官方 SDK 和 `pi-ai` 里引用 Node 内置模块（`node:fs`、`node:child_process` 等）的文件，打包时用 esbuild 替换成空实现。
   - 退路：如果 S8 证明官方 SDK 在 QuickJS 里跑不通，就由宿主层实现这两个协议族，经自定义的 `streamFn` 推给 Pi；Agent 循环仍然是 Pi 的，模型目录仍然直接读 `pi-ai` 的数据文件，不自己维护。
