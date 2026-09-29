@@ -49,13 +49,14 @@ function localTarget() {
 
 function deviceTarget(serial) {
   let fwd;
+  let restoreDevice;
   return {
     name: `device ${serial}`,
     device: true,
     handshakeTimeoutMs: 10_000,
     async setup() {
-      prepareDevice(serial);
-      deviceControl(serial, "disable");
+      // 清掉上次中断留下的开关、配对、转发；电池优化豁免（C6 的前台服务要从后台启动）
+      restoreDevice = prepareDevice(serial);
       deviceControl(serial, "enable");
       fwd = deviceForward(serial);
     },
@@ -64,9 +65,9 @@ function deviceTarget(serial) {
     bridgeArgs: () => ["--serial", serial],
     async teardown() {
       try {
-        deviceControl(serial, "disable");
-      } finally {
         fwd?.remove();
+      } finally {
+        restoreDevice?.();
       }
     },
   };

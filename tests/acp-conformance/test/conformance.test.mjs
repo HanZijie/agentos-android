@@ -126,11 +126,16 @@ for (const target of targets()) {
     });
 
     test("a failed turn is a JSON-RPC error carrying the AgentOS error code", async () => {
+      // 手机上宿主层会重试可重试的模型错误（B6：429 按 retry-after / 1、2、4…30 s 退避，每个请求最多 2 分钟），
+      // 这里要的是错误映射本身，所以用不可重试的 400；重试对客户端透明另有设备用例（device.test.mjs）。
+      // 电脑上的 AcpStdioAgent 不重试，继续用可重试的 429，顺带检查 retryable: true
+      const failure = target === "device" ? { code: "model_bad_request", retryable: false } : { code: "model_rate_limited", retryable: true };
       const { sessionId } = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [] });
-      await assert.rejects(agent.connection.prompt({ sessionId, prompt: directive({ fail: "model_rate_limited" }) }), (e) => {
-        assert.equal(e.code, TASK_FAILED);
-        assert.equal(e.data.agentosCode, "model_rate_limited");
-        assert.equal(e.data.retryable, true);
+      await assert.rejects(agent.connection.prompt({ sessionId, prompt: directive({ fail: failure.code }) }), (e) => {
+        // 连接断了时 SDK 以没有 code 的 Error("ACP connection closed") 拒绝，把原因带出来
+        assert.equal(e.code, TASK_FAILED, `expected a JSON-RPC error ${TASK_FAILED}, got: ${e.message}`);
+        assert.equal(e.data.agentosCode, failure.code);
+        assert.equal(e.data.retryable, failure.retryable);
         assert.match(e.data.taskId, /^tsk_/);
         return true;
       });
