@@ -65,6 +65,14 @@ object Desktop {
     const val HOW_TO = "在电脑上执行 adb forward tcp:8765 localabstract:agentos-acp，或直接用项目提供的 acp-bridge 命令；" +
         "第一次连接时输入这里显示的配对码。手机上的确认照常出现，电脑端无法绕过。"
 
+    /** Notification text and button of the foreground service while the switch is on (architecture F11 item 4, C6). */
+    const val NOTIFICATION_TITLE = "电脑端接入已开启"
+    const val NOTIFICATION_ACTION = "关闭"
+
+    /** Shown next to the switch whether it is on or off, so the user knows before turning it on (F11 item 4). */
+    const val FOREGROUND_NOTE = "打开期间 AgentOS 会保持在后台运行，并显示常驻通知“$NOTIFICATION_TITLE”。" +
+        "用完记得关闭：关掉这个开关，或点通知上的“$NOTIFICATION_ACTION”。"
+
     fun errorText(message: String?): String = when {
         message?.startsWith("agentos.desktop.disabled") == true -> "请先打开电脑端接入"
         else -> "操作失败，请重试"
