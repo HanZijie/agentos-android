@@ -50,7 +50,7 @@ agentos-android/
 │   │   ├── skills/SkillPrompt.kt                                  [W20] 新写：把 Skill 目录写进系统提示；内置 read_skill 工具
 │   │   ├── ports/{HostPort,AgentCore}.kt                          [W2] 新写：HostPort 是宿主层对 Android 的全部依赖（工具、Skill、Hook、确认、存储、密钥、时钟）；AgentCore 是宿主层对 Agent 循环的依赖，由 Pi 适配层实现，测试时用假实现
 │   │   ├── memory/MemoryProvider.kt                               [M6] 接口占位
-│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer（`FakeModelServerMain` 可单独运行，A6）、`RevocableSecrets`（带撤销信号的 SecretPort 测试替身，B5）
+│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer（`FakeModelServerMain` 可单独运行，A6）、`RevocableSecrets`（带撤销信号的 SecretPort 测试替身，B5）、`OpenAiCompatibleTargets`（OpenAI 兼容路线的实时测试目标，B7）
 │   │   └── src/test/                                              [W2] JUnit，在电脑上运行；[W3] 含可以编排 tool_use 的假模型端点
 │   ├── pi-runtime/                                  # 打包进 APK 的 Pi Agent core（JavaScript）
 │   │   ├── package.json · package-lock.json         [W3] 固定 @earendil-works/pi-agent-core、pi-ai 0.86.1；只引入 anthropic-messages、openai-completions 两个协议族
@@ -249,7 +249,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 | S1 | 不需要设备的部分完成；root 模拟器（adb root，API 35 / 37）上 M1–M7 通过 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降级、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁；`pm install` 的输入方式按 tmp → pipe → path → stdin → session 依次回退（模拟器上 path 被 SELinux 拒） | Magisk / KernelSU 真机（M1–M8，含 Play Protect） |
 | S2 | 监督契约 v0.1；root 模拟器（adb root，API 35 / 37）上 B0、K1、K2、K4、K5、T1、P1、B1（缩短为 10 分钟）通过 | [spikes/S2.md](spikes/S2.md)：判活看进程，心跳记录任务状态并用来发现短命进程（`boot` 字段必须等于 `Settings.Global.BOOT_COUNT`）；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起，包处于 stopped 时不拉起。**root 拉起前台服务按 `SYSTEM_UID` 豁免后台启动限制**，App 自己在后台被拒时由监督进程 1.9 s 内代为提升 | Magisk / KernelSU 真机（SELinux 上下文与 adb root 不同）；灭屏 30 分钟、24 小时驻留与内存；K3、K5b |
 | S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑） | 可用；通道参数已定 | API 35 / 36 / 37 真机 |
-| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；MiniMax 国际预设（需要国际 key）；OpenAI 兼容端点 |
+| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort；OpenAI 兼容端点用 MiniMax 的 `https://api.minimax.cn/v1`（B7）在电脑和 Pixel_8a 的 `:agent` 上跑通对话、跨轮回忆、工具调用、abort，思考内容以 `<think>` 混在正文里（B8 处理） | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；MiniMax 国际预设（需要国际 key） |
 | S4–S7 | 未开始 | — | — |
 
 **S2、S3、S4、S6 验证的是四段不同的连接，不能互相替代：**
