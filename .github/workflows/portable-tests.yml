@@ -84,7 +84,7 @@ jobs:
         run: npm run --if-present test
 
   acp-conformance:
-    name: ACP 一致性测试（stdio、电脑端网关 + acp-bridge）
+    name: ACP 一致性测试（stdio、电脑端网关 + acp-bridge；FakeAgentCore 与真实 Pi）
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -108,7 +108,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: tests/acp-conformance/package-lock.json
+          cache-dependency-path: |
+            tests/acp-conformance/package-lock.json
+            core/pi-runtime/package-lock.json
 
       - name: 安装依赖
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
@@ -123,7 +125,20 @@ jobs:
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         run: node tools/acp-bridge/acp-bridge.mjs --version
 
-      - name: 一致性测试
+      - name: 一致性测试（FakeAgentCore）
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         working-directory: tests/acp-conformance
         run: npm test
+
+      # W4 收尾（A5）：同一组用例换成真实的 Pi Agent core（PiAdapter + 电脑上的 QuickJS）+ 假模型端点，两个协议族各跑一遍
+      - name: 打包 Pi Agent core（pi-agent.js、model-catalog.json）
+        if: hashFiles('tests/acp-conformance/package-lock.json') != '' && hashFiles('core/pi-runtime/build.mjs') != ''
+        working-directory: core/pi-runtime
+        run: npm ci && node build.mjs
+
+      - name: 一致性测试（真实 Pi + 假模型端点）
+        if: hashFiles('tests/acp-conformance/package-lock.json') != '' && hashFiles('core/pi-runtime/build.mjs') != ''
+        working-directory: tests/acp-conformance
+        run: |
+          AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=anthropic npm test
+          AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=openai npm test

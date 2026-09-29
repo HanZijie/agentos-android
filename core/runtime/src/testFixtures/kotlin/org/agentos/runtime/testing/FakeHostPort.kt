@@ -154,6 +154,8 @@ class FakeHostPort(
         override val activeModel: StateFlow<ModelSpec?> = this@FakeHostPort.activeModel
     }
 
+    // 只适合测试：这里用 startsWith 做字符串前缀匹配，生产不要照抄（前缀匹配会把 key 交给 https://api.example.com.evil.net）。
+    // 生产按 endpoint 匹配，见 SecretPort.credentialFor 与 net/BaseUrlCredentials。
     override val secrets: SecretPort = object : SecretPort {
         override suspend fun credentialFor(url: String): Credential? =
             secretsByPrefix.entries.firstOrNull { url.startsWith(it.key) }?.let { Credential(it.value) }

@@ -22,6 +22,9 @@ import java.nio.file.Files
 /**
  * 测试用的完整运行时：FakeHostPort（临时目录里的真实 SQLite）+ FakeAgentCore + RuntimeEngine。
  * 同一个 [databaseFile] 可以先后交给两个 TestRuntime，模拟进程重启。
+ *
+ * @param coreFactory 换掉 FakeAgentCore（例如 `AcpStdioAgent --core=pi` 用真实 Pi：PiAdapter + 电脑上的 QuickJS + 假模型端点）；
+ *   这时 [core]、[cores]、[turnsStarted] 没有意义。
  */
 class TestRuntime(
     scripts: (FakeTurnContext) -> FakeTurnScript = FakeScripts.echo(),
@@ -29,6 +32,7 @@ class TestRuntime(
     val host: FakeHostPort = FakeHostPort(databaseFile = databaseFile),
     schedulerConfig: SchedulerConfig = SchedulerConfig(tickMillis = 20),
     config: RuntimeConfig = RuntimeConfig(scheduler = schedulerConfig),
+    coreFactory: AgentCoreFactory? = null,
 ) {
     /** 最近一次由工厂创建的 FakeAgentCore（泵故障后会换新的）。 */
     @Volatile var core: FakeAgentCore? = null
@@ -36,7 +40,8 @@ class TestRuntime(
 
     val cores = mutableListOf<FakeAgentCore>()
 
-    val factory = AgentCoreFactory { FakeAgentCore(scripts).also { core = it; synchronized(cores) { cores += it } } }
+    val factory: AgentCoreFactory = coreFactory
+        ?: AgentCoreFactory { FakeAgentCore(scripts).also { core = it; synchronized(cores) { cores += it } } }
 
     val engine: RuntimeEngine = AgentRuntimes.create(host, factory, config)
 

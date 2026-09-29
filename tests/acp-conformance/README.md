@@ -7,7 +7,7 @@
 | W4 | 电脑上的运行时（`org.agentos.runtime.testing.AcpStdioAgent`：完整的 `RuntimeEngine` + 真实 SQLite + ACP Agent 端），Agent 循环是 FakeAgentCore | stdio，`LineTransport` | ✅ 13 例（`conformance.test.mjs`，目标 `stdio`） |
 | W9 | 同上，以网关模式运行（与手机上同一份 `DesktopGatewayCore`：开关、配对码、令牌、握手；监听本机 TCP 代替抽象 socket） | `tools/acp-bridge --connect` | ✅ 13 例（目标 `gateway`）+ 配对与安全 9 例（`gateway.test.mjs`） |
 | W9 | 手机上的 `:agent`（debug 包；真 RuntimeEngine，Agent 循环暂时是 C 的 ScriptedAgentCore） | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 握手类 6 例（`device.test.mjs`）+ 配对与安全 9 例，模拟器 API 36 |
-| W4（B2 之后） | 电脑上的运行时，Agent 循环换成 B lane 的 PiAdapter（真实 Pi + 假模型端点） | stdio | A5 |
+| W4（B2 之后） | 电脑上的运行时，Agent 循环换成 B lane 的 PiAdapter（真实 Pi，跑在电脑上的 QuickJS 里）+ 假模型端点（FakeModelServer，Anthropic Messages / OpenAI Chat Completions 两个协议族） | stdio 和 gateway | ✅ 同样的 13 例 + 配对安全 9 例（`AGENTOS_ACP_CORE=pi`） |
 
 ## 运行
 
@@ -19,6 +19,16 @@ npm test
 ```
 
 `npm test` 跑电脑上的全部用例（目标 `stdio` 和 `gateway`，以及本机网关的配对与安全用例），不需要设备。`AGENTOS_ACP_TARGETS=stdio` 只跑其中一种目标。
+
+### 真实 Pi + 假模型端点
+
+```bash
+(cd ../../core/pi-runtime && npm ci && node build.mjs)   # 生成 app/src/main/assets/pi-agent.js、model-catalog.json
+AGENTOS_ACP_CORE=pi npm test                             # 模型协议族：Anthropic Messages（MiniMax 预设）
+AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=openai npm test   # OpenAI Chat Completions（自定义端点）
+```
+
+电脑上的运行时换成 B lane 的 PiAdapter（pi-agent.js 跑在 quickjs-kt-jvm 里，与 Android 同一个绑定），模型请求发往同一进程里的 FakeModelServer：它按同样的 `{"fake":…}` 指令回应（文字、thinking、工具调用、等待中止、max_tokens、各类失败），所以用例不用改。两种 core 的已知差别只有一处：模型调用一个从来没有声明过的工具时，FakeAgentCore 交给宿主层拒绝（`[agentos:tool_not_in_catalog]`），真实 Pi 不调 beforeToolCall、自己返回 `Tool <name> not found`；两者都没有执行它，状态都是 `failed`，用例按这个性质检查。
 
 `npm test` 第一次运行时会调用 `../../gradlew :core:runtime:acpConformanceClasspath`，生成 `core/runtime/build/acp-conformance/classpath.txt`。改了 `core/runtime` 的代码之后，重新运行这个 Gradle 任务（或设置 `AGENTOS_ACP_REBUILD=1`）。也可以用 `AGENTOS_ACP_CLASSPATH` 直接给出类路径。
 
@@ -45,7 +55,8 @@ adb shell am broadcast -f 32 -n org.agentos.app/.agent.DesktopGatewayDebugReceiv
 
 ```bash
 java -Dkotlin-logging-to-jul=true -cp "$(cat core/runtime/build/acp-conformance/classpath.txt)" \
-  org.agentos.runtime.testing.AcpStdioAgent [--jev=first] [--db=<目录>] [--consent=allow|deny]
+  org.agentos.runtime.testing.AcpStdioAgent [--jev=first] [--db=<目录>] [--consent=allow|deny] \
+  [--core=fake|pi] [--pi-assets=<目录>] [--pi-api=anthropic|openai]
 ```
 
 加 `--listen=<端口>`（0 表示任选）以网关模式运行：stdin / stdout 变成控制通道（`{"op":"enable"}`、`{"op":"pair"}`、`{"op":"status"}`…，每行一条 JSON），ACP 客户端经 `tools/acp-bridge --connect 127.0.0.1:<端口>` 连进去。
