@@ -100,6 +100,17 @@ class SettingsLogicTest {
         assertTrue(safe[0].warn)
         val missing = StatusText.supervisor("{}", supervisorMissing = true)
         assertTrue(missing[0].value.startsWith("未运行"))
+        // a status stored in an earlier boot is not shown as the current state ("正常" next to "未运行")
+        val stale = StatusText.supervisor("""{"protocol":1,"state":"ok","reason":"runtime_up","seq":3,"module_version":"v0.1.0","module_version_code":1}""", supervisorMissing = true)
+        assertTrue(stale[0].value.startsWith("未运行"))
+        assertTrue(stale[0].warn)
+        assertEquals("上次收到的状态（不是本次开机的）", stale[1].label)
+        assertEquals("正常", stale[1].value)
+        assertFalse(stale[1].warn)
+        // within the first 30 s of a new boot (not yet "missing") the old status is not current either
+        val oldBoot = """{"protocol":1,"state":"ok","reason":"runtime_up","seq":3,"boot_count":11}"""
+        assertEquals("等待本次开机的监督状态", StatusText.supervisor(oldBoot, false, currentBootCount = 12)[0].value)
+        assertEquals("正常", StatusText.supervisor(oldBoot, false, currentBootCount = 11)[0].value)
         assertTrue(StatusText.supervisorMissing("""{"supervisorMissing":true}"""))
         assertEquals("读不到状态", StatusText.runtime("not json")[0].value)
     }
@@ -114,6 +125,11 @@ class SettingsLogicTest {
         assertEquals("关闭", Desktop.summary(Desktop.parseAccess("""{"enabled":false,"listening":false,"pairings":[],"connections":[]}""")))
         assertEquals("482913", Desktop.parseCode("""{"code":"482913","expiresAtMs":5,"ttlMs":300000}""").code)
         assertEquals("请先打开电脑端接入", Desktop.errorText("agentos.desktop.disabled: off"))
+        // F11 item 4: the note next to the switch must use the same words as C's foreground notification
+        assertEquals("电脑端接入已开启", Desktop.NOTIFICATION_TITLE)
+        assertEquals("关闭", Desktop.NOTIFICATION_ACTION)
+        assertTrue(Desktop.FOREGROUND_NOTE.contains("常驻通知“电脑端接入已开启”"))
+        assertTrue(Desktop.FOREGROUND_NOTE.contains("用完记得关闭"))
     }
 
     @Test
