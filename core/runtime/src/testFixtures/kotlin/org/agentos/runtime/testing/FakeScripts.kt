@@ -87,7 +87,8 @@ object FakeScripts {
      * ```json
      * {"fake": {"chunks": 20, "chunkChars": 16, "intervalMs": 20, "text": "x", "thinking": "…",
      *           "tools": [{"name": "add", "arguments": {"a": 1}}], "awaitAbort": true,
-     *           "fail": "model_rate_limited", "maxTokens": true, "crash": true, "toolLoop": 13}}
+     *           "fail": "model_rate_limited", "failMessage": "…", "failDetails": {"reason": "key_revoked"},
+     *           "maxTokens": true, "crash": true, "toolLoop": 13}}
      * ```
      *
      * 不是这种 JSON 时回显。字段都可省略；`chunks` 条文字先发，然后 thinking 在前（若有），
@@ -126,7 +127,10 @@ object FakeScripts {
         if (bool("awaitAbort")) steps += FakeStep.AwaitAbort
         str("fail")?.let { code ->
             val c = ErrorCode.fromWire(code) ?: ErrorCode.MODEL_UNAVAILABLE
-            steps += FakeStep.Fail(c.info("fake failure: $code"))
+            // failMessage / failDetails：模拟 Agent core 带说明和 details 的失败（例如 B5 的 key_revoked）
+            steps += FakeStep.Fail(
+                org.agentos.runtime.errors.ErrorInfo(c, str("failMessage") ?: "fake failure: $code", details = d["failDetails"] as? JsonObject),
+            )
         }
         if (bool("maxTokens")) steps += FakeStep.MaxTokens
         if (bool("crash")) steps += FakeStep.CrashCore()
