@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  lane C（W6/C4）：releaseTest 构建（R8 下的设备验证，不发布）。与 debug 包一样只对回环地址放行明文 HTTP，
-  让设备用例经 adb reverse 连电脑上的假模型端点。配置文件与 src/debug 的相同（B4 会把回环放行移到 main）。
--->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <application android:networkSecurityConfig="@xml/agentos_releasetest_network_security" />
-</manifest>

@@ -21,7 +21,7 @@ android {
             buildConfigField("boolean", "TEST_HOOKS", "true")
         }
         // W6（C4）：R8 下的设备验证。与 release 相同的 R8 规则和不可调试，另外用调试证书签名、带 in-app 执行器
-        // （tests/device/acp-channel/inapp）、打开测试入口、放行回环明文（假模型端点）。只用于测试，不发布
+        // （tests/device/acp-channel/inapp）、打开测试入口（回环明文由 main 的网络安全配置放行，B4）。只用于测试，不发布
         create("releaseTest") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")

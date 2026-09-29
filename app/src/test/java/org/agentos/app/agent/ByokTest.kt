@@ -333,10 +333,17 @@ class ModelSourcesTest {
         for (bad in listOf(
             "http://gw.example.com/v1", "ftp://gw.example.com", "gw.example.com/v1", "https://", "https://u:p@gw.example.com/v1",
             "https://gw.example.com/v1?key=1", "https://gw.example.com/v1#x", "https://gw.example.com/a/../b",
+            // F9：http 只允许 127.0.0.1、localhost、::1
+            "http://127.0.0.2:8080/v1", "http://127.example.com/v1", "http://10.0.2.2:8080/v1",
         )) {
             assertByok(ModelSources.INVALID_ENDPOINT, bad) { m.set(custom(bad), key) }
         }
         assertByok(ModelSources.UNSUPPORTED_API) { m.set(custom("https://gw.example.com", "openai-responses"), key) }
+        // 回环地址可以用 http（本机模型服务、adb reverse）
+        for (ok in listOf("http://127.0.0.1:18787", "http://localhost:11434/v1", "http://[::1]:8080/v1")) {
+            assertTrue(ok, m.set(custom(ok), key)["configured"]!!.jsonPrimitive.boolean)
+        }
+        m.clear()
         assertByok(ModelSources.INVALID_SOURCE) { m.set("not json", key) }
         assertByok(ModelSources.INVALID_SOURCE) { m.set("[]", key) }
         assertByok(ModelSources.INVALID_SOURCE) { m.set("""{"kind":"magic","model":"m"}""", key) }

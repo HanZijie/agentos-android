@@ -71,7 +71,7 @@ python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite sdk --b
 ./gradlew :app:assembleDebug :tests:device:acp-channel:client:assembleDebug
 python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app
 
-# R8 下再跑一遍：releaseTest（与 release 同样的 R8 规则、不可调试，调试证书签名，带 in-app 执行器，放行回环明文）
+# R8 下再跑一遍：releaseTest（与 release 同样的 R8 规则、不可调试，调试证书签名，带 in-app 执行器；回环明文由 main 的网络安全配置放行）
 ./gradlew :app:assembleReleaseTest
 python3 tests/device/acp-channel/run.py --serial $ANDROID_SERIAL --suite app --app-build releaseTest
 
