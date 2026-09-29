@@ -409,11 +409,17 @@ export async function rawConnect(port, host = "127.0.0.1") {
     },
     next(timeoutMs = 15_000) {
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("no line and no close within timeout")), timeoutMs);
-        waiters.push((v) => {
+        const waiter = (v) => {
           clearTimeout(timer);
           resolve(v);
-        });
+        };
+        // 超时的等待者要从队列里拿掉，否则之后到达的行会交给它、丢掉
+        const timer = setTimeout(() => {
+          const i = waiters.indexOf(waiter);
+          if (i >= 0) waiters.splice(i, 1);
+          reject(new Error("no line and no close within timeout"));
+        }, timeoutMs);
+        waiters.push(waiter);
         flush();
       });
     },
