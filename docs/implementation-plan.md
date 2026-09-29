@@ -50,7 +50,7 @@ agentos-android/
 │   │   ├── skills/SkillPrompt.kt                                  [W20] 新写：把 Skill 目录写进系统提示；内置 read_skill 工具
 │   │   ├── ports/{HostPort,AgentCore}.kt                          [W2] 新写：HostPort 是宿主层对 Android 的全部依赖（工具、Skill、Hook、确认、存储、密钥、时钟）；AgentCore 是宿主层对 Agent 循环的依赖，由 Pi 适配层实现，测试时用假实现
 │   │   ├── memory/MemoryProvider.kt                               [M6] 接口占位
-│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer
+│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer（`FakeModelServerMain` 可单独运行，A6）、`RevocableSecrets`（带撤销信号的 SecretPort 测试替身，B5）
 │   │   └── src/test/                                              [W2] JUnit，在电脑上运行；[W3] 含可以编排 tool_use 的假模型端点
 │   ├── pi-runtime/                                  # 打包进 APK 的 Pi Agent core（JavaScript）
 │   │   ├── package.json · package-lock.json         [W3] 固定 @earendil-works/pi-agent-core、pi-ai 0.86.1；只引入 anthropic-messages、openai-completions 两个协议族
@@ -71,6 +71,7 @@ agentos-android/
 │   ├── src/main/AndroidManifest.xml                 # 定义 BIND_MCP_SERVICE、RUN_COMMANDS（signature）；导出 ACP 服务（:agent）；<queries> 声明插件发现 action；声明 :agent、:ext 进程
 │   ├── src/main/aidl/org/agentos/internal/          [W6] IAgentControl；[W14] IExtensionHost、IExtensionCallback（都不导出）
 │   ├── src/main/assets/pi-agent.js                  [W3] 由 core/pi-runtime/build.mjs 生成，不手改，不进仓库；同目录的 model-catalog.json 同样是生成物
+│   ├── src/main/res/xml/network_security_config.xml   [W6，B4] 只对 127.0.0.1、localhost、::1 放行明文 HTTP（debug 与 release 相同，F9），与 HostFetch.LOOPBACK_HOSTS 一致
 │   ├── src/androidTest/                         [W6] 设备测试，跑在 :agent 进程（QuickJsEngine、PiAdapter 契约、冷启动、可选的真实端点）
 │   ├── src/debug/                               [W9] 只进 debug 包：DesktopGatewayDebugReceiver（电脑端接入的测试入口，要求 DUMP）。回环明文放行在 main（B4）；设备用例的测试入口由 BuildConfig.TEST_HOOKS 控制（debug、releaseTest 打开）
 │   ├── src/main/assets/agent-plugin/                [W17] AgentOS 自带插件（标准 Agent Plugin：plugin.json、skills/）
