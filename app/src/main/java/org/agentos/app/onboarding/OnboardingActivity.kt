@@ -20,6 +20,7 @@ import org.agentos.app.R
 import org.agentos.app.settings.AgentControlClient
 import org.agentos.app.settings.Byok
 import org.agentos.app.settings.ModelSourceActivity
+import org.agentos.app.settings.StatusText
 import org.agentos.app.ui.Ui
 
 /**
@@ -32,6 +33,7 @@ class OnboardingActivity : Activity() {
     private lateinit var column: LinearLayout
     private var scope: CoroutineScope? = null
     private var model: Byok.Source? = null
+    private var rooted: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,7 +47,17 @@ class OnboardingActivity : Activity() {
         render()
         scope = MainScope().also { s ->
             s.launch {
-                model = runCatching { AgentControlClient(this@OnboardingActivity).use { Byok.parseSource(it.modelSource) } }.getOrNull()
+                runCatching {
+                    AgentControlClient(this@OnboardingActivity).use { c ->
+                        val bootCount = Settings.Global.getInt(contentResolver, Settings.Global.BOOT_COUNT, -1).takeIf { it >= 0 }
+                        model = Byok.parseSource(c.modelSource)
+                        rooted = when {
+                            StatusText.supervisorThisBoot(c.supervisorStatus, bootCount) -> true
+                            StatusText.supervisorMissing(c.diagnostics) -> false
+                            else -> null
+                        }
+                    }
+                }
                 render()
             }
         }
@@ -64,6 +76,7 @@ class OnboardingActivity : Activity() {
         assistantHeld = getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true,
         batteryExempt = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName),
         pluginCount = 0, // M3a: Extension Host discovery
+        rooted = rooted,
     )
 
     private fun render() {

@@ -1,6 +1,12 @@
 package org.agentos.app.ui
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.util.TypedValue
@@ -13,6 +19,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -27,6 +34,7 @@ import org.agentos.app.R
 class ConversationActivity : Activity() {
     private lateinit var controller: ChatController
     private lateinit var scroll: ScrollView
+    private lateinit var messages: A11yThrottleFrame
     private lateinit var list: LinearLayout
     private lateinit var empty: TextView
     private lateinit var status: TextView
@@ -67,6 +75,44 @@ class ConversationActivity : Activity() {
 
     private fun dp(v: Int) = Ui.dp(this, v)
 
+    private val markdownStyle by lazy {
+        MarkdownSpans.Style(
+            codeBackground = getColor(R.color.ui_code_bg),
+            quoteStripe = getColor(R.color.ui_text_secondary),
+            secondaryText = getColor(R.color.ui_text_secondary),
+            rule = getColor(R.color.ui_text_secondary),
+            link = getColor(R.color.ui_accent),
+            indentPx = dp(14),
+            stripePx = dp(3),
+            gapPx = dp(8),
+            codePadPx = dp(6),
+        )
+    }
+
+    /**
+     * A link in a reply was tapped. Links come from model output, so nothing opens without the user
+     * seeing the full address first; only http(s) is ever offered (Markdown makes no other links).
+     */
+    private fun confirmLink(url: String, label: String) {
+        if (!Markdown.isWebUrl(url) || isFinishing) return
+        val shown = if (label.isBlank() || label == url) url else "“$label”\n$url"
+        AlertDialog.Builder(this)
+            .setTitle(R.string.ui_link_title)
+            .setMessage(getString(R.string.ui_link_message, shown))
+            .setPositiveButton(R.string.ui_link_open) { _, _ ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE))
+                } catch (e: ActivityNotFoundException) {
+                    Toast.makeText(this, R.string.ui_link_no_app, Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNeutralButton(R.string.ui_link_copy) { _, _ ->
+                getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("link", url))
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun buildLayout(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -81,20 +127,22 @@ class ConversationActivity : Activity() {
         }
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         titles.addView(Ui.text(this, 20f, R.color.ui_text, bold = true).apply { setText(R.string.ui_title) })
-        status = Ui.text(this, 12f, R.color.ui_text_secondary)
+        status = Ui.text(this, 12f, R.color.ui_text_secondary).apply { id = R.id.ui_status }
         titles.addView(status)
         bar.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         newChat = Ui.textButton(this, getString(R.string.ui_new_chat), R.color.ui_accent) { controller.newConversation() }
+            .apply { id = R.id.ui_new_chat }
         bar.addView(newChat)
         bar.addView(Ui.textButton(this, getString(R.string.ui_settings), R.color.ui_accent) {
             startActivity(android.content.Intent(this, org.agentos.app.settings.SettingsActivity::class.java))
-        })
+        }.apply { id = R.id.ui_open_settings })
         root.addView(bar, Ui.matchWrap())
         root.addView(View(this).apply { setBackgroundColor(getColor(R.color.ui_divider)) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
 
         // messages
-        val frame = FrameLayout(this)
+        messages = A11yThrottleFrame(this).apply { id = R.id.ui_messages }
+        val frame = messages
         scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -118,6 +166,7 @@ class ConversationActivity : Activity() {
             setBackgroundColor(getColor(R.color.ui_surface))
         }
         input = EditText(this).apply {
+            id = R.id.ui_input
             setHint(R.string.ui_hint_input)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             maxLines = 5
@@ -130,7 +179,10 @@ class ConversationActivity : Activity() {
             setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { onAction(); true } else false }
         }
         composer.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        action = Ui.textButton(this, getString(R.string.ui_send), R.color.ui_accent) { onAction() }
+        action = Ui.textButton(this, getString(R.string.ui_send), R.color.ui_accent) { onAction() }.apply {
+            id = R.id.ui_action
+            contentDescription = getString(R.string.ui_send_desc)
+        }
         composer.addView(action)
         root.addView(composer, Ui.matchWrap())
 
@@ -159,11 +211,13 @@ class ConversationActivity : Activity() {
             else -> ""
         }
         action.text = getString(if (s.busy) R.string.ui_stop else R.string.ui_send)
+        action.contentDescription = getString(if (s.busy) R.string.ui_stop_desc else R.string.ui_send_desc)
         action.isEnabled = s.turn != ChatState.Turn.CANCELLING
         action.alpha = if (action.isEnabled) 1f else 0.4f
         newChat.isEnabled = !s.busy
         newChat.alpha = if (newChat.isEnabled) 1f else 0.4f
         empty.visibility = if (s.items.isEmpty()) View.VISIBLE else View.GONE
+        messages.streaming = s.busy
 
         val atBottom = scroll.scrollY + scroll.height >= list.height - dp(48)
         val ids = s.items.map { it.id }
@@ -205,7 +259,10 @@ class ConversationActivity : Activity() {
                 setPadding(dp(12), dp(4), dp(12), dp(6))
                 setTextIsSelectable(true)
             })
-            addView(bubble(end = false).apply { tag = "text" })
+            addView(bubble(end = false).apply {
+                tag = "text"
+                movementMethod = MarkdownSpans.LinkTapMovement // after setTextIsSelectable: links tap, text still selects
+            })
         }
         is ChatItem.Tool -> LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -240,7 +297,13 @@ class ConversationActivity : Activity() {
                 // trailing newlines are kept while streaming (the next chunk may continue the line), trimmed once done
                 val body = if (item.streaming) item.text.trimStart() else item.text.trim()
                 text.visibility = if (body.isEmpty() && !item.streaming) View.GONE else View.VISIBLE
-                text.text = if (item.streaming) "$body▍" else body
+                text.text = MarkdownSpans.build(
+                    Markdown.render(body, streaming = item.streaming),
+                    tail = if (item.streaming) "▍" else "",
+                    paint = text.paint,
+                    style = markdownStyle,
+                    onLink = ::confirmLink,
+                )
             }
             is ChatItem.Tool -> {
                 val status = getString(

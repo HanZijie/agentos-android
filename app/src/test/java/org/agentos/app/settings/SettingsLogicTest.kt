@@ -133,6 +133,29 @@ class SettingsLogicTest {
     }
 
     @Test
+    fun securityTextOnlyClaimsRootWhenTheSupervisorReportedThisBoot() {
+        val thisBoot = """{"protocol":1,"state":"stopped","reason":"not_launched","seq":1,"boot_count":12}"""
+        val oldBoot = """{"protocol":1,"state":"ok","reason":"runtime_up","seq":9,"boot_count":11}"""
+        assertTrue(StatusText.supervisorThisBoot(thisBoot, 12))
+        assertFalse("stored in an earlier boot", StatusText.supervisorThisBoot(oldBoot, 12))
+        assertFalse("no report", StatusText.supervisorThisBoot("{}", 12))
+        assertFalse("boot count unknown: do not claim", StatusText.supervisorThisBoot(thisBoot, null))
+
+        assertTrue(SecurityText.settings(true).startsWith("这台手机已经 root"))
+        val unknown = SecurityText.settings(false)
+        assertFalse(unknown.contains("这台手机已经 root"))
+        assertTrue(unknown.contains("如果已经 root") && unknown.contains("如果没有 root"))
+
+        assertTrue(SecurityText.welcome(true).contains("这台手机已经 root"))
+        for (r in listOf(false, null)) assertFalse(SecurityText.welcome(r).contains("已经 root"))
+        assertTrue(SecurityText.welcome(false).contains("没有检测到 AgentOS 模块"))
+        // the first-run welcome card follows the same rule
+        val base = Onboarding.Facts(null, null, false, false, false, 0)
+        assertFalse(Onboarding.steps(base)[0].detail.contains("已经 root"))
+        assertTrue(Onboarding.steps(base.copy(rooted = true))[0].detail.contains("这台手机已经 root"))
+    }
+
+    @Test
     fun onboardingSteps() {
         val fresh = Onboarding.Facts(null, null, notificationsGranted = false, assistantHeld = false, batteryExempt = false, pluginCount = 0)
         val steps = Onboarding.steps(fresh)
@@ -141,7 +164,8 @@ class SettingsLogicTest {
         assertEquals(listOf(Onboarding.Id.NOTIFICATIONS, Onboarding.Id.ASSISTANT, Onboarding.Id.BATTERY), Onboarding.pending(fresh))
         val ready = fresh.copy(modelConfigured = true, modelUsable = true, notificationsGranted = true, batteryExempt = true)
         assertEquals(listOf(Onboarding.Id.ASSISTANT), Onboarding.pending(ready))
-        assertNotNull(steps.first { it.id == Onboarding.Id.WELCOME }.detail.contains("best_effort"))
-        assertTrue(steps.first { it.id == Onboarding.Id.WELCOME }.detail.contains("监督进程"))
+        assertTrue(steps.first { it.id == Onboarding.Id.WELCOME }.detail.contains("best_effort"))
+        // the supervisor is only mentioned as guarding the runtime when it reported this boot
+        assertTrue(Onboarding.steps(fresh.copy(rooted = true)).first { it.id == Onboarding.Id.WELCOME }.detail.contains("监督进程"))
     }
 }

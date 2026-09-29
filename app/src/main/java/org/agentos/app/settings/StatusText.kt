@@ -25,6 +25,17 @@ object StatusText {
     private fun JsonObject.l(k: String) = (this[k] as? JsonPrimitive)?.longOrNull
     private fun JsonObject.b(k: String) = (this[k] as? JsonPrimitive)?.booleanOrNull
 
+    /**
+     * True when the root supervisor has reported in this boot (any state, even "not launched yet"):
+     * the AgentOS module is running as root on this phone. False with no report, or with one stored in
+     * an earlier boot: no module, module disabled, phone not rooted, or not reported yet.
+     */
+    fun supervisorThisBoot(supervisorJson: String?, currentBootCount: Int?): Boolean {
+        val o = parse(supervisorJson) ?: return false
+        if (o.s("state") == null || currentBootCount == null) return false
+        return o.i("boot_count") == currentBootCount
+    }
+
     fun runtime(statusJson: String?): List<Line> {
         val o = parse(statusJson) ?: return listOf(Line("运行时", "读不到状态", warn = true))
         val phase = when (o.s("phase")) {

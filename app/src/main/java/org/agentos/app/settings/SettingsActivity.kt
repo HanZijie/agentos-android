@@ -109,19 +109,20 @@ class SettingsActivity : Activity() {
             }
         })
 
-        // ---- security level (principle 6)
+        // ---- security level (principle 6): "rooted" only when the root supervisor reported this boot
+        val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+            .takeIf { it >= 0 }
         column.addView(Ui.sectionTitle(this, "安全等级"))
         column.addView(Ui.card(this).apply {
-            addView(Ui.line(context, "等级", "best_effort（尽力而为）"))
-            addView(Ui.paragraph(context, SECURITY_TEXT))
+            addView(Ui.line(context, "等级", SecurityText.LEVEL))
+            addView(Ui.paragraph(context, SecurityText.settings(StatusText.supervisorThisBoot(s.supervisor, bootCount))))
         })
 
         // ---- runtime and supervisor
         column.addView(Ui.sectionTitle(this, "运行与监督"))
         column.addView(Ui.card(this).apply {
             if (s.runtime != null) StatusText.runtime(s.runtime).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
-            val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
-            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount.takeIf { it >= 0 })
+            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount)
                 .forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
             addView(Ui.buttons(context, "刷新" to { scope?.launch { reload() } }))
         })
@@ -252,13 +253,5 @@ class SettingsActivity : Activity() {
             }
             reload()
         }
-    }
-
-    companion object {
-        const val SECURITY_TEXT =
-            "这台手机已经 root，其他获得 root 权限的应用可以读取 AgentOS 的全部数据，包括加密前后的 key、对话和日志。\n\n" +
-                "AgentOS 能做的是：key 用 Android Keystore 加密保存，只在发出模型请求的那一刻注入，不写进日志、诊断和通知；" +
-                "Agent 的代码不以 root 运行，模型和插件接触不到 root。但它防不住拥有 root 权限的应用。" +
-                "请只给信任的应用授予 root 权限。"
     }
 }
