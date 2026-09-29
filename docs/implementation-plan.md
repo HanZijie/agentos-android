@@ -383,9 +383,9 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
 - [x] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接（B3；字节码缓存在 `codeCacheDir/pi`，key 为 bundle SHA-256 + quickjs-kt 版本 + ABI + 协议版本，读取时校验；`:agent` 进程里首启中位 72 ms、字节码 12 ms；Pixel_8a 上 `:agent` 进程内经国内 key 的真实端点对话、工具调用、abort 通过）
 - [x] `AndroidStore`（BundledSQLiteDriver，CE 目录 `databases/agentos-runtime.db`）、`KeystoreSecrets`（只实现 `SecretPort`）、`HostPortImpl`（工具、Skill、Hook、确认暂为“未开放”实现）、`IAgentControl` v2（BYOK）
-- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 21 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束；API 35 / 36 / 37 与 Pixel_8a 均 21/21，logcat 与私有文件里搜不到 key）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 25 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束；C3.1 时 API 35 / 36 / 37 与 Pixel_8a 均 21/21，C4 后的 25 项见本节“Agent 核心换成 Pi”一条；logcat 与私有文件里搜不到 key）
 - [x] 换成真的 `AgentRuntime`（A3 的 `RuntimeEngine`，C3）；空闲后前台服务保留 2 s 宽限期
-- [ ] Agent 核心换成 Pi（PiAdapter + QuickJsEngine，等 B3；此前用 `ScriptedAgentCore` 占位）
+- [x] Agent 核心换成 Pi（`PiAgentCores`：PiAdapter + QuickJsEngine，C4；`ScriptedAgentCore` 已删除）。`--suite app` 现为 25 项，新增假模型端点（`fake_model.py`，经 `adb reverse`）上的工具轮次、多轮上下文、`:agent` 被杀后恢复的上下文，以及 MiniMax 国内平台的真实对话 `live-minimax`（key 只从环境变量读、经 stdin 投递，对话后清除）。另有 `releaseTest` 构建：与 release 相同的 R8 规则、不可调试，调试证书签名并带测试执行器，只用于测试。API 35 / 36 / 37 上 debug 与 releaseTest 各 25/25；Pixel_8a 上 releaseTest 25/25，真实对话首字约 2 s，logcat 里搜不到 key。R8 下 quickjs-kt 按名字访问 `kotlin.UByteArray`，`app/proguard-rules.pro` 要 keep 它，否则 `:agent` 收到第一次模型响应时 JNI abort
 
 #### W7 模块与打包
 - [x] `customize.sh`、`uninstall.sh`、`module.prop.template`、`support-matrix.yaml`（KernelSU 最低版本暂不检查，W27 定）
