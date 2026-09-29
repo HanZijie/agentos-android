@@ -1,19 +1,33 @@
 // ACP 一致性测试（W4、W9）：官方 TypeScript 客户端（@agentclientprotocol/sdk 1.4.0，与 pi-acp-adapter 一致）
-// 连接电脑上的 AgentOS 运行时。Agent 循环是 FakeAgentCore（prompt 里的 JSON 指令决定剧本）。
-// 同一组用例跑两种目标（AGENTOS_ACP_TARGETS）：stdio（stdin/stdout），gateway（与手机上相同的电脑端网关 + tools/acp-bridge）。
-// 手机上的 :agent 见 device.test.mjs。
+// 连接 AgentOS 运行时，prompt 里的 {"fake":…} 指令决定剧本。同一组用例跑三种目标（AGENTOS_ACP_TARGETS）：
+// - stdio：电脑上的运行时经 stdin/stdout，Agent 循环是 FakeAgentCore 或真实 Pi（AGENTOS_ACP_CORE=pi）；
+// - gateway：同一个运行时以网关模式运行（与手机上相同的电脑端网关）+ tools/acp-bridge；
+// - device（AGENTOS_ACP_DEVICE=<serial>）：手机上的 :agent（真实 Pi）经 tools/acp-bridge，模型是电脑上的 FakeModelServer
+//   经 adb reverse。手机上 M1 没有工具、确认和 Jev，依赖它们的用例跳过（原因见 agent.mjs 的 SKIP）。
 //
 // 覆盖：initialize → session/new → session/prompt 流式输出 → session/cancel，工具调用的更新、错误映射、
 // 不支持的输入、自动选会话扩展，以及线上格式（每行一条 JSON-RPC、没有多余字段、单行不超过 65,536 字符）。
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { agentCore, directive, PROTOCOL_VERSION, startAgent, targets, textOf, until } from "./agent.mjs";
+import { agentCore, deviceSerial, directive, PROTOCOL_VERSION, skipUnless, startAgent, startDeviceModel, targets, textOf, until } from "./agent.mjs";
 
 const META = "org.agentos";
 const TASK_FAILED = -32051;
 
 for (const target of targets()) {
-  describe(`AgentOS runtime over ${target} (${agentCore} agent core)`, () => {
+  const core = target === "device" ? "pi on the phone" : `${agentCore} agent core`;
+  // 设备模式：模型端点（FakeModelServer + adb reverse）在这个目标的所有用例之前起、之后停
+  let model;
+  if (target === "device") {
+    before(async () => {
+      model = await startDeviceModel(deviceSerial);
+    });
+    after(async () => {
+      await model?.stop();
+    });
+  }
+
+  describe(`AgentOS runtime over ${target} (${core})`, { timeout: 300_000 }, () => {
     let agent;
     let init;
 
@@ -55,7 +69,7 @@ for (const target of targets()) {
       assert.ok(chunks >= 1 && chunks < 30, `30 deltas were coalesced into ${chunks} updates`);
     });
 
-    test("a tool call shows up as tool_call, then tool_call_update in_progress and completed", async () => {
+    test("a tool call shows up as tool_call, then tool_call_update in_progress and completed", { skip: skipUnless(target, "tools") }, async () => {
       const { sessionId } = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [] });
       const response = await agent.connection.prompt({
         sessionId,
@@ -86,7 +100,7 @@ for (const target of targets()) {
       assert.match(updates[0].content[0].content.text, /^\[agentos:tool_not_in_catalog\]|^Tool rm_rf not found$/);
     });
 
-    test("a write tool is confirmed by AgentOS (not by the client) and runs", async () => {
+    test("a write tool is confirmed by AgentOS (not by the client) and runs", { skip: skipUnless(target, "tools", "consent") }, async () => {
       const { sessionId } = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [] });
       const response = await agent.connection.prompt({ sessionId, prompt: directive({ tools: [{ name: "send_note", arguments: { text: "hi" } }] }) });
       assert.equal(response.stopReason, "end_turn");
@@ -124,10 +138,16 @@ for (const target of targets()) {
       assert.equal(again.stopReason, "end_turn");
     });
 
-    test("max tokens and the tool round limit map to their stop reasons", async () => {
+    test("max tokens maps to the max_tokens stop reason", async () => {
       const { sessionId } = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [] });
       const r = await agent.connection.prompt({ sessionId, prompt: directive({ chunks: 1, maxTokens: true }) });
       assert.equal(r.stopReason, "max_tokens");
+      const next = await agent.connection.prompt({ sessionId, prompt: [{ type: "text", text: "next" }] });
+      assert.equal(next.stopReason, "end_turn");
+    });
+
+    test("the tool round limit maps to max_turn_requests", { skip: skipUnless(target, "tools") }, async () => {
+      const { sessionId } = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [] });
       // 工具轮次上限 12（architecture 4.1）：第 13 次带工具的往返不执行，本轮以 max_turn_requests 结束
       const loop = await agent.connection.prompt({ sessionId, prompt: directive({ toolLoop: 13 }) });
       assert.equal(loop.stopReason, "max_turn_requests");
@@ -185,7 +205,7 @@ for (const target of targets()) {
     });
   });
 
-  describe(`session auto-select extension (${target}, ${agentCore} agent core)`, () => {
+  describe(`session auto-select extension (${target}, ${core})`, { timeout: 300_000 }, () => {
     test("is refused unless negotiated in initialize", async () => {
       const agent = await startAgent({ target });
       try {
@@ -199,7 +219,7 @@ for (const target of targets()) {
       }
     });
 
-    test("creates a session, then selects it again, and reports the selection in _meta", async () => {
+    test("creates a session, then selects it again, and reports the selection in _meta", { skip: skipUnless(target, "jev") }, async () => {
       const agent = await startAgent({ args: ["--jev=first"], target });
       try {
         await agent.connection.initialize({
