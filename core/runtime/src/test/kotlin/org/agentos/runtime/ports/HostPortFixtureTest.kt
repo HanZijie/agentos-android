@@ -1,6 +1,7 @@
 package org.agentos.runtime.ports
 
 import androidx.sqlite.execSQL
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.agentos.runtime.testing.FakeHostPort
 import kotlin.test.AfterTest
@@ -46,6 +47,21 @@ class HostPortFixtureTest {
         assertFalse("fake-key" in "$credential")
         assertEquals("fake…6789", credential.masked())
         assertEquals(null, host.secrets.credentialFor("https://other.example/v1"))
+    }
+
+    @Test
+    fun `revocations default to an empty flow and credentials compare by identity`() = runBlocking {
+        // 默认实现：现有的 SecretPort（假实现、电脑上的实现）不用改就能编译，也不发任何撤销
+        assertEquals(emptyList(), host.secrets.revocations.toList())
+        val plain = object : SecretPort {
+            override suspend fun credentialFor(url: String): Credential? = null
+        }
+        assertEquals(emptyList(), plain.revocations.toList())
+        // 撤销按对象身份比较：内容相同的两个 Credential 不相等
+        val a = Credential("same-key-0123456789")
+        val b = Credential("same-key-0123456789")
+        assertTrue(a == a)
+        assertFalse(a == b, "Credential must not override equals (SecretPort.revocations compares by identity)")
     }
 
     @Test
