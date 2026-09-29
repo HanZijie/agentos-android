@@ -32,11 +32,16 @@ import com.agentclientprotocol.rpc.JsonRpcErrorCode
 import com.agentclientprotocol.transport.Transport
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.transformWhile
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
@@ -56,6 +61,7 @@ import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.OutboundGate
 import org.agentos.runtime.router.SessionRouter
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /** ACP Agent 端的参数（acp-mapping.md）。 */
 data class AcpConfig(
@@ -183,6 +189,11 @@ internal class AcpSession(
     override val sessionId: SessionId = SessionId(id)
     private val id: String = id
 
+    private companion object {
+        /** [awaitCancelHandoff] 的兜底：cancel 最多等 cancelWaitMillis，再留这么多余量。 */
+        const val CANCEL_HANDOFF_MARGIN_MILLIS = 5_000L
+    }
+
     override suspend fun postInitialize() {
         val s = selection ?: return
         // 自动选会话的结果：只对协商了扩展的客户端有意义；普通字段为空，标准客户端看到的是一条无内容的会话信息更新
@@ -191,40 +202,91 @@ internal class AcpSession(
         }
     }
 
+    /**
+     * 本连接上这个会话正在进行的一轮（SDK 同一会话同时只允许一轮）。`cancelRequested`：这一轮进行期间收到了本连接的
+     * session/cancel——SDK 会在 [cancel] 返回之后取消这一轮的协程（A8，见 [cancel]）。
+     */
+    private class PromptTurn {
+        val cancelRequested = AtomicBoolean(false)
+    }
+
+    private val active = AtomicReference<PromptTurn?>(null)
+
     override suspend fun prompt(content: List<ContentBlock>, _meta: JsonElement?): Flow<Event> {
-        val blocks = validate(content)
-        // 从收到起就计入 runState（恢复期间收到的也一样），提交持久化后才开始读这一轮的事件
-        val (after, task) = guarded { engine.submitWithCursor(caller, id, blocks) }
-        val mapper = UpdateMapper()
-        return flow {
-            var result: PromptResponse? = null
-            var failure: JsonRpcException? = null
-            engine.events(id, after)
-                .filter { it.taskId == task.id }
-                .transformWhile { e -> emit(e); !isTerminal(e) }
-                .collect { e ->
-                    when (e.eventType) {
-                        EventTypes.TASK_COMPLETED -> result = PromptResponse(stopReason(e), _meta = ProfileExtensions.promptResponseMeta(task.id))
-                        EventTypes.TASK_CANCELLED -> result = PromptResponse(StopReason.CANCELLED, _meta = ProfileExtensions.promptResponseMeta(task.id))
-                        EventTypes.TASK_FAILED -> failure = rpcError(e.error ?: ErrorCode.INTERNAL.info("task failed"), task.id)
-                        EventTypes.TASK_RECOVERY_REQUIRED -> {
-                            val err = engine.task(task.id)?.error ?: ErrorCode.AGENT_CORE_FAILED.info("the task was interrupted")
-                            failure = rpcError(err, task.id)
-                        }
-                        else -> for (update in mapper.map(e)) {
-                            // 背压：Binder 通道的本地积压降下来再发（binder-channel-v1 第 5 节）
-                            gate.awaitWritable()
-                            emit(Event.SessionUpdateEvent(update))
-                        }
-                    }
-                }
-            failure?.let { throw it }
-            emit(Event.PromptResponseEvent(result ?: PromptResponse(StopReason.END_TURN)))
+        val turn = PromptTurn()
+        active.set(turn)
+        try {
+            val blocks = validate(content)
+            // 从收到起就计入 runState（恢复期间收到的也一样），提交持久化后才开始读这一轮的事件。
+            // 提交不可中断：SDK 在提交途中取消这一轮（session/cancel）时，要拿到任务 ID 一并取消，不能留下没人等的任务
+            val (after, task) = withContext(NonCancellable) { guarded { engine.submitWithCursor(caller, id, blocks) } }
+            if (turn.cancelRequested.get() || !currentCoroutineContext().isActive) {
+                // session/cancel 在任务提交完成之前到达，那次 engine.cancel 可能没看到这个任务
+                withContext(NonCancellable) { runCatching { engine.cancel(caller, id) } }
+            }
+            currentCoroutineContext().ensureActive()
+            return turnEvents(turn, after, task.id)
+        } catch (e: Throwable) {
+            active.compareAndSet(turn, null)
+            throw e
         }
     }
 
-    /** session/cancel：取消会话里未结束的任务，并等运行中的停下（让本轮以 cancelled 正常返回，随后的 prompt 不会撞上“取消中”）。 */
+    private fun turnEvents(turn: PromptTurn, after: Long, taskId: String): Flow<Event> {
+        val mapper = UpdateMapper()
+        return flow {
+            try {
+                var result: PromptResponse? = null
+                var failure: JsonRpcException? = null
+                engine.events(id, after)
+                    .filter { it.taskId == taskId }
+                    .transformWhile { e -> emit(e); !isTerminal(e) }
+                    .collect { e ->
+                        when (e.eventType) {
+                            EventTypes.TASK_COMPLETED -> result = PromptResponse(stopReason(e), _meta = ProfileExtensions.promptResponseMeta(taskId))
+                            EventTypes.TASK_CANCELLED -> result = PromptResponse(StopReason.CANCELLED, _meta = ProfileExtensions.promptResponseMeta(taskId))
+                            EventTypes.TASK_FAILED -> failure = rpcError(e.error ?: ErrorCode.INTERNAL.info("task failed"), taskId)
+                            EventTypes.TASK_RECOVERY_REQUIRED -> {
+                                val err = engine.task(taskId)?.error ?: ErrorCode.AGENT_CORE_FAILED.info("the task was interrupted")
+                                failure = rpcError(err, taskId)
+                            }
+                            else -> for (update in mapper.map(e)) {
+                                // 背压：Binder 通道的本地积压降下来再发（binder-channel-v1 第 5 节）
+                                gate.awaitWritable()
+                                emit(Event.SessionUpdateEvent(update))
+                            }
+                        }
+                    }
+                // SDK 记下这个响应，这一轮的协程结束（或被取消）时才交给客户端
+                if (failure == null) emit(Event.PromptResponseEvent(result ?: PromptResponse(StopReason.END_TURN)))
+                if (turn.cancelRequested.get()) awaitCancelHandoff()
+                failure?.let { throw it }
+            } finally {
+                active.compareAndSet(turn, null)
+            }
+        }
+    }
+
+    /**
+     * 这一轮收到了本连接的 session/cancel：不结束，等 SDK 在 [cancel] 返回之后取消这一轮的协程——SDK 随后把上面记下的
+     * 响应交给客户端（失败的一轮则回 cancelled）。这样客户端收到响应、发出下一轮时，SDK 的取消一定已经做完，
+     * 不会落到下一轮上（A8）。兜底：等不到就照常结束。
+     */
+    private suspend fun awaitCancelHandoff() {
+        withTimeoutOrNull(config.cancelWaitMillis + CANCEL_HANDOFF_MARGIN_MILLIS) { awaitCancellation() }
+    }
+
+    /**
+     * session/cancel：取消会话里未结束的任务，并等运行中的停下（随后的 prompt 不会撞上“取消中”），最多 [AcpConfig.cancelWaitMillis]。
+     *
+     * A8：SDK 0.30.1 在这个方法**返回之后**才取消它眼里的“当前 prompt”（`Agent.SessionWrapper.cancel`：
+     * `agentSession.cancel()` → `_activePrompt.getAndSet(null)?.promptJob.cancel()`）。所以被取消的这一轮不能在那之前把响应
+     * 交给客户端（[awaitCancelHandoff]），否则客户端马上发的下一轮会成为“当前 prompt”，被这次 cancel 取消。
+     * 本连接上没有进行中的一轮时什么都不做、也不挂起：ACP 的 session/cancel 只针对进行中的 prompt。
+     */
     override suspend fun cancel() {
+        val turn = active.get() ?: return
+        turn.cancelRequested.set(true)
         val ids = runCatching { engine.cancel(caller, id) }.getOrDefault(emptyList())
         withTimeoutOrNull(config.cancelWaitMillis) { ids.forEach { engine.awaitTask(it) } }
     }
