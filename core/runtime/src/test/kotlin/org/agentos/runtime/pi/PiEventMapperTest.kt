@@ -157,6 +157,20 @@ class PiErrorClassifierTest {
     }
 
     @Test
+    fun retriedFailuresReportTheirAttempts() {
+        val spent = PiErrorClassifier.classify(listOf(ModelRequestOutcome.Responded("s1", url, 529, attempts = 5)), null)
+        assertEquals(ErrorCode.MODEL_UNAVAILABLE, spent.code)
+        assertEquals(5, spent.details!!["attempts"]!!.jsonPrimitive.int)
+
+        val network = failed(NetErrorKind.NETWORK).also { it.error.attempts = 3 }
+        assertEquals(3, PiErrorClassifier.classify(listOf(network), null).details!!["attempts"]!!.jsonPrimitive.int)
+
+        // A single attempt adds nothing.
+        assertNull(PiErrorClassifier.classify(listOf(responded(503)), null).details!!["attempts"])
+        assertNull(PiErrorClassifier.classify(listOf(failed(NetErrorKind.NETWORK)), null).details)
+    }
+
+    @Test
     fun revokedKeyIsModelNotConfiguredWithReason() {
         // F9: clearing the model source mid-turn; the integrator's wording, never auth_failed.
         for (outcome in listOf(failed(NetErrorKind.KEY_REVOKED), bodyFailed(NetErrorKind.KEY_REVOKED))) {

@@ -25,10 +25,18 @@ data class SchedulerConfig(
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     /** architecture 4.1：工具轮次上限。 */
     val maxToolRounds: Int = 12,
+    /**
+     * architecture F8 的过渡期限（W10 之后保留作兜底）：需要恢复满这么久的任务，在运行时启动时按放弃结束
+     * （`task.recovery_resolved { reason: recovery_expired }` → `task.failed`）。0 表示不限。
+     */
+    val recoveryExpiryMillis: Long = 24 * 60 * 60_000L,
+    /** 需要恢复的任务最多保留几条；启动时超出的从最旧的开始同样放弃。0 表示不限。 */
+    val maxRecoveryPending: Int = 50,
 ) {
     init {
         require(maxRunningSessions >= 1 && maxRunningPerOwner >= 1 && maxQueuedPerSession >= 1)
         require(cancelGraceMillis > 0 && tickMillis > 0 && coalesceWindowMillis in 1..1_000 && coalesceMaxChars > 0)
+        require(recoveryExpiryMillis >= 0 && maxRecoveryPending >= 0)
     }
 
     companion object {

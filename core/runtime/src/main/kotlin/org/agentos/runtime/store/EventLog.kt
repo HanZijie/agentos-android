@@ -68,6 +68,10 @@ class EventLog internal constructor(
 
     fun lastSequence(sessionId: String): Long =
         db.queryOne("SELECT last_sequence FROM sessions WHERE id = ?", sessionId) { it.long(0) } ?: 0
+
+    /** 某个任务最近一次 [eventType] 事件的时间（毫秒）；没有时 null。走 events_task_idx。 */
+    fun lastTimestamp(taskId: String, eventType: String): Long? =
+        db.queryOne("SELECT MAX(timestamp) FROM events WHERE task_id = ? AND event_type = ?", taskId, eventType) { it.longOrNull(0) }
 }
 
 /**

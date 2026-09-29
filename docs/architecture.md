@@ -373,7 +373,11 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 - 运行时每次启动时，把需要恢复满 24 小时的任务按“放弃”结束：发出 `task.recovery_resolved`（决定为放弃，原因 `recovery_expired`），再发出终态事件。
 - 需要恢复的任务最多保留 50 条，超出的从最旧的开始按同样方式放弃。
 - 被放弃的任务不重放，结果未知的副作用照旧不重放。
-- W10 用户可以选择之后，保留这两条规则作为兜底（A 实现）。
+- W10 用户可以选择之后，保留这两条规则作为兜底。
+- 已实现（A7）：
+  - 需要恢复的起始时间取最近一次 `task.recovery_required` 事件的时间，不改 Store 的 schema。
+  - 过期结束的任务错误码为 `recovery_expired`（-32051），`runtime.recovered` 里新增 `expired` 计数。
+  - 期限和上限都是 `SchedulerConfig` 的参数。
 
 ### F9 自带模型 key（BYOK）
 
@@ -386,7 +390,7 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
    - **清除**：立即作废（整合人 2026-09-29 决定）：删除文件和 Keystore 主密钥，之后的模型请求（包括同一轮里的下一次）一律拿不到 key，以 `model_not_configured` 结束，不再用旧 key 跑完这一轮（C3.1 已实现）。正在传输的那一次 HTTP 响应也要中止，分三处实现，不阻塞 M1：
      - `SecretPort` 追加 `revocations: Flow<Credential>`，默认空流（A，已完成）。清除时发出被撤销的 Credential，按对象身份比较；更换不发。
      - HostFetch 在构造时订阅撤销流，按对象身份找到携带该 Credential 的在途调用，等响应头和读流两个阶段都会中止，抛 `NetErrorKind.KEY_REVOKED`，不重试（B5，已完成）。它还记下最近撤销的 32 个 Credential，所以“刚取到 key、还没登记请求”这几毫秒里撤销的，请求也不会发出去。
-     - `KeystoreSecrets.revoke()` 发出撤销信号（C，进行中）。发出的必须是 `credentialFor` 当初返回的那个对象，包括换下来但还留在内存里的旧 key。
+     - `KeystoreSecrets.revoke()` 发出撤销信号（C5，已完成）。设备实测（API 35 / 36 / 37 × debug / releaseTest，66/66）：从调用清除到这一轮结束 10–135 ms（只有第一层时约 930 ms），假端点看到在途连接被断开。发出的必须是 `credentialFor` 当初返回的那个对象，包括换下来但还留在内存里的旧 key。
      被中止的这一轮同样以 `model_not_configured` 结束，`details.reason=key_revoked`（整合人 2026-09-29 决定，不归入 `model_auth_failed`）。
    - 错误以 `agentos.byok.<code>` 返回，错误消息里不含 key。
 3. key 只在 Kotlin 宿主层里使用：Pi 发出的模型请求经过宿主层的 `fetch` 时才注入请求头，QuickJS 里的 Pi Agent core 看不到 key。

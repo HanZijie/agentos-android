@@ -384,7 +384,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `AcpService`：导出 `IAcpService`，每条通道绑定调用方 UID；M1 只接受 AgentOS App 自己，其他 UID 返回“未开放”
 - [x] `QuickJsEngine`：加载 `pi-agent.js`，接上 `HostFetch` 和宿主层的桥接（B3；字节码缓存在 `codeCacheDir/pi`，key 为 bundle SHA-256 + quickjs-kt 版本 + ABI + 协议版本，读取时校验；`:agent` 进程里首启中位 72 ms、字节码 12 ms；Pixel_8a 上 `:agent` 进程内经国内 key 的真实端点对话、工具调用、abort 通过）
 - [x] `AndroidStore`（BundledSQLiteDriver，CE 目录 `databases/agentos-runtime.db`）、`KeystoreSecrets`（只实现 `SecretPort`）、`HostPortImpl`（工具、Skill、Hook、确认暂为“未开放”实现）、`IAgentControl` v2（BYOK）
-- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 25 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束；C3.1 时 API 35 / 36 / 37 与 Pixel_8a 均 21/21，C4 后的 25 项见本节“Agent 核心换成 Pi”一条；logcat 与私有文件里搜不到 key）
+- [x] `tests/device/` 的 ACP 通道用例：握手、非本 App 的 UID 被拒、超长消息、客户端被杀、`:agent` 被杀后重新 bind（`--suite app` 现为 25 项，另含冷进程开任务、监督命令、退出原因、第三方碰内部组件、用户主动停止后的恢复、Store 重启、BYOK 往返 / 重启 / 清除、清除时本轮立即以 `model_not_configured` 结束，在途响应被中止（details.reason=key_revoked，C5）；C3.1 时 API 35 / 36 / 37 与 Pixel_8a 均 21/21，C4 后的 25 项见本节“Agent 核心换成 Pi”一条；logcat 与私有文件里搜不到 key）
 - [x] 换成真的 `AgentRuntime`（A3 的 `RuntimeEngine`，C3）；空闲后前台服务保留 2 s 宽限期
 - [x] Agent 核心换成 Pi（`PiAgentCores`：PiAdapter + QuickJsEngine，C4；`ScriptedAgentCore` 已删除）。`--suite app` 现为 25 项，新增假模型端点（`fake_model.py`，经 `adb reverse`）上的工具轮次、多轮上下文、`:agent` 被杀后恢复的上下文，以及 MiniMax 国内平台的真实对话 `live-minimax`（key 只从环境变量读、经 stdin 投递，对话后清除）。另有 `releaseTest` 构建：与 release 相同的 R8 规则、不可调试，调试证书签名并带测试执行器，只用于测试。API 35 / 36 / 37 上 debug 与 releaseTest 各 25/25；Pixel_8a 上 releaseTest 25/25，真实对话首字约 2 s，logcat 里搜不到 key。R8 下 quickjs-kt 按名字访问 `kotlin.UByteArray`，`app/proguard-rules.pro` 要 keep 它，否则 `:agent` 收到第一次模型响应时 JNI abort
 
@@ -397,9 +397,9 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 #### W8 自带界面
 - [x] `LocalAcpClient`：官方 SDK 客户端 + `BinderAcpTransport`（D3a）
-- [ ] 对话界面、流式输出、取消（D3a：桌面入口、对话界面已完成，界面用平台 View、不引入界面库；Pixel_8a 与 API 35 上从桌面入口打开，经 Binder 到 `:agent` 跑通 initialize → session/new → prompt，未配置模型时提示“还没有配置模型”；流式与取消的端到端等设置页完成后补测）
-- [ ] 设置页：BYOK（厂商预设读 `model-catalog.json`，另有自定义兼容端点：URL、协议、模型名、key）、安全等级、运行与监督状态
-- [ ] 首次引导：BYOK、通知权限、默认助理、电池优化豁免、已发现的插件
+- [x] 对话界面、流式输出、取消（D3a / D3）。界面用平台 View，不引入界面库。整合人 2026-09-29 在 Pixel_8a 上用 MiniMax 国内平台的真实 key 走了一遍：从桌面入口打开，经首次引导进设置填 key，对话流式输出，点“停止”后当场停住并显示“已取消”；清除 key 后，logcat 和 App 私有数据里都搜不到 key。截图在工作区 `demo/2026-09-29-pixel8a-ui/`，不在仓库里。待改：回复里的 Markdown 还没有渲染
+- [x] 设置页：BYOK（厂商预设读 `model-catalog.json`，另有自定义兼容端点：URL、协议、模型名、key）、安全等级、运行与监督状态（D3；模型与 key 页设了 FLAG_SECURE；另含电脑端接入开关与配对，IAgentControl v3）
+- [x] 首次引导：BYOK、通知权限、默认助理、电池优化豁免、已发现的插件（D3；默认助理入口在 W13，插件发现在 M3a，这两步现在只做说明）
 
 #### W9 电脑端接入
 - [x] `DesktopGateway`：开发者开关、抽象 socket `agentos-acp`、一次性配对码（A4；`IAgentControl` v3）
@@ -431,7 +431,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] 诊断页：版本、健康状态、上次错误、监督进程状态；不输出 key 和完整 prompt
 
 #### W12 断网与升级
-- [ ] 断网处理：错误分类、退避重试、任务 deadline
+- [ ] 断网处理：错误分类、退避重试、任务 deadline（退避重试已由 B6 提前完成：响应头之前重试，1–30 s 退避，每个请求最多 2 分钟，retry-after 优先；断网的端到端与 deadline 的精确收紧仍在 W12）
 - [ ] Store 的 schema 迁移：只向前迁移，迁移前备份，失败就回滚并停在 safe mode
 - [ ] OTA：开机时重新检查 API 和 fingerprint，超出支持范围就进入 safe mode
 - [ ] `tests/device/`：覆盖连续重启、断网、杀 App 各进程、杀监督进程

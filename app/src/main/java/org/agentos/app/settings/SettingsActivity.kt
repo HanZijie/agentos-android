@@ -120,7 +120,8 @@ class SettingsActivity : Activity() {
         column.addView(Ui.sectionTitle(this, "运行与监督"))
         column.addView(Ui.card(this).apply {
             if (s.runtime != null) StatusText.runtime(s.runtime).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
-            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics))
+            val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount.takeIf { it >= 0 })
                 .forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
             addView(Ui.buttons(context, "刷新" to { scope?.launch { reload() } }))
         })
@@ -155,6 +156,7 @@ class SettingsActivity : Activity() {
                     }
                 })
             })
+            addView(Ui.paragraph(context, Desktop.FOREGROUND_NOTE))
             if (d.enabled) {
                 addView(Ui.paragraph(context, Desktop.HOW_TO))
                 d.pairings.forEach { p ->

@@ -100,6 +100,7 @@
 | `execution_timeout` | 否 | -32051 | 执行超过任务 deadline，已取消 |
 | `agent_core_failed` | 否 | -32051 | Agent core 的泵故障（S8），这一轮在 core 里的结局未知，任务进入恢复 |
 | `abandoned` | 否 | -32051 | 需要恢复的任务被用户放弃（W10） |
+| `recovery_expired` | 否 | -32051 | 需要恢复的任务没有人决定，运行时启动时按放弃结束（architecture F8 过渡期限）：满 24 小时（`details.rule = age`），或需要恢复的任务超过 50 条时最旧的那些（`details.rule = limit`）；期限和上限见 `SchedulerConfig.recoveryExpiryMillis` / `maxRecoveryPending` |
 | `store_failed` | 否 | -32603 | Store 读写失败（磁盘满、数据库损坏） |
 | `internal` | 否 | -32603 | 其他内部错误（程序缺陷） |
 
@@ -110,9 +111,9 @@
 | 对象 | 规则 |
 |---|---|
 | 官方 SDK 和 `pi-ai` | **永不自己重试**：调用时传 `maxRetries: 0`（S8 已验证 500、429 各只发 1 个请求） |
-| 网络出口（HostFetch） | 只在**还没把响应头交给 JS 之前**重试同一个请求：`model_network`、`model_timeout`（连接阶段）、`model_rate_limited`、`model_unavailable`；按指数退避（1 s 起，最长 30 s），`retry-after` 优先，总时长不超过任务 deadline。响应头交给 JS 之后出错（`model_stream_interrupted` 等）不重试，这一轮以 `task.failed` 结束。M1 的 HostFetch 可以先不重试（W3），退避重试在 W12 加上 |
+| 网络出口（HostFetch） | 只在**还没把响应头交给 JS 之前**重试同一个请求（B6 已实现，`:agent` 默认启用）：HTTP 408 / 425 / 429 / 5xx（含 529）、`model_network`、`model_timeout`（仅连接阶段，即拿到连接之前的 TCP 与 TLS；拿到连接后等响应头超时不重发，服务商可能已在处理）。指数退避 1 s 起、翻倍、最长 30 s，抖动只向上加 0–25%；`retry-after` / `retry-after-ms` 优先，最多 60 s，更长就把响应交给 JS，details 里带 `retryAfterSeconds`。每个请求连同所有等待总时长不超过 2 分钟（整合人 2026-09-29 定，`RetryPolicy.DEFAULT.maxTotalMs`）；任务 deadline 由调度器到期取消保证，取消或撤销 key 会立即打断等待。永不重试：TLS 失败、400 / 401 / 402 / 403 / 404 / 409 / 413 / 422 等终态、取消、`KEY_REVOKED`。响应头交给 JS 之后出错（`model_stream_interrupted` 等）不重试，这一轮以 `task.failed` 结束。重试后仍失败时 `details.attempts` 为尝试次数；每次重试写一条运行时日志 “model request retry: …”，不含 key 和查询串 |
 | 工具调用 | **永不自动重试**。`tool_unavailable`（确定没发出）作为错误结果交回模型，由模型决定是否再调；`tool_result_unknown`、`tool_timeout` 在恢复时标记为结果未知，不重放 |
-| 任务 | 不自动重放。运行时重启、Agent core 故障时，已开始的任务进入 `task.recovery_required`，由用户选择重试或放弃（W10）；safe mode 下不自动继续 |
+| 任务 | 不自动重放。运行时重启、Agent core 故障时，已开始的任务进入 `task.recovery_required`，由用户选择重试或放弃（W10）；safe mode 下不自动继续。没人决定的，运行时启动时满 24 小时、或超过 50 条时从最旧的开始按放弃结束（`recovery_expired`，F8 过渡期限），同样不重放 |
 | ACP 客户端 | 收到 `retryable: true` 的错误，可以稍后重发同样的 prompt；`false` 的错误重发没有意义，应提示用户（例如去设置页检查 key） |
 
 ## 5. JSON-RPC 映射

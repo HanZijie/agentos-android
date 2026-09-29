@@ -72,6 +72,8 @@ enum class ErrorCode(
     EXECUTION_TIMEOUT("execution_timeout", false, RpcCodes.TASK_FAILED, Kind.TASK),
     AGENT_CORE_FAILED("agent_core_failed", false, RpcCodes.TASK_FAILED, Kind.TASK),
     ABANDONED("abandoned", false, RpcCodes.TASK_FAILED, Kind.TASK),
+    /** architecture F8 过渡期限：需要恢复的任务满 24 小时、或超过保留上限，启动时由运行时放弃。 */
+    RECOVERY_EXPIRED("recovery_expired", false, RpcCodes.TASK_FAILED, Kind.TASK),
     STORE_FAILED("store_failed", false, RpcCodes.INTERNAL_ERROR, Kind.TASK),
     INTERNAL("internal", false, RpcCodes.INTERNAL_ERROR, Kind.TASK),
     ;
