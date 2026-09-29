@@ -185,8 +185,8 @@ class HostFetchTest {
 
     @Test
     fun `status classification matches the SDK retry rules`() {
-        for (s in listOf(408, 409, 429, 500, 502, 503, 529)) assertTrue(HttpStatusPolicy.isRetryable(s), "$s")
-        for (s in listOf(200, 400, 401, 403, 404, 413, 422)) assertTrue(!HttpStatusPolicy.isRetryable(s), "$s")
+        for (s in listOf(408, 425, 429, 500, 502, 503, 529)) assertTrue(HttpStatusPolicy.isRetryable(s), "$s")
+        for (s in listOf(200, 400, 401, 402, 403, 404, 409, 413, 422)) assertTrue(!HttpStatusPolicy.isRetryable(s), "$s")
     }
 
     @Test
@@ -209,7 +209,7 @@ class HostFetchTest {
         }
         assertEquals(3, server.requestCount)
         assertEquals(2, f.retried)
-        assertTrue(sleeps[0] in 75..100, "backoff ${sleeps[0]}")
+        assertTrue(sleeps[0] in 100..125, "backoff ${sleeps[0]}: never shorter than the rule, at most 25 % jitter")
         assertEquals(2_000, sleeps[1], "retry-after honoured")
     }
 

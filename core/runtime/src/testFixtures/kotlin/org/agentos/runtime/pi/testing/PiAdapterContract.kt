@@ -16,6 +16,7 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.events.AgentEvent
 import org.agentos.runtime.events.EventTypes
+import org.agentos.runtime.net.RetryPolicy
 import org.agentos.runtime.pi.BytecodeCache
 import org.agentos.runtime.pi.JsEngine
 import org.agentos.runtime.pi.JsEngineFactory
@@ -32,11 +33,13 @@ import org.agentos.runtime.ports.Credential
 import org.agentos.runtime.ports.FinishReason
 import org.agentos.runtime.ports.ModelSpec
 import org.agentos.runtime.ports.PiMessages
+import org.agentos.runtime.ports.RuntimeLog
 import org.agentos.runtime.ports.ToolCallDecision
 import org.agentos.runtime.ports.ToolDeclaration
 import org.agentos.runtime.ports.ToolResult
 import org.agentos.runtime.ports.TurnInput
 import org.agentos.runtime.ports.TurnOutcome
+import org.agentos.runtime.testing.CollectingLog
 import org.agentos.runtime.testing.FakeStep
 import org.agentos.runtime.testing.FakeTurnScript
 import org.agentos.runtime.testing.RecordingTurnHost
@@ -160,11 +163,13 @@ abstract class PiAdapterContract {
     private val openaiKey by lazy { Credential(fake.key) }
     private var secrets: RevocableSecrets? = null
 
-    private fun core(): PiAdapter = PiAdapter(
+    private fun core(retry: RetryPolicy = RetryPolicy.NONE, log: RuntimeLog = RuntimeLog.NONE): PiAdapter = PiAdapter(
         bundle = { bundle },
         engineFactory = engines,
         secrets = RevocableSecrets(listOf(fake.anthropicBaseUrl to anthropicKey, fake.openaiBaseUrl to openaiKey)).also { secrets = it },
         bytecodeCache = bytecodeCache,
+        retry = retry,
+        log = log,
     )
 
     private fun config(model: ModelSpec, maxToolRounds: Int = AgentSessionConfig.DEFAULT_MAX_TOOL_ROUNDS) =
@@ -604,6 +609,66 @@ abstract class PiAdapterContract {
             }
         } finally {
             core.close()
+        }
+    }
+
+    /**
+     * errors.md section 4 on the real stack: the egress retries 529 / 429 before the head reaches
+     * JS (retry-after first), so the turn streams once; final statuses and failures after the head
+     * are not retried; a spent retry budget ends as the last error with details.attempts. Retries
+     * are logged without the key. Backoff scaled down for the test.
+     */
+    @Test
+    fun retriesBeforeTheHeadAndStreamsOnce() = runBlocking<Unit> {
+        val policy = RetryPolicy(maxAttempts = 3, initialBackoffMs = 100, maxBackoffMs = 400, maxTotalMs = 20_000)
+        for ((tag, model) in families) {
+            val log = CollectingLog()
+            val core = core(retry = policy, log = log)
+            try {
+                withTimeout(scenarioTimeoutMs) {
+                    core.start()
+                    val session = core.openSession("retry", config(model))
+                    fun sent(n0: Int) = fake.requests.size - n0
+
+                    var n0 = fake.requests.size
+                    fake.failNext(529, times = 2)
+                    val host = RecordingTurnHost()
+                    val first = session.runTurn(TurnInput(prompt(tag, FakeTurnScript(FakeStep.Text("after retries")))), host)
+                    assertIs<TurnOutcome.Finished>(first, "[$tag] $first")
+                    assertEquals("after retries", host.streamedText(), "[$tag] streamed once")
+                    assertEquals(3, sent(n0), "[$tag] two 529s, then the stream")
+                    val retries = synchronized(log.lines) { log.lines.filter { "model request retry" in it } }
+                    assertEquals(2, retries.size, "[$tag] $retries")
+                    assertTrue(retries.all { "HTTP 529" in it && fake.key !in it }, "[$tag] $retries")
+
+                    n0 = fake.requests.size
+                    fake.failNext(429, retryAfter = "1")
+                    val t0 = System.nanoTime()
+                    assertIs<TurnOutcome.Finished>(session.runTurn(TurnInput(prompt(tag, FakeTurnScript(FakeStep.Text("ok")))), RecordingTurnHost()))
+                    assertTrue((System.nanoTime() - t0) / 1e6 >= 900, "[$tag] retry-after 1 s honoured")
+                    assertEquals(2, sent(n0))
+
+                    n0 = fake.requests.size
+                    fake.failNext(401)
+                    val auth = session.runTurn(TurnInput(prompt(tag, FakeTurnScript(FakeStep.Text("never")))), RecordingTurnHost())
+                    assertEquals(ErrorCode.MODEL_AUTH_FAILED, (auth as TurnOutcome.Failed).error.code)
+                    assertEquals(1, sent(n0), "[$tag] 401 is final")
+
+                    n0 = fake.requests.size
+                    val cut = session.runTurn(TurnInput(prompt(tag, FakeTurnScript(FakeStep.Text("some"), FakeStep.Fail(ErrorCode.MODEL_STREAM_INTERRUPTED.info("x"))))), RecordingTurnHost())
+                    assertEquals(ErrorCode.MODEL_STREAM_INTERRUPTED, (cut as TurnOutcome.Failed).error.code)
+                    assertEquals(1, sent(n0), "[$tag] nothing is retried after the head")
+
+                    n0 = fake.requests.size
+                    val spent = session.runTurn(TurnInput("[fail500] $tag ${System.nanoTime()}"), RecordingTurnHost())
+                    assertIs<TurnOutcome.Failed>(spent)
+                    assertEquals(ErrorCode.MODEL_UNAVAILABLE, spent.error.code)
+                    assertEquals(3, spent.error.details!!["attempts"]!!.jsonPrimitive.int, "[$tag] ${spent.error}")
+                    assertEquals(3, sent(n0), "[$tag] maxAttempts")
+                }
+            } finally {
+                core.close()
+            }
         }
     }
 

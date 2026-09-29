@@ -89,7 +89,15 @@ class PiAdapter(
     private val log: RuntimeLog = RuntimeLog.NONE,
 ) : AgentCore {
 
-    private val fetch = HostFetch(secrets, httpClient, retry)
+    // Retries before the head reaches JS are visible in the runtime log (errors.md section 4); the
+    // notice carries no key and no query string.
+    private val fetch = HostFetch(secrets, httpClient, retry, onRetry = { n ->
+        log.info(
+            TAG,
+            "model request retry: ${n.reason} on attempt ${n.attempt}, next in ${n.waitMs} ms" +
+                (if (n.serverRequested) " (retry-after)" else "") + "; session ${n.sessionId}, ${n.endpoint}",
+        )
+    })
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val stateFlow = MutableStateFlow<AgentCoreState>(AgentCoreState.Idle)
     override val state: StateFlow<AgentCoreState> = stateFlow.asStateFlow()
