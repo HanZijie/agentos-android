@@ -64,7 +64,7 @@
 
 | 错误码 | 可重试 | JSON-RPC code | 含义 |
 |---|---|---|---|
-| `model_not_configured` | 否 | -32051 | 没有选择模型，或这个 endpoint 没有配置 key；网络出口不发请求 |
+| `model_not_configured` | 否 | -32051 | 没有选择模型，或这个 endpoint 没有配置 key；网络出口不发请求。用户在设置里清除 key 时，正在传输的请求也被中止（网络出口 `NetErrorKind.KEY_REVOKED`，不重试），这一轮同样以此结束，`details.reason = key_revoked`，消息为 “The model key was removed in AgentOS settings; this turn was stopped.”；消息和 details 里不含 key（F9） |
 | `model_auth_failed` | 否 | -32051 | 401 / 403：key 无效或没有权限 |
 | `model_quota_exhausted` | 否 | -32051 | 402：账户余额或额度用完 |
 | `model_bad_request` | 否 | -32051 | 其他 4xx：请求被模型服务拒绝（模型名不对、参数不对、上下文过长等） |

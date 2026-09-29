@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- W3/W6（lane B）：:agent 里的 HostFetch 调模型端点（Pi Agent core 的全部网络出口） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- W8：首次引导里请求忽略电池优化（F2；S2 的退路：后台时 App 自己进不了前台） -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- W7：root 监督进程的状态广播只能由 root（绕过权限检查）或同证书的 App 发来（docs/spikes/S2.md 契约 e） -->
     <permission
@@ -86,6 +88,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- W8：设置、模型与 key（FLAG_SECURE，不进截图和最近任务缩略图）、首次引导。都不导出 -->
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:exported="false"
+            android:label="@string/ui_settings"
+            android:theme="@style/Theme.AgentOS" />
+        <activity
+            android:name=".settings.ModelSourceActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AgentOS"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".onboarding.OnboardingActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AgentOS" />
 
         <!-- ================= W9：电脑端接入 ================= -->
 

@@ -68,6 +68,11 @@ class AgentUpdateAndErrorsTest {
 
         val safe = AgentErrors.fromRpc(-32050, "safe_mode: runtime is in safe mode", "safe_mode", false)
         assertTrue(safe.hint!!.contains("动作"))
+
+        // F9: the key was cleared while this turn was running
+        val revoked = AgentErrors.fromRpc(-32051, "model_not_configured: revoked", "model_not_configured", false, reason = "key_revoked")
+        assertEquals("模型 key 已在设置中清除，这一轮已停止", revoked.title)
+        assertEquals("model_not_configured", revoked.code)
     }
 
     @Test
