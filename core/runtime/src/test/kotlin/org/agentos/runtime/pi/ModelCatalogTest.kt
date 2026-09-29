@@ -1,5 +1,7 @@
 package org.agentos.runtime.pi
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assume.assumeTrue
 import java.io.File
@@ -66,6 +68,61 @@ class ModelCatalogTest {
     @Test
     fun `unknown schema version is refused`() {
         assertFailsWith<IllegalArgumentException> { ModelCatalog.parse(sample.replace("\"schemaVersion\":1", "\"schemaVersion\":2")) }
+    }
+
+    @Test
+    fun `MiniMax OpenAI hosts get reasoning_split and keep-replay, matched by exact host`() {
+        val c = ModelCatalog.parse(sample)
+        val expected = """{"agentosExtraBody":{"reasoning_split":true},"agentosThinkTagsReplay":"keep"}"""
+        for (url in listOf(
+            "https://api.minimax.io/v1", "https://api.minimaxi.com/v1", "https://api.minimax.cn/v1",
+            "https://API.MiniMax.CN/v1/", "https://api.minimax.cn./v1", "https://api.minimax.io:443/v1", " https://api.minimaxi.com/v1 ",
+        )) {
+            assertEquals(expected, c.customModel("openai-completions", "MiniMax-M2.7", url).json["compat"].toString(), url)
+        }
+        for (url in listOf(
+            "https://minimax.io/v1", "https://evil-minimax.cn/v1", "https://api.minimax.cn.evil.com/v1", "https://x.api.minimax.cn/v1",
+            "https://api-minimax.cn/v1", "https://gateway.example.com/api.minimax.cn/v1",
+            "https://api.deepseek.com/v1", "http://127.0.0.1:8080/v1",
+        )) {
+            assertEquals(null, c.customModel("openai-completions", "m", url).json["compat"], url)
+        }
+        // user info is refused outright (Endpoint.parse), never matched as a MiniMax host
+        for (url in listOf("https://user@api.minimax.cn/v1", "https://api.minimax.cn@evil.com/v1")) {
+            assertFailsWith<IllegalArgumentException>(url) { c.customModel("openai-completions", "m", url) }
+        }
+        // the Anthropic route is untouched (catalog presets and custom anthropic-messages)
+        assertEquals(null, c.customModel("anthropic-messages", "MiniMax-M2.7", "https://api.minimax.cn/anthropic").json["compat"])
+        assertEquals("""{"x":1}""", c.model("minimax", "MiniMax-M2.7")!!.json["compat"].toString())
+    }
+
+    @Test
+    fun `template compat wins over the MiniMax defaults`() {
+        val withCompat = sample.replace(
+            "\"openai-completions\":{\"api\":\"openai-completions\",",
+            "\"openai-completions\":{\"compat\":{\"agentosExtraBody\":{\"reasoning_split\":false,\"x\":1},\"supportsStore\":false},\"api\":\"openai-completions\",",
+        )
+        val m = ModelCatalog.parse(withCompat).customModel("openai-completions", "MiniMax-M2.7", "https://api.minimax.io/v1")
+        assertEquals(
+            """{"agentosExtraBody":{"reasoning_split":false,"x":1},"agentosThinkTagsReplay":"keep","supportsStore":false}""",
+            m.json["compat"].toString(),
+        )
+    }
+
+    @Test
+    fun `withCompat merges into compat and the given values win`() {
+        val c = ModelCatalog.parse(sample)
+        val minimax = c.customModel("openai-completions", "MiniMax-M2.7", "https://api.minimax.cn/v1")
+        val fallback = minimax.withCompat(Json.parseToJsonElement("""{"agentosExtraBody":{"reasoning_split":false,"y":2},"agentosThinkTags":true}""").jsonObject)
+        assertEquals(
+            """{"agentosExtraBody":{"reasoning_split":false,"y":2},"agentosThinkTagsReplay":"keep","agentosThinkTags":true}""",
+            fallback.compat.toString(),
+        )
+        assertEquals(minimax.id, fallback.id)
+        assertEquals(minimax.baseUrl, fallback.baseUrl)
+        val plain = c.customModel("openai-completions", "m", "https://gateway.example.com/v1")
+        assertEquals("{}", plain.compat.toString())
+        assertEquals(ModelCatalog.MINIMAX_OPENAI_COMPAT, plain.withCompat(ModelCatalog.MINIMAX_OPENAI_COMPAT).compat)
     }
 
     @Test

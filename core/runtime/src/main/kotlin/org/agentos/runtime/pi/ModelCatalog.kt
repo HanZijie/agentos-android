@@ -49,6 +49,10 @@ class ModelCatalog private constructor(
      * [api] ("anthropic-messages" or "openai-completions"). [baseUrl] is what the SDK appends
      * its path to: `…/v1` style for OpenAI Chat Completions (`/chat/completions` is added), the
      * API root for Anthropic Messages (`/v1/messages` is added).
+     *
+     * MiniMax's own OpenAI-compatible hosts ([MINIMAX_OPENAI_HOSTS], openai-completions only) get
+     * [MINIMAX_OPENAI_COMPAT]; pi-agent.js itself knows no provider (core/pi-runtime/README.md,
+     * "模型兼容设置").
      */
     fun customModel(
         api: String,
@@ -74,11 +78,49 @@ class ModelCatalog private constructor(
         maxTokens?.let { fields["maxTokens"] = JsonPrimitive(it) }
         reasoning?.let { fields["reasoning"] = JsonPrimitive(it) }
         input?.let { list -> fields["input"] = JsonArray(list.map { JsonPrimitive(it) }) }
+        if (api == "openai-completions" && endpoint.scheme == "https" && endpoint.host in MINIMAX_OPENAI_HOSTS) {
+            // What the template already says wins.
+            fields["compat"] = mergeJson(MINIMAX_OPENAI_COMPAT, fields["compat"] as? JsonObject ?: JsonObject(emptyMap()))
+        }
         return CatalogModel(JsonObject(fields))
     }
 
     companion object {
         const val SUPPORTED_SCHEMA_VERSION: Int = 1
+
+        /**
+         * Hosts of MiniMax's OpenAI-compatible API (international, China, China alternate). Exact
+         * host match after normalisation (lower case, no trailing dot, no user info): no
+         * subdomains and no lookalikes.
+         */
+        val MINIMAX_OPENAI_HOSTS: Set<String> = setOf("api.minimax.io", "api.minimaxi.com", "api.minimax.cn")
+
+        /**
+         * `compat` for MiniMax on openai-completions (keys: core/pi-runtime/README.md):
+         * - `reasoning_split: true` in the request: M2.x reasoning comes in `reasoning_content` /
+         *   `reasoning_details` instead of inline `<think>…</think>` ("separates thinking content
+         *   into the reasoning_content and reasoning_details fields", MiniMax Chat Completions API
+         *   reference); pi-ai handles those as thinking and sends `reasoning_details` back;
+         * - `agentosThinkTagsReplay: "keep"`: if reasoning still arrives inline, it goes back in its
+         *   original place in later requests ("the historical content is passed back in its
+         *   original format. Do not remove the <think>...</think> part", MiniMax-M2 model card).
+         */
+        val MINIMAX_OPENAI_COMPAT: JsonObject = JsonObject(
+            mapOf(
+                "agentosExtraBody" to JsonObject(mapOf("reasoning_split" to JsonPrimitive(true))),
+                "agentosThinkTagsReplay" to JsonPrimitive("keep"),
+            ),
+        )
+
+        /** [base] with [over] on top: objects are merged key by key, anything else in [over] wins. */
+        internal fun mergeJson(base: JsonObject, over: JsonObject): JsonObject {
+            val out = base.toMutableMap()
+            for ((k, v) in over) {
+                val b = out[k]
+                out[k] = if (b is JsonObject && v is JsonObject) mergeJson(b, v) else v
+            }
+            return JsonObject(out)
+        }
 
         private val json = Json { ignoreUnknownKeys = true }
 
@@ -125,6 +167,14 @@ class CatalogModel(val json: JsonObject) {
     val input: List<String> get() = (json["input"] as? JsonArray)?.map { it.jsonPrimitive.content } ?: listOf("text")
     val contextWindow: Int? get() = json["contextWindow"]?.jsonPrimitive?.intOrNull
     val maxTokens: Int? get() = json["maxTokens"]?.jsonPrimitive?.intOrNull
+    val compat: JsonObject get() = json["compat"] as? JsonObject ?: JsonObject(emptyMap())
+
+    /**
+     * This model with [compat] merged into its `compat` (objects key by key, the given values win),
+     * for example `{"agentosExtraBody":{"reasoning_split":false}}`. Keys: core/pi-runtime/README.md.
+     */
+    fun withCompat(compat: JsonObject): CatalogModel =
+        CatalogModel(JsonObject(json + ("compat" to ModelCatalog.mergeJson(this.compat, compat))))
 
     private fun str(key: String): String = (json[key] as? JsonPrimitive)?.contentOrNull ?: ""
 
