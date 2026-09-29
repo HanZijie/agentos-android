@@ -80,23 +80,39 @@ class AgentControl(private val process: AgentProcess) : IAgentControl.Stub() {
 
     override fun getDesktopAccess(): String {
         enforceSelf()
-        return process.desktop.status().toString()
+        return desktop("getDesktopAccess") { process.desktop.status().toString() }
     }
 
     override fun setDesktopAccessEnabled(enabled: Boolean): String {
         enforceSelf()
-        return process.desktop.setEnabled(enabled).let { process.desktop.status().toString() }
+        return desktop("setDesktopAccessEnabled($enabled)") { process.desktop.setEnabled(enabled).let { process.desktop.status().toString() } }
     }
 
     override fun newDesktopPairingCode(): String {
         enforceSelf()
-        return process.desktop.newPairingCodeJson().toString()
+        return desktop("newDesktopPairingCode") { process.desktop.newPairingCodeJson().toString() }
     }
 
     override fun revokeDesktopPairing(pairingId: String?): String {
         enforceSelf()
-        if (pairingId.isNullOrEmpty()) process.desktop.revokeAll() else process.desktop.revoke(pairingId)
-        return process.desktop.status().toString()
+        return desktop("revokeDesktopPairing") {
+            if (pairingId.isNullOrEmpty()) process.desktop.revokeAll() else process.desktop.revoke(pairingId)
+            process.desktop.status().toString()
+        }
+    }
+
+    /**
+     * v3 的异常：`agentos.desktop.*`（例如开关关闭时生成配对码的 `agentos.desktop.disabled`）原样回到调用方；其他异常先在
+     * logcat 打出完整堆栈（电脑端接入的异常消息里没有配对码和令牌），IllegalStateException / IllegalArgumentException 照常回去，
+     * 别的类型换成只带类型名的 `agentos.desktop.internal: <类型>`。Binder 只能传回少数几种异常（Parcel.getExceptionCode），
+     * 其他类型（例如 A9 的 NoSuchElementException）会在 `:agent` 的 Binder 线程上重新抛出，调用方拿不到原因。
+     */
+    private inline fun <T> desktop(what: String, block: () -> T): T = try {
+        block()
+    } catch (e: Exception) {
+        val passThrough = e is IllegalStateException || e is IllegalArgumentException
+        if (!(passThrough && e.message?.startsWith("agentos.desktop.") == true)) Log.w(TAG, "$what failed", e)
+        throw if (passThrough) e else IllegalStateException("agentos.desktop.internal: ${e.javaClass.simpleName}")
     }
 
     private inline fun <T> byok(block: () -> T): T = try {
