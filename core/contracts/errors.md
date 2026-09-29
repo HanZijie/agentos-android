@@ -149,6 +149,10 @@
 
 - 方括号里是错误码，后面是给模型看的一句英文说明，不带内部细节（进程名、UID、堆栈）。
 - 同一个错误写进 `tool.settled` 事件的 `error`（events.md 4.3）。
+- **例外（整合人 2026-09-29 决定）**：模型调用本轮没有声明的工具时，由 Agent 核心（Pi）直接把 `Tool <name> not found` 交回模型（pi-agent-core 0.86.1），不经过宿主层。
+  - 这个工具从未派发，没有副作用，所以不写 `tool.settled`；界面从 `tool_execution_end`（isError）知道这次失败。
+  - 从“模型能否据此纠正”看，它和 `[agentos:tool_not_in_catalog]` 等价，两条路线下模型都能从同一请求的工具列表里纠正。
+  - 要统一时，在 pi-runtime 胶水层让未声明的工具也走 beforeToolCall，由 Broker 拒绝，不在 PiAdapter 里改写文字。触发条件是界面或诊断需要在 Pi 路线上看到这个错误码，或者实测发现模型恢复不过来（B 的小项，未排期）。
 
 ## 7. 与原型的对照
 
