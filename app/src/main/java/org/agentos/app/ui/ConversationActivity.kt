@@ -44,6 +44,9 @@ class ConversationActivity : Activity() {
         super.onCreate(savedInstanceState)
         controller = ChatController.get(this)
         setContentView(buildLayout())
+        if (savedInstanceState == null && !org.agentos.app.onboarding.OnboardingActivity.isDone(this)) {
+            startActivity(android.content.Intent(this, org.agentos.app.onboarding.OnboardingActivity::class.java))
+        }
     }
 
     override fun onStart() {
@@ -83,6 +86,9 @@ class ConversationActivity : Activity() {
         bar.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         newChat = Ui.textButton(this, getString(R.string.ui_new_chat), R.color.ui_accent) { controller.newConversation() }
         bar.addView(newChat)
+        bar.addView(Ui.textButton(this, getString(R.string.ui_settings), R.color.ui_accent) {
+            startActivity(android.content.Intent(this, org.agentos.app.settings.SettingsActivity::class.java))
+        })
         root.addView(bar, Ui.matchWrap())
         root.addView(View(this).apply { setBackgroundColor(getColor(R.color.ui_divider)) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
@@ -231,7 +237,8 @@ class ConversationActivity : Activity() {
                 header.setText(if (item.thoughtExpanded) R.string.ui_thought_expanded else R.string.ui_thought_collapsed)
                 thought.visibility = if (hasThought && item.thoughtExpanded) View.VISIBLE else View.GONE
                 thought.text = item.thought.trim()
-                val body = item.text.trimStart()
+                // trailing newlines are kept while streaming (the next chunk may continue the line), trimmed once done
+                val body = if (item.streaming) item.text.trimStart() else item.text.trim()
                 text.visibility = if (body.isEmpty() && !item.streaming) View.GONE else View.VISIBLE
                 text.text = if (item.streaming) "$body▍" else body
             }

@@ -368,18 +368,25 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 | 断网 | 宿主层的网络出口把错误分为可重试和不可重试；可重试的按退避重试，直到任务的 deadline；已经执行过的工具调用不会重复执行 |
 | OTA 升级 | 开机时重新检查 API 和 fingerprint，超出支持范围就进入 safe mode，并提示用户安装匹配版本的模块 |
 
+**需要恢复的任务的过渡期限（整合人 2026-09-29 决定，W10 之前）**：“重试或放弃”的界面要到 W10 才有，M1 又没有 `session/load`，所以标记为需要恢复的任务没有人处理，每次 `:agent` 被杀都会多出几条。C4 的设备用例连跑 20 次后，`recoveryPending` 从 4 涨到 42。过渡规则如下：
+
+- 运行时每次启动时，把需要恢复满 24 小时的任务按“放弃”结束：发出 `task.recovery_resolved`（决定为放弃，原因 `recovery_expired`），再发出终态事件。
+- 需要恢复的任务最多保留 50 条，超出的从最旧的开始按同样方式放弃。
+- 被放弃的任务不重放，结果未知的副作用照旧不重放。
+- W10 用户可以选择之后，保留这两条规则作为兜底（A 实现）。
+
 ### F9 自带模型 key（BYOK）
 
 1. 用户在设置页选择模型来源：
    - **厂商预设**：列表来自 `pi-ai` 的模型目录，MiniMax（国际 / 国内）排在最前。用户只需填写 key，endpoint、协议和模型参数（上下文长度、最大输出、是否支持推理）都已预置。
    - **自定义兼容端点**：填写 URL、协议（Anthropic Messages 或 OpenAI Chat Completions）、模型名和 key，适用于自建网关和预设里没有的厂商。URL 必须是 `https://`；唯一的例外是回环地址（`127.0.0.1`、`localhost`、`::1`）允许 `http://`，用于手机上本地运行的模型服务（整合人 2026-09-29 决定，release 包同样生效）。
    首版不支持用订阅账号登录（Claude Pro/Max、ChatGPT、Copilot 等 OAuth）。
-2. 主进程经 `IAgentControl`（v2 的 `setModelSource` 等）交给运行时。宿主层用 Android Keystore 里的 AES-256-GCM 主密钥（不要求���户认证）加密 key，与模型来源一起写入 `:agent` 的 CE 私有目录（`files/byok/model-source.json`，一次原子写入）。key 绑定端点：厂商预设绑定该厂商的全部 baseUrl，自定义端点只绑定它自己的 baseUrl，加密时把 baseUrl 作为附加认证数据，所以换端点必须重新输入 key。
+2. 主进程经 `IAgentControl`（v2 的 `setModelSource` 等）交给运行时。宿主层用 Android Keystore 里的 AES-256-GCM 主密钥（不要求用户认证）加密 key，与模型来源一起写入 `:agent` 的 CE 私有目录（`files/byok/model-source.json`，一次原子写入）。key 绑定端点：厂商预设绑定该厂商的全部 baseUrl，自定义端点只绑定它自己的 baseUrl，加密时把 baseUrl 作为附加认证数据，所以换端点必须重新输入 key。
    - **更换**：热加载，下一次模型请求生效，不打断正在运行的这一轮。
    - **清除**：立即作废（整合人 2026-09-29 决定）：删除文件和 Keystore 主密钥，之后的模型请求（包括同一轮里的下一次）一律拿不到 key，以 `model_not_configured` 结束，不再用旧 key 跑完这一轮（C3.1 已实现）。正在传输的那一次 HTTP 响应也要中止，分三处实现，不阻塞 M1：
-     - `SecretPort` 追加 `revocations: Flow<Credential>`，默认空流（A）。清除时发出被撤销的 Credential，按对象身份比较；更换不发。
-     - HostFetch 取消携带该 Credential 的在途调用，抛 `NetErrorKind.KEY_REVOKED`，不重试（B）。
-     - `KeystoreSecrets.revoke()` 发出撤销信号（C）。
+     - `SecretPort` 追加 `revocations: Flow<Credential>`，默认空流（A，已完成）。清除时发出被撤销的 Credential，按对象身份比较；更换不发。
+     - HostFetch 在构造时订阅撤销流，按对象身份找到携带该 Credential 的在途调用，等响应头和读流两个阶段都会中止，抛 `NetErrorKind.KEY_REVOKED`，不重试（B5，已完成）。它还记下最近撤销的 32 个 Credential，所以“刚取到 key、还没登记请求”这几毫秒里撤销的，请求也不会发出去。
+     - `KeystoreSecrets.revoke()` 发出撤销信号（C，进行中）。发出的必须是 `credentialFor` 当初返回的那个对象，包括换下来但还留在内存里的旧 key。
      被中止的这一轮同样以 `model_not_configured` 结束，`details.reason=key_revoked`（整合人 2026-09-29 决定，不归入 `model_auth_failed`）。
    - 错误以 `agentos.byok.<code>` 返回，错误消息里不含 key。
 3. key 只在 Kotlin 宿主层里使用：Pi 发出的模型请求经过宿主层的 `fetch` 时才注入请求头，QuickJS 里的 Pi Agent core 看不到 key。
@@ -398,6 +405,10 @@ MCP 工具默认按“写”处理，服务端注解只能把等级调高；用�
 1. 用户在设置页开启“电脑端接入”，页面上显示一次性配对码。
 2. 电脑执行 `adb forward tcp:8765 localabstract:agentos-acp`；也可以直接用项目提供的 stdio 桥接命令，它会自动完成转发。
 3. 客户端第一次连接时先提交配对码。之后按标准 ACP 使用；电脑端作为一个独立的调用方，有自己的会话空间。手机上的确认照常出现，电脑端无法绕过。
+4. **开关打开期间，`:agent` 以前台服务运行**（`specialUse`），并显示常驻通知“电脑端接入已开启”，通知上带“关闭”按钮（整合人 2026-09-29 决定）。
+   - 原因：`:agent` 空闲时（没有任务，也没有被 Binder 绑定）是 cached 进程，大约 10 秒后会被系统的 cached-apps freezer 冻结。抽象 socket 上的连接不会解冻进程，所以电脑端的新连接和已建立会话的请求都得不到响应（A6 在 API 36 模拟器上复现）。
+   - 关闭开关后退出前台，回到“有任务才前台”。
+   - 长时间没有电脑端连接时是否自动关闭开关，留到 W11 再定。
 
 ### F12 升级
 

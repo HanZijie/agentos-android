@@ -28,7 +28,9 @@ function localTarget() {
   let gw;
   return {
     name: "local",
+    device: false,
     handshakeTimeoutMs: 500,
+    keepAwake: () => () => {},
     async setup() {
       gw = await startLocalGateway({ args: ["--handshake-timeout-ms=500"] });
       const s = await gw.status();
@@ -49,7 +51,20 @@ function deviceTarget(serial) {
   let fwd;
   return {
     name: `device ${serial}`,
+    device: true,
     handshakeTimeoutMs: 10_000,
+    // 空闲的 :agent 是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，计时器和 socket 都停住（见下面的 todo 用例）。
+    // 测网关自身的计时时，用 debug 入口的 status 广播让进程保持解冻
+    keepAwake: () => {
+      const timer = setInterval(() => {
+        try {
+          deviceControl(serial, "status");
+        } catch {
+          // 设备忙时下次再试
+        }
+      }, 3_000);
+      return () => clearInterval(timer);
+    },
     async setup() {
       deviceControl(serial, "disable");
       deviceControl(serial, "enable");
@@ -185,12 +200,34 @@ for (const t of gatewayTargets) {
     });
 
     test("a silent connection is closed after the handshake timeout", async () => {
+      // C 在设备上见过的偶发失败：等待的 10 秒里 :agent 被 freezer 冻结，看门狗要等解冻才触发。这里测的是看门狗本身
+      const awake = t.keepAwake();
       const raw = await rawConnect(t.port());
       const t0 = Date.now();
-      assert.equal(await raw.next(t.handshakeTimeoutMs + 10_000), null);
+      const closed = await raw.next(t.handshakeTimeoutMs + 10_000).finally(awake);
+      assert.equal(closed, null);
       const elapsed = Date.now() - t0;
       assert.ok(elapsed >= t.handshakeTimeoutMs - 200 && elapsed < t.handshakeTimeoutMs + 5_000, `closed after ${elapsed} ms`);
       await until(async () => (await t.control("status")).handshakeTimeouts >= 1, 5_000, "timeout counted");
     });
+
+    test(
+      "the gateway still answers after the phone has been idle for 15 s",
+      {
+        skip: t.device ? false : "只在手机上有意义（cached-apps freezer）",
+        todo: t.device
+          ? "已知问题：电脑端接入打开、:agent 空闲时是 cached 进程，约 10 秒后被 cached-apps freezer 冻结，电脑端的连接和已建立会话的请求都得不到服务，直到别的事件解冻进程。待定方案：电脑端接入打开期间 :agent 以前台服务运行（C 的 RuntimeLifecycle、D 的通知），见 A6 报告"
+          : false,
+      },
+      async () => {
+        const { code } = await t.control("pair");
+        await sleep(15_000);
+        const raw = await rawConnect(t.port());
+        raw.send({ jsonrpc: "2.0", id: 0, method: "_org.agentos/pair", params: { version: 1, code } });
+        const reply = await raw.next(12_000);
+        assert.ok(reply?.result, "paired after the phone was idle");
+        raw.close();
+      },
+    );
   });
 }

@@ -23,12 +23,39 @@ export const repoRoot = path.resolve(here, "../../..");
 const classpathFile = path.join(repoRoot, "core/runtime/build/acp-conformance/classpath.txt");
 export const bridgeScript = path.join(repoRoot, "tools/acp-bridge/acp-bridge.mjs");
 
-/** 这次要跑的目标。默认 stdio 和 gateway（都不需要设备）；设了 AGENTOS_ACP_DEVICE 时 device 用例另外跑。 */
+export const deviceSerial = process.env.AGENTOS_ACP_DEVICE || null;
+
+/**
+ * 这次要跑的目标（AGENTOS_ACP_TARGETS，逗号分隔）。默认：没设 AGENTOS_ACP_DEVICE 时 stdio 和 gateway（都不需要设备）；
+ * 设了时只跑 device（手机上的 :agent，真实 Pi + 电脑上的 FakeModelServer）。
+ */
 export function targets() {
-  return (process.env.AGENTOS_ACP_TARGETS ?? "stdio,gateway").split(",").map((s) => s.trim()).filter(Boolean);
+  const fallback = deviceSerial ? "device" : "stdio,gateway";
+  return (process.env.AGENTOS_ACP_TARGETS ?? fallback).split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-export const deviceSerial = process.env.AGENTOS_ACP_DEVICE || null;
+/**
+ * 被测目标具备的测试能力。电脑上的 AcpStdioAgent 注册了测试工具 add（read）/ send_note（write，确认自动通过），
+ * 并能用 --jev=first 模拟 Jev；手机上 M1 都没有，依赖它们的用例在设备模式下跳过（原因见 SKIP）。
+ */
+export function capabilities(target) {
+  const desktop = target !== "device";
+  return { tools: desktop, consent: desktop, jev: desktop };
+}
+
+/** 设备模式下跳过的原因（报告里逐条列出）。 */
+export const SKIP = {
+  tools: "手机上 M1 没有工具：插件工具归 W14（Extension Host），MCP 工具归 W15；电脑上用 AcpStdioAgent 注册的 add / send_note",
+  consent: "手机上 M1 没有风险策略与确认界面（W16）；电脑上的确认由 AcpStdioAgent 自动通过",
+  jev: "--jev=first 只在电脑上的 AcpStdioAgent 里有；手机上的 :agent 没有配置 Jev（RuntimeConfig.jev 为空，接线还没有分配工作包）",
+};
+
+/** 某个用例在这个目标上要不要跳过：返回 false（照常跑）或跳过原因。 */
+export function skipUnless(target, ...needs) {
+  const caps = capabilities(target);
+  const missing = needs.filter((n) => !caps[n]);
+  return missing.length ? missing.map((n) => SKIP[n]).join("；") : false;
+}
 
 /**
  * 电脑上的运行时用哪个 Agent 循环（AGENTOS_ACP_CORE）：fake（默认，FakeAgentCore）或 pi（真实 Pi：PiAdapter + 电脑上的
@@ -264,19 +291,72 @@ export function deviceControl(serial, op, longExtras = {}) {
   return reply;
 }
 
+/** 设备上的测试模型来源（C 的 tests/device/acp-channel inapp 里 FakeModel：自定义 Anthropic Messages 端点）。 */
+export const DEVICE_MODEL = { port: 18787, baseUrl: "http://127.0.0.1:18787", model: "fake-model", key: "agtest-fake-model-key" };
+
+function deviceModelReady(status) {
+  return status.modelUsable && status.modelBaseUrl === DEVICE_MODEL.baseUrl && status.modelId === DEVICE_MODEL.model;
+}
+
 /**
- * 手机上的宿主层没有配置模型时，任务以 model_not_configured 失败。流式用例之前借 C 的设备测试执行器
- * （tests/device/acp-channel/inapp，debug 包里有）配一个回环地址上的测试端点：它在跑任何非 BYOK 场景之前调用
- * ensureTestModel（ScriptedAgentCore 不会去连这个端点；key 是代码里的占位值，不经命令行）。已经可用时什么都不做。
+ * 让手机上的模型来源指向测试端点。C4 之后 :agent 的 Agent 循环是真实 Pi，模型请求真的发出去；
+ * 借 C 的设备测试执行器（tests/device/acp-channel/inapp 的 AgentScenarioActivity，debug 包里有）设置：它在跑任何
+ * 非 BYOK 场景之前调用 ensureTestModel（baseUrl、模型、测试 key 都在它的代码里，不经 adb 命令行）。已经是它时什么都不做。
  */
 export async function ensureDeviceTestModel(serial) {
-  if (deviceControl(serial, "status").modelUsable) return false;
+  if (deviceModelReady(deviceControl(serial, "status"))) return false;
   execFileSync(adbPath(), [
     "-s", serial, "shell", "am", "start", "-W", "-n", "org.agentos.app/org.agentos.test.acp.inapp.AgentScenarioActivity",
-    "--es", "scenario", "handshake", "--es", "run", `a4-model-${Date.now()}`, "--es", "args", "'{}'",
+    "--es", "scenario", "handshake", "--es", "run", `a6-model-${Date.now()}`, "--es", "args", "'{}'",
   ], { encoding: "utf8" });
-  await until(() => deviceControl(serial, "status").modelUsable, 30_000, "the device test model to be configured");
+  await until(() => deviceModelReady(deviceControl(serial, "status")), 30_000, "the device test model to be configured");
   return true;
+}
+
+/**
+ * 设备模式的模型端点：电脑上起 B 的 FakeModelServer（FakeModelServerMain，按 {"fake":…} 指令回应），
+ * `adb reverse tcp:18787 tcp:<端口>` 映射到手机，再确保手机上的模型来源指向它。返回 { port, stop() }。
+ */
+export async function startDeviceModel(serial) {
+  const java = process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, "bin", "java") : "java";
+  const child = spawn(java, ["-cp", agentClasspath(), "org.agentos.runtime.testing.FakeModelServerMain", `--key=${DEVICE_MODEL.key}`], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const stderr = [];
+  child.stderr.on("data", (d) => stderr.push(d.toString("utf8")));
+  const port = await new Promise((resolve, reject) => {
+    let buf = "";
+    child.stdout.on("data", (d) => {
+      buf += d.toString("utf8");
+      const nl = buf.indexOf("\n");
+      if (nl >= 0) resolve(JSON.parse(buf.slice(0, nl)).port);
+    });
+    child.once("exit", (code) => reject(new Error(`FakeModelServerMain exited (${code}): ${stderr.join("")}`)));
+  });
+  execFileSync(adbPath(), ["-s", serial, "reverse", `tcp:${DEVICE_MODEL.port}`, `tcp:${port}`]);
+  await ensureDeviceTestModel(serial);
+  return {
+    port,
+    stderr,
+    async stop() {
+      try {
+        execFileSync(adbPath(), ["-s", serial, "reverse", "--remove", `tcp:${DEVICE_MODEL.port}`]);
+      } catch {
+        // 已经没有了
+      }
+      child.stdin.end();
+      await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolve();
+        }, 5_000);
+        child.once("exit", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    },
+  };
 }
 
 /** adb forward tcp:0 localabstract:agentos-acp，返回本机端口和移除函数。 */
@@ -329,11 +409,17 @@ export async function rawConnect(port, host = "127.0.0.1") {
     },
     next(timeoutMs = 15_000) {
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("no line and no close within timeout")), timeoutMs);
-        waiters.push((v) => {
+        const waiter = (v) => {
           clearTimeout(timer);
           resolve(v);
-        });
+        };
+        // 超时的等待者要从队列里拿掉，否则之后到达的行会交给它、丢掉
+        const timer = setTimeout(() => {
+          const i = waiters.indexOf(waiter);
+          if (i >= 0) waiters.splice(i, 1);
+          reject(new Error("no line and no close within timeout"));
+        }, timeoutMs);
+        waiters.push(waiter);
         flush();
       });
     },

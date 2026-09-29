@@ -4,10 +4,10 @@
 
 | 阶段 | 被测对象 | 传输 | 状态 |
 |---|---|---|---|
-| W4 | 电脑上的运行时（`org.agentos.runtime.testing.AcpStdioAgent`：完整的 `RuntimeEngine` + 真实 SQLite + ACP Agent 端），Agent 循环是 FakeAgentCore | stdio，`LineTransport` | ✅ 13 例（`conformance.test.mjs`，目标 `stdio`） |
-| W9 | 同上，以网关模式运行（与手机上同一份 `DesktopGatewayCore`：开关、配对码、令牌、握手；监听本机 TCP 代替抽象 socket） | `tools/acp-bridge --connect` | ✅ 13 例（目标 `gateway`）+ 配对与安全 9 例（`gateway.test.mjs`） |
-| W9 | 手机上的 `:agent`（debug 包；真 RuntimeEngine，Agent 循环暂时是 C 的 ScriptedAgentCore） | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 握手类 6 例（`device.test.mjs`）+ 配对与安全 9 例，模拟器 API 36 |
-| W4（B2 之后） | 电脑上的运行时，Agent 循环换成 B lane 的 PiAdapter（真实 Pi，跑在电脑上的 QuickJS 里）+ 假模型端点（FakeModelServer，Anthropic Messages / OpenAI Chat Completions 两个协议族） | stdio 和 gateway | ✅ 同样的 13 例 + 配对安全 9 例（`AGENTOS_ACP_CORE=pi`） |
+| W4 | 电脑上的运行时（`org.agentos.runtime.testing.AcpStdioAgent`：完整的 `RuntimeEngine` + 真实 SQLite + ACP Agent 端），Agent 循环是 FakeAgentCore | stdio，`LineTransport` | ✅ 14 例（`conformance.test.mjs`，目标 `stdio`） |
+| W9 | 同上，以网关模式运行（与手机上同一份 `DesktopGatewayCore`：开关、配对码、令牌、握手；监听本机 TCP 代替抽象 socket） | `tools/acp-bridge --connect` | ✅ 14 例（目标 `gateway`）+ 配对与安全 9 例（`gateway.test.mjs`） |
+| W9（C4 之后） | 手机上的 `:agent`（debug 包；真实 Pi），模型是电脑上的 FakeModelServer 经 `adb reverse` | `tools/acp-bridge`：`adb forward tcp:0 localabstract:agentos-acp` | ✅ 一致性 14 例中 10 例（4 例依赖工具、确认或 Jev，跳过）+ 设备专属 3 例 + 配对与安全 9 例（+1 例 todo：freezer），模拟器 API 36 |
+| W4（B2 之后） | 电脑上的运行时，Agent 循环换成 B lane 的 PiAdapter（真实 Pi，跑在电脑上的 QuickJS 里）+ 假模型端点（FakeModelServer，Anthropic Messages / OpenAI Chat Completions 两个协议族） | stdio 和 gateway | ✅ 同样的 14 例 + 配对安全 9 例（`AGENTOS_ACP_CORE=pi`） |
 
 ## 运行
 
@@ -35,13 +35,29 @@ AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=openai npm test   # OpenAI Chat Completio
 ### 手机（W9）
 
 ```bash
-# 设备上装 debug 包（开关和配对码经 debug 包的测试入口 DesktopGatewayDebugReceiver 操作）
-ANDROID_SERIAL=<serial> ./gradlew :app:installDebug
-cd tests/acp-conformance
+# 设备上装 debug 包（开关和配对码经 debug 包的测试入口 DesktopGatewayDebugReceiver 操作）。
+# 一定带 ANDROID_SERIAL：不带时 :app:installDebug 会装到所有连着的设备上
+(cd ../../core/pi-runtime && npm ci && node build.mjs)
+ANDROID_SERIAL=<serial> ../../gradlew -p ../.. :app:installDebug
 AGENTOS_ACP_DEVICE=<serial> npm run test:device
 ```
 
-`test:device` 跑 `device.test.mjs`（经 `tools/acp-bridge` 的握手类用例：initialize、session/new、prompt 流式、cancel、线上格式、70,000 字符输出的单行上限）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。手机上的 Agent 循环在 Pi 接上之前是 C 的 ScriptedAgentCore（不调模型、没有工具，按 prompt 里的 JSON 脚本输出），不认 FakeAgentCore 的指令和测试工具，所以只跑握手类用例；完整的 13 例在电脑上的 `gateway` 目标里跑，走的是同一份网关代码。宿主层没有配置模型时任务以 `model_not_configured` 失败，所以 `device.test.mjs` 开始前如果设备上还没有可用的模型，会借 C 的设备测试执行器（`tests/device/acp-channel/inapp` 的 `AgentScenarioActivity`，debug 包里有）配一个回环地址上的测试端点（ScriptedAgentCore 不会去连它；key 是代码里的占位值，不经 adb 命令行）。
+设了 `AGENTOS_ACP_DEVICE` 时，一致性用例的默认目标是 `device`：手机上 `:agent` 里的真实 Pi 经 `tools/acp-bridge`（`adb forward` → `localabstract:agentos-acp`）对外。模型是电脑上的 B 的 FakeModelServer（`FakeModelServerMain`，按同样的 `{"fake":…}` 指令回应），经 `adb reverse tcp:18787 tcp:<端口>` 映射到手机的 `127.0.0.1:18787`；手机上的模型来源是 C 的测试端点（`tests/device/acp-channel/inapp` 的 `ensureTestModel`：`http://127.0.0.1:18787`、`fake-model`、测试 key），不是时借 C 的 `AgentScenarioActivity` 设置（key 在它的代码里，不经 adb 命令行）。
+
+手机上 M1 没有这些，依赖它们的用例在 `device` 目标上跳过（原因写在 `agent.mjs` 的 `SKIP`，测试输出里也有）：
+
+| 用例 | 依赖 | 归属 |
+|---|---|---|
+| a tool call shows up as tool_call, then tool_call_update in_progress and completed | 工具（电脑上是 AcpStdioAgent 注册的 `add`） | W14 插件工具 / W15 MCP |
+| a write tool is confirmed by AgentOS (not by the client) and runs | 工具 + 确认（`send_note`，确认自动通过） | W14 / W15，W16 风险策略与确认 |
+| the tool round limit maps to max_turn_requests | 工具（连续 13 轮工具调用） | W14 / W15 |
+| creates a session, then selects it again, and reports the selection in _meta | Jev（电脑上是 `--jev=first`） | 手机上的 Jev 接线尚未分配工作包 |
+
+“目录外的工具”一例在手机上照常跑：模型调用的工具从来没有声明过，真实 Pi 自己返回 `Tool <name> not found`。
+
+`test:device` 还跑 `device.test.mjs`（设备专属：连接身份是 adbd 的 uid 2000、70,000 字符的模型输出经网关完整送达、手机发出的每一行格式与大小）和 `gateway.test.mjs`（本机网关和手机各一遍：开关关闭时没有应答、握手前的 ACP 消息得到 `auth_required` 并断开、错误配对码、5 次作废、过期、一次性、令牌重连与关开关作废、超长行、握手超时）。
+
+**已知问题（todo 用例）**：电脑端接入打开、`:agent` 空闲时是 cached 进程，约 10 秒后被 cached-apps freezer 冻结；这时电脑端的新连接和已建立会话的请求都得不到服务，直到别的事件解冻进程。`gateway.test.mjs` 的 “the gateway still answers after the phone has been idle for 15 s” 在手机上复现它（标为 todo，不让整组失败）；握手超时用例在等待期间用 status 广播保持进程解冻，只测网关自己的计时。
 
 debug 包的测试入口也可以手动用：
 
@@ -71,7 +87,7 @@ Agent 循环是 FakeAgentCore 时，prompt 里的 JSON 指令决定它的行为�
 - `session/new` → `session/prompt`：`agent_message_chunk` 流式输出、合并、`end_turn`、响应里的任务 ID；
 - 工具：`tool_call`（pending）→ `tool_call_update`（in_progress → completed）；write 级工具由 AgentOS 确认；目录外的工具直接 `failed`；
 - `session/cancel` → `cancelled`，会话随后照常可用；
-- 失败 → JSON-RPC 错误 -32051，`data.agentosCode`、`retryable`；`max_tokens`、`max_turn_requests`（工具轮次上限 12）；
+- 失败 → JSON-RPC 错误 -32051，`data.agentosCode`、`retryable`；`max_tokens`；`max_turn_requests`（工具轮次上限 12）；
 - 不支持的输入明确拒绝：`mcpServers`、图片、`session/load`；`resource_link` 和嵌入的文字资源可以用；
 - 线上格式：每行一条 JSON-RPC 2.0；长输出切分后单行不超过 65,536 字符；
 - 自动选会话扩展：没协商时拒绝；协商后第一次新建、第二次选中已有会话，结果在 `session_info_update` 的 `_meta` 里。

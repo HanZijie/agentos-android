@@ -50,7 +50,7 @@ agentos-android/
 │   │   ├── skills/SkillPrompt.kt                                  [W20] 新写：把 Skill 目录写进系统提示；内置 read_skill 工具
 │   │   ├── ports/{HostPort,AgentCore}.kt                          [W2] 新写：HostPort 是宿主层对 Android 的全部依赖（工具、Skill、Hook、确认、存储、密钥、时钟）；AgentCore 是宿主层对 Agent 循环的依赖，由 Pi 适配层实现，测试时用假实现
 │   │   ├── memory/MemoryProvider.kt                               [M6] 接口占位
-│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer
+│   │   ├── src/testFixtures/                                      [W2] FakeAgentCore、FakeHostPort、TestRuntime、AcpStdioAgent（电脑端 Agent 进程）；[W3] QuickJsJvmEngine、FakeModelServer（`FakeModelServerMain` 可单独运行，A6）、`RevocableSecrets`（带撤销信号的 SecretPort 测试替身，B5）
 │   │   └── src/test/                                              [W2] JUnit，在电脑上运行；[W3] 含可以编排 tool_use 的假模型端点
 │   ├── pi-runtime/                                  # 打包进 APK 的 Pi Agent core（JavaScript）
 │   │   ├── package.json · package-lock.json         [W3] 固定 @earendil-works/pi-agent-core、pi-ai 0.86.1；只引入 anthropic-messages、openai-completions 两个协议族
@@ -71,19 +71,20 @@ agentos-android/
 │   ├── src/main/AndroidManifest.xml                 # 定义 BIND_MCP_SERVICE、RUN_COMMANDS（signature）；导出 ACP 服务（:agent）；<queries> 声明插件发现 action；声明 :agent、:ext 进程
 │   ├── src/main/aidl/org/agentos/internal/          [W6] IAgentControl；[W14] IExtensionHost、IExtensionCallback（都不导出）
 │   ├── src/main/assets/pi-agent.js                  [W3] 由 core/pi-runtime/build.mjs 生成，不手改，不进仓库；同目录的 model-catalog.json 同样是生成物
+│   ├── src/main/res/xml/network_security_config.xml   [W6，B4] 只对 127.0.0.1、localhost、::1 放行明文 HTTP（debug 与 release 相同，F9），与 HostFetch.LOOPBACK_HOSTS 一致
 │   ├── src/androidTest/                         [W6] 设备测试，跑在 :agent 进程（QuickJsEngine、PiAdapter 契约、冷启动、可选的真实端点）
-│   ├── src/debug/                               [W6] 只在 debug 包生效��测试入口、网络配置
+│   ├── src/debug/                               [W9] 只进 debug 包：DesktopGatewayDebugReceiver（电脑端接入的测试入口，要求 DUMP）。回环明文放行在 main（B4）；设备用例的测试入口由 BuildConfig.TEST_HOOKS 控制（debug、releaseTest 打开）
 │   ├── src/main/assets/agent-plugin/                [W17] AgentOS 自带插件（标准 Agent Plugin：plugin.json、skills/）
 │   └── src/main/java/org/agentos/app/
 │       ├── agent/                                   # 运行时进程 :agent
 │       │   ├── AgentService.kt                      [W6] 有任务时前台服务（specialUse）；写心跳文件
 │       │   ├── AgentProcess.kt · RuntimeLifecycle.kt · Heartbeat.kt   [W6] :agent 进程入口；前台 / 空闲判断（纯 Kotlin，恢复期间不判空闲）；心跳（DE 存储，监督契约 b）
-│       │   ├── PlaceholderAgentRuntime.kt           [W6] 临时：A3 的 AgentRuntime 实现进 main 后删除
 │       │   ├── AcpService.kt                        [W6] 导出的 IAcpService：每条通道绑定调用方 UID，交给 SDK 的 Agent 端；M1 只接受本 App；[W25] 放开第三方
 │       │   ├── AndroidStore.kt                      [W6] SQLite 实现
 │       │   ├── QuickJsEngine.kt                     [W6，B lane] ← agenriod PiRuntime.kt、NativeAgentBridge.kt 的 QuickJS 接线：JsEngine 的 Android 实现，加载 pi-agent.js
 │       │   ├── PiAgentCores.kt                      [W6，B lane] :agent 的 AgentCoreFactory：PiAdapter.factory + QuickJsEngine + hostPort.secrets
 │       │   ├── KeystoreSecrets.kt                   [W6] BYOK，Keystore 加密
+│       │   ├── ModelSources.kt                      [W6] 模型来源（厂商预设 / 自定义兼容端点）的校验、保存（files/byok/model-source.json）与热加载；清除 = key 立即作废
 │       │   ├── HostPortImpl.kt                      [W6]；[W16] 工具与确认；[W20] Skill；[W22] Hook
 │       │   ├── AgentControl.kt                      [W6] IAgentControl 的实现
 │       │   ├── ConsentCoordinator.kt                [W16] 前台时弹确认界面，后台时发通知；60 秒无响应视为拒绝
@@ -161,7 +162,7 @@ agentos-android/
 ├── tests/
 │   ├── acp-conformance/                             [W4] 官方 TypeScript 客户端经 stdio 测电脑上的运行时；[W9] 经 adb forward 测真机
 │   └── device/                                      [W6] 起：adb 驱动的真机测试，ACP 通道、MCP Binder、Runner、监督的用例分开；也可以在 root 过的模拟器上跑
-│       └── acp-channel/{common,agent,client,inapp}/ · run.py   [W5] SDK 回归（--suite sdk）；[W6] :agent 用例（--suite app，inapp 执行器以 debugImplementation 注入 app，release 包里没有）
+│       └── acp-channel/{common,agent,client,inapp}/ · run.py   [W5] SDK 回归（--suite sdk）；[W6] :agent 用例（--suite app，inapp 执行器以 debugImplementation / releaseTestImplementation 注入 debug 和 releaseTest 包，release 包里没有；测试 key 只经 stdin 投递（`adb shell content write` 到 inapp 的 KeyDropProvider），不进 adb 命令行（API 37 的 adbd 会把命令行写进 logcat））
 ├── docs/
 │   ├── architecture.md · extensions.md · implementation-plan.md · assets/
 │   ├── spikes/                                      # 验证项的结论：S1、S2、S3、S8（真机部分待测）
@@ -403,7 +404,11 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 #### W9 电脑端接入
 - [x] `DesktopGateway`：开发者开关、抽象 socket `agentos-acp`、一次性配对码（A4；`IAgentControl` v3）
 - [x] `tools/acp-bridge/`（A4）
-- [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机（A4：Pixel_8a 模拟器上 `npm run test:device` 24/24；真机待测）
+- [ ] `tests/acp-conformance/` 扩展到经 `adb forward` 测真机。
+  - A4：Pixel_8a 模拟器上 `npm run test:device` 24/24。
+  - A6：设备模式跑完整的一致性用例。手机上是真实 Pi，模型端点是电脑上的 `FakeModelServerMain`（经 `adb reverse`）。14 例中 10 例通过、4 例跳过：3 例依赖工具（W14 / W15，其中 1 例还要确认，W16），1 例依赖只有电脑上才有的 `--jev` 开关。
+  - 真机待测。
+- [ ] 电脑端接入打开期间 `:agent` 以前台服务运行并显示通知，避免空闲时被 cached-apps freezer 冻结（architecture F11 第 4 点；A6 发现，C 实现）
 
 **M1 验收**：
 - [ ] 找 10 名极客内测

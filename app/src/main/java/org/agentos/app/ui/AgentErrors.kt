@@ -68,8 +68,21 @@ object AgentErrors {
         "internal" to Text("AgentOS 内部错误"),
     )
 
-    /** From a JSON-RPC error of `session/prompt` or another request. */
-    fun fromRpc(rpcCode: Int, message: String?, agentosCode: String?, retryable: Boolean?, retryAfterSeconds: Long? = null): AgentError {
+    /**
+     * From a JSON-RPC error of `session/prompt` or another request. [reason] is `data.details.reason`
+     * (architecture F9: `model_not_configured` with `key_revoked` = the key was cleared during this turn).
+     */
+    fun fromRpc(
+        rpcCode: Int,
+        message: String?,
+        agentosCode: String?,
+        retryable: Boolean?,
+        retryAfterSeconds: Long? = null,
+        reason: String? = null,
+    ): AgentError {
+        if (agentosCode == "model_not_configured" && reason == "key_revoked") {
+            return AgentError("模型 key 已在设置中清除，这一轮已停止", "到设置页重新选择模型厂商并填写 key", false, agentosCode)
+        }
         val known = agentosCode?.let { byCode[it] }
         if (known != null) {
             val hint = if (agentosCode == "model_rate_limited" && retryAfterSeconds != null && retryAfterSeconds > 0) {
