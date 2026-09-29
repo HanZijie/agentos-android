@@ -10,12 +10,17 @@ import com.agentclientprotocol.model.ToolCallContent
 import com.agentclientprotocol.model.ToolCallStatus
 import com.agentclientprotocol.protocol.JsonRpcException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -23,7 +28,9 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.RuntimeConfig
 import org.agentos.runtime.errors.RpcCodes
 import org.agentos.runtime.events.EventTypes
+import org.agentos.runtime.ports.ToolInvocationResult
 import org.agentos.runtime.ports.ToolResult
+import org.agentos.runtime.ports.ToolRisk
 import org.agentos.runtime.router.JevProvider
 import org.agentos.runtime.scheduler.SchedulerConfig
 import org.agentos.runtime.store.TaskState
@@ -143,6 +150,42 @@ class AcpAgentSideTest {
         val next = pair.prompt(session, "again")
         assertEquals(StopReason.END_TURN, next.response().stopReason)
         assertEquals("echo: again", next.text())
+    }
+
+    /**
+     * A8：取消漏到下一轮。SDK 0.30.1 处理 session/cancel 的顺序是 `agentSession.cancel()` 返回之后，才
+     * `_activePrompt.getAndSet(null)?.promptJob.cancel()`。我们的 cancel() 会等任务停下；如果这期间被取消的这一轮已经
+     * 返回、客户端马上发了下一轮，SDK 取消的就是下一轮。这里让会话里另一个任务停得慢（工具 1 秒不可取消），
+     * 把这个窗口稳定地拉到约 1 秒：修复之前每次都失败（下一轮 CANCELLED 或 invalid_state）。
+     */
+    @Test
+    fun `a prompt sent right after a cancelled turn is not cancelled by that session cancel`() = test { pair ->
+        pair.rt.host.tools.register("slow_stop", ToolRisk.READ) {
+            withContext(NonCancellable) { delay(1_000) }
+            ToolInvocationResult.Completed(ToolResult.text("stopped late"))
+        }
+        pair.initialize()
+        val session = pair.newSession()
+        val sid = session.sessionId.value
+        // 同一会话里先跑一个停得慢的任务（同一个调用方，直接提交给运行时），卡在工具调用里
+        val blocker = pair.rt.engine.submit(
+            TestRuntime.APP, sid,
+            TestRuntime.text(directive("tools" to buildJsonArray { add(buildJsonObject { put("name", "slow_stop") }) })),
+        )
+        pair.rt.awaitEvent(sid) { it.taskId == blocker.id && it.eventType == EventTypes.TOOL_DISPATCHED }
+        // 这一轮排在它后面
+        val events = mutableListOf<com.agentclientprotocol.common.Event>()
+        val turn = async { session.prompt(listOf(ContentBlock.Text("queued turn"))).collect { events += it } }
+        pair.rt.until { pair.rt.engine.runState.value.queuedTasks >= 1 }
+        // 取消：排队的这一轮立即取消；运行中的那个约 1 秒后才停
+        session.cancel()
+        turn.await()
+        assertEquals(StopReason.CANCELLED, events.response().stopReason)
+        // 马上发下一轮：不能被刚才那次 cancel 取消
+        val next = pair.prompt(session, "again")
+        assertEquals(StopReason.END_TURN, next.response().stopReason)
+        assertEquals("echo: again", next.text())
+        assertEquals(TaskState.CANCELLED, pair.rt.engine.awaitTask(blocker.id).state)
     }
 
     @Test

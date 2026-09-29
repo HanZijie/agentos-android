@@ -117,9 +117,11 @@
 
 ## 8. `session/cancel`
 
-1. 取消这个会话里所有未结束的任务：排队的立即取消，运行中的请 Agent core abort（F6、session-scheduling.md 第 6 节）；
-2. **等运行中的任务停下再返回**（最多 12 秒）：这样这一轮的 `session/prompt` 先按正常路径读到 `task.cancelled`、把已提交的更新发完、以 `cancelled` 返回；随后立即发的 prompt 也不会撞上“取消中”（`invalid_state`）；
-3. 12 秒内没停下，SDK 取消这一轮的处理协程，`session/prompt` 同样以 `cancelled` 返回；运行时这一侧按取消宽限期把这次执行标记为结果未知。
+1. 只针对**本连接上进行中的那一轮**（ACP）：本连接上没有进行中的 prompt 时什么都不做（也不挂起）。有的话，取消这个会话里所有未结束的任务：排队的立即取消，运行中的请 Agent core abort（F6、session-scheduling.md 第 6 节）；
+2. **等运行中的任务停下再返回**（最多 12 秒）：随后立即发的 prompt 不会撞上“取消中”（`invalid_state`）；
+3. 被取消的这一轮照常读到 `task.cancelled`、把已提交的更新发完，但 `cancelled` 响应**压到 SDK 完成取消之后才交给客户端**（A8）。原因：SDK 0.30.1 在 `AgentSession.cancel()` 返回之后才取消它眼里的“当前 prompt”（`_activePrompt.getAndSet(null)?.promptJob.cancel()`）；如果这一轮提前返回、客户端马上发了下一轮，被取消的就是下一轮（“点停止后马上发的消息也被取消”）。所以客户端收到 `cancelled` 时，会话已经可以接受下一轮；响应仍带 `_meta."org.agentos".taskId`；
+4. 12 秒内没停下，SDK 取消这一轮的处理协程，`session/prompt` 同样以 `cancelled` 返回；运行时这一侧按取消宽限期把这次执行标记为结果未知；
+5. cancel 在这一轮的任务提交完成之前到达时，提交一完成就把它取消，不留下没人等的任务。
 
 ## 9. 背压与消息大小
 
