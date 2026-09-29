@@ -408,7 +408,10 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
   - A4：Pixel_8a 模拟器上 `npm run test:device` 24/24。
   - A6：设备模式跑完整的一致性用例。手机上是真实 Pi，模型端点是电脑上的 `FakeModelServerMain`（经 `adb reverse`）。14 例中 10 例通过、4 例跳过：3 例依赖工具（W14 / W15，其中 1 例还要确认，W16），1 例依赖只有电脑上才有的 `--jev` 开关。
   - 真机待测。
-- [ ] 电脑端接入打开期间 `:agent` 以前台服务运行并显示通知，避免空闲时被 cached-apps freezer 冻结（architecture F11 第 4 点；A6 发现，C 实现）
+- [x] 电脑端接入打开期间 `:agent` 以前台服务运行并显示通知，避免空闲时被 cached-apps freezer 冻结（architecture F11 第 4 点；A6 发现，C6 实现）。
+  - C 的模拟器（API 35 / 36 / 37）上 `desktop_idle.py` 各 18/18：空闲 60 s 后经 acp-bridge 握手 73–344 ms，对话与取消成功，`isFrozen` 始终为 false。
+  - 整合人在 Pixel_8a 上复核：`desktop_idle.py` 15/18，核心项全部通过（空闲 60 s 后握手 111–126 ms，对话与取消成功，36 个采样都没有被冻结，开机拉起和 bind 拉起后都回到前台）。失败的 3 项都是脚本没有先展开 Silent 分组里折叠的通知、点不到“关闭”；手动展开后“关闭”有效，开关关闭并退出前台。
+  - 后台拉起需要电池优化豁免，监督进程按 `hold=desktop` 拉起放到 W11
 
 **M1 验收**：
 - [ ] 找 10 名极客内测
