@@ -8,6 +8,10 @@ plugins {
 
 android {
     namespace = "org.agentos.test.acp.inapp"
+    defaultConfig {
+        // AgentOS 的 releaseTest 包（R8）带着本库：反射调用 IAgentControl 的部分要 keep
+        consumerProguardFiles("consumer-rules.pro")
+    }
 }
 
 dependencies {

@@ -130,8 +130,19 @@ class PromptRun {
     var chunkChars = 0L
     var maxChunkChars = 0
 
+    /** 收到的文字（前 [TEXT_CAP] 个字符，用来核对上下文）。 */
+    val text = StringBuilder()
+    /** session/update 里的 tool_call 条数，以及 tool_call_update 的状态（按到达顺序）。 */
+    var toolCalls = 0
+    val toolStatuses = mutableListOf<String>()
+
+    companion object {
+        const val TEXT_CAP = 65_536
+    }
+
     fun json(): JSONObject = JSONObject()
         .put("chunks", chunks).put("chars", chunkChars).put("maxChunkChars", maxChunkChars).put("outOfOrder", outOfOrder)
+        .put("toolCalls", toolCalls).put("toolStatuses", org.json.JSONArray(toolStatuses))
         .put("stopReason", stopReason ?: JSONObject.NULL)
         .put("error", errJson(error))
         .put("firstChunkMs", if (firstChunkNs > 0) (firstChunkNs - startNs) / 1e6 else -1.0)
@@ -164,7 +175,9 @@ suspend fun runPrompt(
                         run.lastSeq = seq
                         if (run.chunks == 0) run.firstChunkNs = t
                         run.chunks++
-                        val len = (u.content as? ContentBlock.Text)?.text?.length ?: 0
+                        val piece = (u.content as? ContentBlock.Text)?.text.orEmpty()
+                        val len = piece.length
+                        if (run.text.length < PromptRun.TEXT_CAP) run.text.append(piece.take(PromptRun.TEXT_CAP - run.text.length))
                         run.chunkChars += len
                         if (len > run.maxChunkChars) run.maxChunkChars = len
                         if (t - lastUi > 250_000_000) {
@@ -172,6 +185,10 @@ suspend fun runPrompt(
                             onStatus("chunks=${run.chunks}")
                         }
                         onChunk(run)
+                    } else if (u is SessionUpdate.ToolCall) {
+                        run.toolCalls++
+                    } else if (u is SessionUpdate.ToolCallUpdate) {
+                        run.toolStatuses += u.status?.name ?: "NONE"
                     }
                 }
                 is Event.PromptResponseEvent -> run.stopReason = ev.response.stopReason.name

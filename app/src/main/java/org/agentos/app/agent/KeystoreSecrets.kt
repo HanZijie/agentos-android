@@ -58,7 +58,8 @@ class KeystoreSecrets(
 
     private val served = AtomicLong()
     private val denied = AtomicLong()
-    private val revocations = AtomicLong()
+    // 计数器；不能叫 revocations：那是 SecretPort 的撤销信号（Flow<Credential>，A 追加，发送由 C 实现）
+    private val revokedCount = AtomicLong()
     @Volatile private var lastRevokedAtMs = 0L
 
     /** 用主密钥加密 [key]，绑定到 [bindings]。不改变当前生效的 key。 */
@@ -101,7 +102,7 @@ class KeystoreSecrets(
         current = null
         retired = null
         if (had) {
-            revocations.incrementAndGet()
+            revokedCount.incrementAndGet()
             lastRevokedAtMs = System.currentTimeMillis()
         }
     }
@@ -133,7 +134,7 @@ class KeystoreSecrets(
     /** 请求计数（诊断、设备用例用，不含任何 key 内容）：交出 key 的次数、找不到 key 的次数、撤销次数。 */
     fun stats(): Map<String, Any?> = mapOf(
         "served" to served.get(), "denied" to denied.get(),
-        "revocations" to revocations.get(), "lastRevokedAtMs" to lastRevokedAtMs,
+        "revocations" to revokedCount.get(), "lastRevokedAtMs" to lastRevokedAtMs,
     )
 
     /** 只判断能否匹配（ModelSources 判断“可用”、诊断用），不计入 [stats]；匹配本身不挂起、不做 I/O。 */

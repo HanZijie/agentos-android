@@ -4,7 +4,8 @@
 两套用例：
   sdk  W5 回归：测试 Agent App（:agent 进程）↔ 第三方身份的测试客户端，覆盖 sdk:binder-channel 和 sdk:acp-android。
   app  W6 用例：AgentOS App 的 :agent（AcpService、AgentService、AgentControl）。宿主层是真正的 RuntimeEngine，
-       Agent core 在 B2 之前是 ScriptedAgentCore。通道用例由注入 debug 包的
+       Agent core 是 Pi（PiAgentCores：PiAdapter + QuickJsEngine），模型请求发到本脚本起的假模型端点（fake_model.py，
+       经 adb reverse）。通道用例由注入 debug / releaseTest 包的
        in-app 执行器以 AgentOS 自己的 UID 跑；"非本 App 的 UID 被拒"由测试客户端以第三方 UID 跑。
        BYOK 用例的 key 是本脚本每次随机生成的测试 key，用例结束后在整个 logcat（-b all）和结果里搜它。
 
@@ -21,6 +22,8 @@ import json
 import os
 import secrets
 import shutil
+
+import fake_model
 import subprocess
 import sys
 import time
@@ -96,6 +99,11 @@ def app_cases():
         # C3.1：清除 = 立即作废（长流式进行中清除）
         ("byok-clear-inflight", a, "byok-clear-inflight", {"apiKeyFile": KEY_FILE}, 120, "byok"),
         ("byok-clear", a, "byok-clear", {"apiKeyFile": KEY_FILE}, 120, "byok"),
+        # C4：Pi Agent core 端到端（假模型端点经 adb reverse；live 用真实的 MiniMax 国内平台）
+        ("pi-tool-round", a, "pi-tool-round", {}, 120, "check"),
+        ("pi-context", a, "pi-context", {}, 120, "check"),
+        ("recovery-context", a, "recovery-context", {}, 180, "check"),
+        ("live-minimax", a, "live-minimax", {"keyFile": "test/live_key"}, 240, "live"),
     ]
 
 
@@ -108,13 +116,48 @@ def make_test_key():
     return "agtest-" + secrets.token_urlsafe(36)
 
 
-def push_test_key(adb, key):
-    """adb exec-in + run-as：key 只走 stdin，命令行里没有它（debug 包可 run-as）。"""
-    cmd = [adb.adb, "-s", adb.serial, "exec-in",
-           f"run-as {APP_PKG} sh -c 'mkdir -p files/test && cat > files/{KEY_FILE}'"]
-    p = subprocess.run(cmd, input=key, capture_output=True, text=True, timeout=60)
-    if p.returncode != 0:
-        raise RuntimeError(f"push test key failed: {p.returncode} {p.stderr.strip()}")
+KEY_DROP = "content://org.agentos.test.acp.inapp.keydrop/"
+
+
+def push_key(adb, slot, key):
+    """adb shell content write：key 只走 stdin，命令行里只有 URI。写进 App 私有目录 files/test/<slot>
+    （inapp 的 KeyDropProvider，要求 DUMP；debug 和不可调试的 releaseTest 包都能用）。
+    用 adb shell（shell v2）而不是 exec-in：exec-in 不等设备上的命令结束就返回，key 会晚于用例落盘。"""
+    want = len(key.encode("utf-8"))
+    got = None
+    for attempt in (1, 2):
+        cmd = [adb.adb, "-s", adb.serial, "shell", f"content write --uri {KEY_DROP}{slot}"]
+        p = subprocess.run(cmd, input=key, capture_output=True, text=True, timeout=60)
+        if p.returncode != 0 or p.stderr.strip():
+            raise RuntimeError(f"push key failed: {p.returncode} {p.stderr.strip()[:200]}")
+        # 写完核对长度（KeyDropProvider.query 只返回长度，不返回内容）；不对就重写一次
+        got = key_file_size(adb, slot)
+        if got == want:
+            return attempt
+    raise RuntimeError(f"push key: file size {got}, expected {want}")
+
+
+def key_file_size(adb, slot):
+    out = adb.sh(f"content query --uri {KEY_DROP}{slot}", check=False)
+    for part in out.replace(",", " ").split():
+        if part.startswith("size="):
+            try:
+                return int(part[5:])
+            except ValueError:
+                return None
+    return None
+
+
+def live_key():
+    """真实对话用的 key：只从环境变量读（例如先 set -a; . .secrets/minimax.env）。没有就跳过 live 用例。"""
+    return os.environ.get("MINIMAX_API_KEY") or None
+
+
+def start_fake_model(adb, keys):
+    """电脑上的假模型端点 + adb reverse（设备上的 127.0.0.1:18787 → 这里）。"""
+    fm = fake_model.FakeModel(keys).start()
+    adb.run("reverse", f"tcp:{fake_model.DEVICE_PORT}", f"tcp:{fm.port}")
+    return fm
 
 
 def leak_scan(adb, key, result):
@@ -279,6 +322,8 @@ def main():
     ap.add_argument("--suite", choices=["sdk", "app"], default="sdk")
     ap.add_argument("--build", choices=["debug", "release"], default="debug",
                     help="sdk 用例的测试 App 构建类型；app 用例固定用 AgentOS 的 debug 包（in-app 执行器只在 debug 包里）")
+    ap.add_argument("--app-build", choices=["debug", "releaseTest"], default="debug",
+                    help="app 用例用的 AgentOS 包：debug，或 releaseTest（R8，调试证书签名，带 in-app 执行器）")
     ap.add_argument("--only", help="逗号分隔的用例名")
     ap.add_argument("--no-install", action="store_true")
     ap.add_argument("--label", default="")
@@ -292,7 +337,7 @@ def main():
         if a.suite == "sdk":
             install(adb, os.path.join(tdir, "agent", "build", "outputs", "apk", a.build, f"agent-{a.build}.apk"))
         else:
-            install(adb, os.path.join(REPO, "app", "build", "outputs", "apk", "debug", "app-debug.apk"))
+            install(adb, os.path.join(REPO, "app", "build", "outputs", "apk", a.app_build, f"app-{a.app_build}.apk"))
     for pkg in (CLIENT_PKG, TEST_AGENT_PKG, APP_PKG):
         adb.sh(f"am force-stop {pkg}", check=False)
     adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
@@ -307,14 +352,22 @@ def main():
     only = set(a.only.split(",")) if a.only else None
     cases = sdk_cases() if a.suite == "sdk" else app_cases()
     test_key = make_test_key()
+    real_key = live_key()
+    fm = None
+    if a.suite == "app":
+        # 假模型端点认两把测试 key：通道用例的固定 key 和 BYOK 用例的随机 key
+        fm = start_fake_model(adb, {"agtest-fake-model-key": "test", test_key: "byok"})
     results, failed = {}, []
     for name, activity, scenario, args, timeout, kind in cases:
         if only and name not in only:
             continue
         t0 = time.time()
         try:
+            push_attempts = None
             if kind == "byok":
-                push_test_key(adb, test_key)
+                push_attempts = push_key(adb, "byok_key", test_key)
+            if kind == "live" and real_key:
+                push_attempts = push_key(adb, "live_key", real_key)
             if scenario == "client-kill":
                 r = run_client_kill(adb, name, activity, args, timeout)
             elif kind == "userstop":
@@ -323,14 +376,16 @@ def main():
                 r = run_one(adb, name, activity, scenario, args, timeout)
         except Exception as e:  # noqa: BLE001
             r = {"ok": False, "error": f"driver: {e}"}
-        if r is not None and kind == "byok":
-            leak = leak_scan(adb, test_key, r)
+        if r is not None and kind in ("byok", "live") and (kind == "byok" or real_key):
+            leak = leak_scan(adb, test_key if kind == "byok" else real_key, r)
             r["leakScan"] = leak
             r["summary"] = f"{r.get('summary', '')} logcatHits={leak['logcatHits']}/{leak['logcatLines']} resultHits={leak['resultHits']}"
             if leak["logcatHits"] or leak["resultHits"]:
                 r["ok"] = False
         if r is not None:
             r["driverSec"] = round(time.time() - t0, 1)
+            if push_attempts is not None:
+                r["keyPushAttempts"] = push_attempts
             if kind == "negative":
                 # 负向实验：关掉流控后允许失败，但必须在超时内结束（不能挂住）
                 r["deliveredAll"] = r.get("ok")
@@ -341,7 +396,14 @@ def main():
         print(summarize(name, r), flush=True)
         adb.sh(f"am force-stop {CLIENT_PKG}", check=False)
 
-    out = {"suite": a.suite, "build": a.build if a.suite == "sdk" else "debug", "device": device,
+    if fm is not None:
+        adb.run("reverse", "--remove", f"tcp:{fake_model.DEVICE_PORT}", check=False)
+        fm.stop()
+    if a.suite == "app":
+        # 兜底：不留任何测试 key / 真实 key 文件在设备上（用例读完本来就会删）
+        dropped = run_one(adb, "drop-keys", INAPP_ACTIVITY, "drop-keys", {}, 60)
+        print(f"drop-keys: {dropped.get('summary') if dropped else 'TIMEOUT'}")
+    out = {"suite": a.suite, "build": a.build if a.suite == "sdk" else a.app_build, "device": device,
            "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "results": results}
     os.makedirs(os.path.join(tdir, "results", "raw"), exist_ok=True)
     tag = f"-{a.label}" if a.label else ""

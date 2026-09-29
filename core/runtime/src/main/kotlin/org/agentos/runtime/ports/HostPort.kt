@@ -1,9 +1,11 @@
 package org.agentos.runtime.ports
 
 import androidx.sqlite.SQLiteDriver
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.json.JsonObject
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.errors.ErrorInfo
@@ -273,13 +275,32 @@ interface ModelConfigPort {
 
 interface SecretPort {
     /**
-     * 按请求 URL 找 key：与已配置厂商的 baseUrl 按前缀匹配。只由网络出口（net/HostFetch）调用；
-     * 找不到时返回 null，网络出口不发请求（model_not_configured）。
+     * 按请求 URL 找 key：与 key 绑定的 endpoint（厂商的 baseUrl，或自定义端点）匹配——scheme、host、port 完全相同，
+     * 路径在段边界上匹配（`https://api.example.com/v1` 匹配 `…/v1/messages`，不匹配 `…/v10` 或别的 host）；
+     * 多个 endpoint 都匹配时取路径最长的。**不是字符串前缀匹配**：`https://api.example.com.evil.net/…` 拿不到
+     * `https://api.example.com` 的 key。参考实现是 `net/BaseUrlCredentials`（生产的 KeystoreSecrets 委托给它）。
+     * 只由网络出口（net/HostFetch）调用；找不到时返回 null，网络出口不发请求（model_not_configured）。
      */
     suspend fun credentialFor(url: String): Credential?
+
+    /**
+     * 撤销信号（architecture F9：清除 = 立即作废）。用户**清除**模型来源时，被丢掉的每个 [Credential]（当前的和
+     * 换下来还留在内存里的）各发一次；网络出口（net/HostFetch，B）据此中止正在用这个 key 传输的 HTTP 响应，
+     * 那次请求以 `model_not_configured`（`details.reason = key_revoked`）结束。之后 [credentialFor] 对它原来的端点一律返回 null。
+     *
+     * - 按**对象身份**比较：发出的就是 [credentialFor] 当初返回的那个对象（[Credential] 不重写 equals / hashCode），
+     *   订阅方用 `===` 判断某个请求用的 key 是否被撤销，不比较 key 的内容；
+     * - **更换** key（setModelSource，热加载）**不发**：换下来的 key 继续服务进行中的那一轮，运行时空闲后才丢弃；
+     * - 默认实现是空流：不支持撤销的实现（测试的假实现、电脑上的实现）不用改。生产实现（KeystoreSecrets，C）在清除时发送。
+     *   是热流，没有重放：只对订阅之后的撤销生效，网络出口在发请求之前订阅。
+     */
+    val revocations: Flow<Credential> get() = emptyFlow()
 }
 
-/** 一个 key。toString 不泄露内容；只有网络出口在组装请求头时调用 [reveal]。 */
+/**
+ * 一个 key。toString 不泄露内容；只有网络出口在组装请求头时调用 [reveal]。
+ * **不重写 equals / hashCode**：两个内容相同的 Credential 是两个不同的 key 实例，[SecretPort.revocations] 按对象身份比较。
+ */
 class Credential(private val secret: String) {
     init {
         require(secret.isNotEmpty()) { "empty credential" }

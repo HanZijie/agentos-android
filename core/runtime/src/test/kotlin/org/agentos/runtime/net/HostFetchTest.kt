@@ -109,9 +109,25 @@ class HostFetchTest {
 
     @Test
     fun `cleartext http is refused except to loopback`() = runBlocking<Unit> {
-        val e = assertFailsWith<HostFetchException> { HostFetch(NO_SECRETS).open(FetchRequest("http://example.com/v1")) }
-        assertEquals(NetErrorKind.REJECTED, e.kind)
-        assertTrue(HostFetch.isLoopback("127.0.0.1") && HostFetch.isLoopback("localhost") && !HostFetch.isLoopback("10.0.2.2"))
+        val refused = listOf(
+            "http://example.com/v1",
+            "http://10.0.2.2:8080/v1",
+            "http://192.168.1.20:11434/v1",
+            "http://127.0.0.2:8080/v1",
+            "http://127.example.com/v1",
+            "http://localhost.example.com/v1",
+            "http://[::2]:8080/v1",
+        )
+        for (url in refused) {
+            val e = assertFailsWith<HostFetchException>(url) { HostFetch(NO_SECRETS).open(FetchRequest(url)) }
+            assertEquals(NetErrorKind.REJECTED, e.kind, url)
+        }
+        // Loopback passes the policy; nothing listens on port 1, so the request fails later, at connect.
+        for (url in listOf("http://127.0.0.1:1/v1", "http://localhost:1/v1", "http://[::1]:1/v1", "http://[0:0:0:0:0:0:0:1]:1/v1")) {
+            val e = assertFailsWith<HostFetchException>(url) { HostFetch(NO_SECRETS).open(FetchRequest(url)) }
+            assertEquals(NetErrorKind.CONNECT, e.kind, url)
+        }
+        assertEquals(setOf("127.0.0.1", "localhost", "::1"), HostFetch.LOOPBACK_HOSTS)
     }
 
     @Test

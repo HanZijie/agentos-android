@@ -445,15 +445,18 @@ class ModelSources(
             }
         }
 
-        /** 自定义端点：绝对 https URL（http 只允许回环地址，与 HostFetch 一致），不带用户信息、query、fragment。 */
+        /** 自定义端点：绝对 https URL（http 只允许 127.0.0.1、localhost、::1，architecture F9），不带用户信息、query、fragment。 */
         fun checkEndpoint(raw: String): String {
             val url = raw.trim().trimEnd('/')
-            val bad = ByokException(INVALID_ENDPOINT, "baseUrl must be an absolute https URL without credentials, query or fragment (http only for loopback)")
+            val bad = ByokException(INVALID_ENDPOINT, "baseUrl must be an absolute https URL without credentials, query or fragment (http only for 127.0.0.1, localhost, ::1)")
             if (url.isEmpty() || url.length > MAX_URL_CHARS) throw bad
             val u = runCatching { URI(url) }.getOrNull() ?: throw bad
             val scheme = u.scheme?.lowercase(Locale.ROOT) ?: throw bad
             val host = u.host?.takeIf { it.isNotEmpty() } ?: throw bad
-            if (scheme != "https" && !(scheme == "http" && HostFetch.isLoopback(host.lowercase(Locale.ROOT)))) throw bad
+            // F9：只有 127.0.0.1、localhost、::1 可以用 http（与 HostFetch.LOOPBACK_HOSTS 和网络安全配置一致）；
+            // java.net.URI 的 IPv6 host 带方括号，先去掉
+            val bare = host.lowercase(Locale.ROOT).removeSurrounding("[", "]")
+            if (scheme != "https" && !(scheme == "http" && HostFetch.isLoopback(bare))) throw bad
             if (u.rawUserInfo != null || u.rawQuery != null || u.rawFragment != null) throw bad
             if (u.rawPath.orEmpty().split('/').any { it == ".." || it == "." }) throw bad
             return url

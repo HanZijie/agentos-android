@@ -76,7 +76,7 @@ interface IAgentControl {
      *     key 绑定到该厂商的全部 baseUrl；
      *   自定义兼容端点：{"kind":"custom", "api":"anthropic-messages"|"openai-completions", "baseUrl":"https://…",
      *     "model":"模型 id", "name"?, "contextWindow"?, "maxTokens"?, "reasoning"?, "input"?:["text","image"], "thinkingLevel"?}，
-     *     baseUrl 必须是绝对 https URL（http 只允许 localhost / 127.x / ::1），不带用户信息、query、fragment；
+     *     baseUrl 必须是绝对 https URL（http 只允许 127.0.0.1 / localhost / ::1，architecture F9），不带用户信息、query、fragment；
      *     OpenAI Chat Completions 填到 /v1 这一级，Anthropic Messages 填 API 根；key 只绑定到这个 baseUrl。
      *   thinkingLevel 可省略，默认 "off"。
      * apiKey：新 key（去掉首尾空白；不能含空白和控制字符；最长 4096 字符）。

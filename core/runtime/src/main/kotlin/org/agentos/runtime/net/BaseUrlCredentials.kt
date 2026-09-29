@@ -54,7 +54,8 @@ internal class Endpoint(val scheme: String, val host: String, val port: Int, val
             val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
             if (scheme != "https" && scheme != "http") return null
             if (uri.rawUserInfo != null) return null
-            val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.') ?: return null
+            // IPv6 literals without brackets, as OkHttp's HttpUrl.host has them (HostFetch.isLoopback).
+            val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.')?.removeSurrounding("[", "]") ?: return null
             if (host.isEmpty()) return null
             val port = if (uri.port >= 0) uri.port else if (scheme == "https") 443 else 80
             val path = uri.normalize().rawPath.orEmpty()
