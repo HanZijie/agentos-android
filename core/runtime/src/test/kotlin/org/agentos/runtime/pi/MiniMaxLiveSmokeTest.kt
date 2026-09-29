@@ -30,8 +30,8 @@ import kotlin.test.assertTrue
  *   compatible endpoint" path on anthropic-messages, with the template default (reasoning: false)
  *   and with reasoning: true;
  * - MINIMAX_OPENAI_BASE_URL (for example https://api.minimax.cn/v1): the OpenAI Chat Completions
- *   route (openai-completions), model MINIMAX_OPENAI_MODEL (default MiniMax-M2.7), in the three
- *   variants of [OpenAiCompatibleTargets] (template, reasoning_split, think-tags fallback). Each
+ *   route (openai-completions), model MINIMAX_OPENAI_MODEL (default MiniMax-M2.7), in the four
+ *   variants of [OpenAiCompatibleTargets] (template, MiniMax compat, think-tags keep / drop). Each
  *   must stream thinking deltas and never show <think> tags in the answer.
  *
  * Results are printed per target ("LIVE ..." lines in the test's standard output).
@@ -68,8 +68,8 @@ class MiniMaxLiveSmokeTest {
         val t0 = System.currentTimeMillis()
         val chat = h.runtime.prompt(s1, p.chat)
         val firstDelta = (h.deltas(s1, "thinking_delta") + h.deltas(s1)).minOfOrNull { it.at }?.minus(t0)
-        // Reasoning must never reach the answer as <think>…</think> text (B8: reasoning_split for
-        // MiniMax hosts, the leading-think fallback for other OpenAI-compatible endpoints).
+        // Reasoning must never reach the answer as <think>…</think> text (B8.1: reasoning_split from
+        // ModelCatalog.customModel for MiniMax hosts, the leading-think fallback for custom endpoints).
         val inlineThink = chat.text.contains("<think>") || chat.text.contains("</think>")
         val thinkingDeltas = h.deltas(s1, "thinking_delta").size
         report.append(" chat=${chat.stopReason} text=${chat.text.trim().takeLast(40).replace('\n', ' ')} textDeltas=${h.deltas(s1).size} thinkingDeltas=$thinkingDeltas inlineThink=$inlineThink firstDeltaMs=$firstDelta")
@@ -147,7 +147,9 @@ class MiniMaxLiveSmokeTest {
     /**
      * The OpenAI route against the fake endpoint playing MiniMax M2.x (reasoning first, inline
      * <think>…</think> unless reasoning_split): the answer never shows the tags, thinking arrives
-     * as thinking deltas, and the next request does not send the reasoning back as answer text.
+     * as thinking deltas, and later requests carry reasoning_split and the replayed reasoning as
+     * the variant says ([OpenAiCompatibleTargets.checkFakeWire]: <think> back in the assistant
+     * text with keep, not at all with drop, reasoning_content with reasoning_split).
      */
     @Test
     fun `openai-compatible route runs against the fake endpoint`() = runBlocking<Unit> {
@@ -155,7 +157,8 @@ class MiniMaxLiveSmokeTest {
         val catalog = PiAssets.catalog
         assumeTrue(PiAssets.MISSING, bundle != null && catalog != null)
         FakeModelServer().use { server ->
-            for ((name, model) in OpenAiCompatibleTargets.targets(catalog!!, server.openaiBaseUrl, OpenAiCompatibleTargets.FAKE_THINK_TAGS_MODEL)) {
+            for (variant in OpenAiCompatibleTargets.targets(catalog!!, server.openaiBaseUrl, OpenAiCompatibleTargets.FAKE_THINK_TAGS_MODEL)) {
+                val (name, model) = variant
                 val h = PiHarness(listOf(model.baseUrl to server.key))
                 h.runtime.start(bundle!!)
                 val n0 = server.requests.size
@@ -170,20 +173,11 @@ class MiniMaxLiveSmokeTest {
                 val toolResults = bodies.flatMap { b -> b["messages"]!!.jsonArray.map { it.jsonObject }.filter { it["role"]?.jsonPrimitive?.content == "tool" } }
                 assertTrue(toolResults.isNotEmpty(), "$name: the tool result went back")
                 assertTrue(bodies.all { it["stream"]?.jsonPrimitive?.content == "true" }, "$name: streaming")
-                // Request side: reasoning_split only where asked for (127.0.0.1 is not a MiniMax host).
-                val split = bodies.map { it["reasoning_split"]?.jsonPrimitive?.content }.toSet()
-                val expected = when {
-                    name.endsWith("(reasoning_split)") -> "true"
-                    name.endsWith("(think-tags fallback)") -> "false"
-                    else -> null
-                }
-                assertEquals(setOf(expected), split, "$name: reasoning_split in the requests")
-                // Replay: reasoning never goes back as assistant text.
-                val assistantText = bodies.flatMap { b ->
-                    b["messages"]!!.jsonArray.map { it.jsonObject }.filter { it["role"]?.jsonPrimitive?.content == "assistant" }.map { it["content"].toString() }
-                }
-                assertTrue(assistantText.isNotEmpty(), "$name: later requests replay the earlier turns")
-                assertTrue(assistantText.none { "think>" in it }, "$name: $assistantText")
+                // reasoning_split only where the variant asks for it (127.0.0.1 is not a MiniMax
+                // host), and the replay of inline reasoning as the variant says.
+                assertEquals(emptyList(), OpenAiCompatibleTargets.checkFakeWire(variant, bodies))
+                val replayed = bodies.flatMap { b -> b["messages"]!!.jsonArray.filter { it.jsonObject["role"]?.jsonPrimitive?.content == "assistant" } }
+                println("REPLAY $name: ${replayed.first().jsonObject["content"].toString().take(80)}")
                 // The template default (reasoning: false) keeps the plain system role and no reasoning_effort.
                 assertTrue(bodies.all { b -> b["messages"]!!.jsonArray.none { it.jsonObject["role"]?.jsonPrimitive?.content == "developer" } }, name)
                 assertFalse(bodies.any { "reasoning_effort" in it }, name)

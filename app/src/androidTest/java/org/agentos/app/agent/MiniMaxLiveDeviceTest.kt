@@ -36,7 +36,7 @@ import kotlin.test.assertTrue
  * The real MiniMax endpoint (domestic platform) through the production factory in the `:agent`
  * process: a text turn, a tool call and an abort, for the `minimax-cn` preset and, when given,
  * the same model on another Anthropic-compatible base URL and on MiniMax's OpenAI-compatible
- * endpoint (openai-completions, template and [OpenAiCompatibleTargets.MINIMAX_COMPAT]).
+ * endpoint (openai-completions, the variants of [OpenAiCompatibleTargets]).
  *
  * Credentials: the runner writes `MINIMAX_API_KEY=...` (and optionally
  * `MINIMAX_ANTHROPIC_BASE_URL=...`, `MINIMAX_OPENAI_BASE_URL=...`, `MINIMAX_OPENAI_MODEL=...`) into
@@ -177,9 +177,10 @@ class MiniMaxLiveDeviceTest {
     }
 
     /**
-     * The OpenAI Chat Completions route of [realEndpointTextToolAndAbort] (both variants of
+     * The OpenAI Chat Completions route of [realEndpointTextToolAndAbort] (all variants of
      * [OpenAiCompatibleTargets]) through the same code, against the in-process fake endpoint:
-     * no key needed, runs on every device run.
+     * no key needed, runs on every device run. The requests of each variant carry reasoning_split
+     * and the replayed reasoning as the variant says ([OpenAiCompatibleTargets.checkFakeWire]).
      */
     @Test
     fun openAiRouteAgainstFakeEndpoint() = runBlocking<Unit> {
@@ -188,9 +189,15 @@ class MiniMaxLiveDeviceTest {
             val hostPort = FakeHostPort(credentials = mapOf(server.openaiBaseUrl to server.key))
             val factory = PiAgentCores.create(Device.context, hostPort)
             val seen = StringBuilder()
-            for ((name, model) in OpenAiCompatibleTargets.targets(catalog, server.openaiBaseUrl, OpenAiCompatibleTargets.FAKE_THINK_TAGS_MODEL)) {
-                runTarget(factory, "fake $name", model.toModelSpec(), fake, seen, expectThinking = true)
+            val wireFailures = mutableListOf<String>()
+            for (variant in OpenAiCompatibleTargets.targets(catalog, server.openaiBaseUrl, OpenAiCompatibleTargets.FAKE_THINK_TAGS_MODEL)) {
+                val n0 = server.requests.size
+                runTarget(factory, "fake ${variant.name}", variant.model.toModelSpec(), fake, seen, expectThinking = true)
+                val failed = OpenAiCompatibleTargets.checkFakeWire(variant, server.requests.drop(n0).map { it.body })
+                Log.i(Device.TAG, "fake ${variant.name}: wire ${if (failed.isEmpty()) "ok" else failed.joinToString()}")
+                wireFailures += failed
             }
+            assertEquals(emptyList(), wireFailures)
             assertTrue(server.requests.all { it.api == "openai" && it.presentedKeyKind == "real" }, "OpenAI route, key injected by HostFetch")
             synchronized(hostPort.log.lines) { hostPort.log.lines.forEach { seen.append(it) } }
             assertFalse(server.key in seen.toString(), "the key appears in messages, events or logs")
