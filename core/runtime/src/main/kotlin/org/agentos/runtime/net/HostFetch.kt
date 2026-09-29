@@ -1,12 +1,16 @@
 package org.agentos.runtime.net
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -15,6 +19,8 @@ import org.agentos.runtime.ports.Credential
 import org.agentos.runtime.ports.SecretPort
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Connection
+import okhttp3.EventListener
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -90,23 +96,38 @@ class HostFetchException(
     cause: Throwable? = null,
 ) : IOException(message, cause) {
     val retryable: Boolean get() = kind.retryable
+
+    /** Requests sent for this fetch before it failed, retries included (diagnostics). */
+    var attempts: Int = 1
+        internal set
 }
 
-/** HTTP status classification, aligned with the retry rules of the pinned Anthropic / OpenAI SDKs. */
+/**
+ * HTTP statuses the egress retries (core/contracts/errors.md, section 4): the ones classified as
+ * model_timeout (408), model_rate_limited (425, 429) and model_unavailable (5xx, including
+ * Anthropic's 529 overloaded). Everything else (400, 401/403, 402, 409, 413, ...) is final.
+ */
 object HttpStatusPolicy {
     fun isRetryable(status: Int): Boolean =
-        status == 408 || status == 409 || status == 429 || status in 500..599
+        status == 408 || status == 425 || status == 429 || status in 500..599
 }
 
 /**
  * Host-side retry, applied only before a response head is handed to JS: nothing has been
  * streamed yet, so retrying cannot duplicate output. pi-ai and the SDKs run with
- * `maxRetries: 0`; this is the only retry in the model path.
+ * `maxRetries: 0`; this is the only retry in the model path (errors.md, section 4).
  *
- * - transport errors with [NetErrorKind.retryable] and HTTP 408 / 409 / 429 / 5xx are retried;
- * - `retry-after-ms` / `retry-after` (seconds or HTTP date) are honoured up to [maxRetryAfterMs];
- *   a longer server-requested delay returns the response as is;
- * - no retry starts if it would end after [deadline] (epoch ms, per request; null = none).
+ * - retried: [HttpStatusPolicy] statuses; model_network transport failures (connect, DNS, reset,
+ *   unexpected end before the head); timeouts only while connecting (before a connection was
+ *   acquired: a timeout waiting for the head may mean the provider is already working on it);
+ * - never retried: TLS failures, auth / quota / bad request statuses, cancellation, a revoked key;
+ * - backoff: [initialBackoffMs] doubled per attempt, up to [maxBackoffMs], plus up to 25 % jitter
+ *   upwards (so never shorter than the rule); `retry-after-ms` / `retry-after` (seconds or HTTP
+ *   date) takes precedence up to [maxRetryAfterMs], a longer server-requested delay returns the
+ *   response as is;
+ * - budget: no retry starts if its wait would end after [deadline] (epoch ms, per request; null =
+ *   none) or more than [maxTotalMs] after the first attempt started (0 = none). The task deadline
+ *   itself is enforced by cancellation: the scheduler aborts the turn, which cancels a pending wait.
  */
 class RetryPolicy(
     val maxAttempts: Int = 1,
@@ -114,6 +135,7 @@ class RetryPolicy(
     val maxBackoffMs: Long = 8_000,
     val maxRetryAfterMs: Long = 60_000,
     val deadline: (FetchRequest) -> Long? = { null },
+    val maxTotalMs: Long = 0,
 ) {
     init {
         require(maxAttempts >= 1) { "maxAttempts must be >= 1" }
@@ -122,8 +144,37 @@ class RetryPolicy(
     companion object {
         /** One attempt, no retry. */
         val NONE = RetryPolicy(maxAttempts = 1)
+
+        /**
+         * The production policy (errors.md, section 4): exponential backoff from 1 s up to 30 s,
+         * `retry-after` first (up to 60 s), at most 2 minutes per request including all waits.
+         * [maxAttempts] is high enough that the time budget is what ends it.
+         */
+        val DEFAULT = RetryPolicy(
+            maxAttempts = 10,
+            initialBackoffMs = 1_000,
+            maxBackoffMs = 30_000,
+            maxRetryAfterMs = 60_000,
+            maxTotalMs = 120_000,
+        )
     }
 }
+
+/**
+ * One retry about to happen, for logs and diagnostics. Carries no key and no query string:
+ * [endpoint] is scheme, host, port and path of the request URL.
+ */
+class RetryNotice(
+    val sessionId: String?,
+    val endpoint: String,
+    /** The attempt that just failed (1 = the first request). */
+    val attempt: Int,
+    /** "HTTP 529", or the transport failure kind ("network", "connect", "timeout", ...). */
+    val reason: String,
+    val waitMs: Long,
+    /** True when [waitMs] comes from the server's retry-after header. */
+    val serverRequested: Boolean,
+)
 
 /** A response whose head has arrived. Read the body with [read]; [cancel] closes the connection. */
 class FetchResponse internal constructor(
@@ -209,7 +260,8 @@ class FetchResponse internal constructor(
  *   retries at the transport level (`retryOnConnectionFailure(false)`);
  * - allows cleartext http only to loopback hosts ([isLoopback]: local model servers, tests, `adb reverse`);
  * - classifies failures as retryable / non-retryable ([NetErrorKind], [HttpStatusPolicy]) and
- *   retries only per [retry] (default: no retry);
+ *   retries before the head reaches JS only per [retry] (default [RetryPolicy.NONE]; the app uses
+ *   [RetryPolicy.DEFAULT]), reporting each retry to [onRetry];
  * - cuts off calls whose key is revoked (architecture F9 "清除 = 立即作废", second layer): it
  *   subscribes to [SecretPort.revocations] when constructed, before any request, remembers which
  *   [Credential] object each open call carries, and cancels the matching calls when that object is
@@ -229,12 +281,32 @@ class HostFetch(
     private val clock: () -> Long = System::currentTimeMillis,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
     private val random: Random = Random.Default,
+    /** Called before each retry wait (logs, diagnostics). Must not block. */
+    private val onRetry: (RetryNotice) -> Unit = {},
 ) : Closeable {
     private val client: OkHttpClient = client.newBuilder()
         .retryOnConnectionFailure(false)
         .followRedirects(false)
         .followSslRedirects(false)
+        // Marks whether an attempt got past connecting (TCP + TLS): decides if a timeout is retried.
+        .eventListenerFactory { call ->
+            val phase = call.request().tag(AttemptPhase::class.java)
+            if (phase == null) {
+                EventListener.NONE
+            } else {
+                object : EventListener() {
+                    override fun connectionAcquired(call: Call, connection: Connection) {
+                        phase.connected = true
+                    }
+                }
+            }
+        }
         .build()
+
+    /** Per attempt: set once OkHttp has a connection for it. */
+    private class AttemptPhase {
+        @Volatile var connected: Boolean = false
+    }
 
     private val startedCount = AtomicInteger()
     private val retriedCount = AtomicInteger()
@@ -251,6 +323,9 @@ class HostFetch(
     internal inner class KeyUse(val credential: Credential) {
         @Volatile var revoked: Boolean = false
         @Volatile var call: Call? = null
+
+        /** Completed on revocation: wakes a retry wait early. */
+        val revokedSignal: CompletableDeferred<Unit> = CompletableDeferred()
 
         fun cancelCall() {
             call?.let { runCatching { it.cancel() } }
@@ -284,7 +359,10 @@ class HostFetch(
             while (recentlyRevoked.size > RECENTLY_REVOKED) recentlyRevoked.removeFirst()
             inUse.filter { it.credential === credential }.onEach { it.revoked = true }
         }
-        hit.forEach { it.cancelCall() }
+        hit.forEach {
+            it.cancelCall()
+            it.revokedSignal.complete(Unit)
+        }
     }
 
     private fun track(credential: Credential): KeyUse = synchronized(keyLock) {
@@ -338,15 +416,18 @@ class HostFetch(
             ?: if (method in BODY_METHODS) ByteArray(0).toRequestBody(contentType?.toMediaTypeOrNull()) else null
         builder.method(method, body)
         val okRequest = builder.build()
+        val endpoint = url.newBuilder().query(null).fragment(null).build().toString()
 
         val use = key?.let { track(it) }
+        val startedAt = clock()
+        var attempt = 0
         try {
-            var attempt = 0
             while (true) {
                 attempt++
                 if (use?.revoked == true) throw revokedError()
                 startedCount.incrementAndGet()
-                val call = client.newCall(okRequest)
+                val phase = AttemptPhase()
+                val call = client.newCall(okRequest.newBuilder().tag(AttemptPhase::class.java, phase).build())
                 // Publish the call before checking the flag; revoke() sets the flag before reading
                 // the call, so one of the two sides always sees the other.
                 use?.call = call
@@ -356,12 +437,19 @@ class HostFetch(
                 } catch (e: IOException) {
                     if (use?.revoked == true) throw revokedError(e)
                     val error = classify(e)
+                    val retryable = when (error.kind) {
+                        NetErrorKind.NETWORK, NetErrorKind.CONNECT, NetErrorKind.DNS -> true
+                        // A timeout after the connection was acquired happened while waiting for the head:
+                        // the provider may already be working on the request, so it is not repeated.
+                        NetErrorKind.TIMEOUT -> !phase.connected
+                        else -> false
+                    }
                     val wait = backoff(attempt)
-                    if (error.retryable && canRetry(request, attempt, wait)) {
-                        retriedCount.incrementAndGet()
-                        sleep(wait)
+                    if (retryable && canRetry(request, attempt, wait, startedAt)) {
+                        waitBeforeRetry(RetryNotice(request.sessionId, endpoint, attempt, error.kind.name.lowercase(), wait, false), use)
                         continue
                     }
+                    error.attempts = attempt
                     throw error
                 }
                 if (use?.revoked == true) {
@@ -371,10 +459,9 @@ class HostFetch(
                 if (HttpStatusPolicy.isRetryable(response.code) && attempt < retry.maxAttempts) {
                     val serverWait = retryAfterMs(response)
                     val wait = serverWait ?: backoff(attempt)
-                    if ((serverWait == null || serverWait <= retry.maxRetryAfterMs) && canRetry(request, attempt, wait)) {
+                    if ((serverWait == null || serverWait <= retry.maxRetryAfterMs) && canRetry(request, attempt, wait, startedAt)) {
                         response.close()
-                        retriedCount.incrementAndGet()
-                        sleep(wait)
+                        waitBeforeRetry(RetryNotice(request.sessionId, endpoint, attempt, "HTTP ${response.code}", wait, serverWait != null), use)
                         continue
                     }
                 }
@@ -382,8 +469,34 @@ class HostFetch(
             }
         } catch (e: Throwable) {
             use?.release()
+            if (e is HostFetchException && e.kind == NetErrorKind.KEY_REVOKED) e.attempts = attempt.coerceAtLeast(1)
             throw e
         }
+    }
+
+    /**
+     * Reports [notice], then waits [RetryNotice.waitMs]. The wait ends early when the request's key
+     * is revoked (the next loop turn then fails with KEY_REVOKED) and throws when the caller is
+     * cancelled (a JS abort, or the scheduler at the task deadline).
+     */
+    private suspend fun waitBeforeRetry(notice: RetryNotice, use: KeyUse?) {
+        currentCoroutineContext().ensureActive()
+        retriedCount.incrementAndGet()
+        runCatching { onRetry(notice) }
+        if (use == null) {
+            sleep(notice.waitMs)
+        } else {
+            coroutineScope {
+                val sleeping = launch { sleep(notice.waitMs) }
+                val watching = launch {
+                    use.revokedSignal.await()
+                    sleeping.cancel()
+                }
+                sleeping.join()
+                watching.cancel()
+            }
+        }
+        currentCoroutineContext().ensureActive()
     }
 
     private fun revokedError(cause: Throwable? = null) = HostFetchException(NetErrorKind.KEY_REVOKED, KEY_REVOKED_MESSAGE, cause)
@@ -395,16 +508,19 @@ class HostFetch(
         throw HostFetchException(NetErrorKind.NO_CREDENTIAL, "No API key configured for $host")
     }
 
-    private fun canRetry(request: FetchRequest, attempt: Int, waitMs: Long): Boolean {
+    private fun canRetry(request: FetchRequest, attempt: Int, waitMs: Long, startedAt: Long): Boolean {
         if (attempt >= retry.maxAttempts) return false
+        val resumeAt = clock() + waitMs
+        if (retry.maxTotalMs > 0 && resumeAt > startedAt + retry.maxTotalMs) return false
         val deadline = retry.deadline(request) ?: return true
-        return clock() + waitMs < deadline
+        return resumeAt < deadline
     }
 
+    /** [RetryPolicy.initialBackoffMs] · 2^(attempt-1), capped, plus up to 25 % jitter (never above the cap). */
     private fun backoff(attempt: Int): Long {
         val exp = retry.initialBackoffMs * (1L shl (attempt - 1).coerceAtMost(20))
-        val capped = exp.coerceAtMost(retry.maxBackoffMs)
-        return (capped * (0.75 + random.nextDouble() * 0.25)).toLong()
+        val base = exp.coerceAtMost(retry.maxBackoffMs)
+        return (base * (1.0 + random.nextDouble() * 0.25)).toLong().coerceAtMost(retry.maxBackoffMs)
     }
 
     private fun retryAfterMs(response: Response): Long? {
