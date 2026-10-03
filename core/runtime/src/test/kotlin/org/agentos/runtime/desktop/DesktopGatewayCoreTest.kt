@@ -32,6 +32,9 @@ import java.net.ConnectException
 import java.net.InetAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -40,6 +43,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+/** A9 的竞态用例跑多久（修复前的 core 在这段时间里几乎每次都会失败，见用例说明）。 */
+private const val STATUS_RACE_MILLIS = 3_000L
 
 /**
  * W9：电脑端网关的平台无关部分（[DesktopGatewayCore]）经真实 TCP 连接 + 完整的运行时（FakeAgentCore）。
@@ -250,6 +256,42 @@ class DesktopGatewayCoreTest {
         runBlocking { withTimeout(5_000) { while (gateway.connections().isNotEmpty()) delay(10) } }
         gateway.setEnabled(true)
         assertEquals("invalid_token", Raw().pair(token = token).reason())
+    }
+
+    /**
+     * A9：关开关时最后一条连接在另一个线程上关闭、从连接表里移走；同一时刻读状态（设置页的开关、debug 入口的 disable
+     * 都是 setEnabled(false) 之后马上 status()）偶发 NoSuchElementException。每轮带 1 条连接关开关，另一个线程
+     * 同时不停地读 stats()，任何一次抛异常就失败。
+     */
+    @Test
+    fun `reading the status while turning the switch off closes the last connection never fails`() {
+        start()
+        val failure = AtomicReference<Throwable?>()
+        var rounds = 0
+        val deadline = System.nanoTime() + STATUS_RACE_MILLIS * 1_000_000
+        while (System.nanoTime() < deadline && failure.get() == null) {
+            rounds++
+            val (raw, _) = paired()
+            runBlocking { withTimeout(5_000) { while (gateway.connections().isEmpty()) delay(1) } }
+            val stop = AtomicBoolean(false)
+            val reader = thread(name = "status-reader") {
+                while (!stop.get()) {
+                    try {
+                        gateway.stats()
+                    } catch (e: Throwable) {
+                        failure.compareAndSet(null, e)
+                        return@thread
+                    }
+                }
+            }
+            gateway.setEnabled(false)
+            runBlocking { withTimeout(5_000) { while (gateway.stats().connections.isNotEmpty()) delay(1) } }
+            stop.set(true)
+            reader.join()
+            raw.close()
+        }
+        failure.get()?.let { throw AssertionError("stats() failed in round $rounds while the last connection closed", it) }
+        assertTrue(rounds >= 20, "only $rounds rounds")
     }
 
     @Test
