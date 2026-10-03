@@ -25,7 +25,22 @@ object StatusText {
     private fun JsonObject.l(k: String) = (this[k] as? JsonPrimitive)?.longOrNull
     private fun JsonObject.b(k: String) = (this[k] as? JsonPrimitive)?.booleanOrNull
 
-    fun runtime(statusJson: String?): List<Line> {
+    /**
+     * True when the root supervisor has reported in this boot (any state, even "not launched yet"):
+     * the AgentOS module is running as root on this phone. False with no report, or with one stored in
+     * an earlier boot: no module, module disabled, phone not rooted, or not reported yet.
+     */
+    fun supervisorThisBoot(supervisorJson: String?, currentBootCount: Int?): Boolean {
+        val o = parse(supervisorJson) ?: return false
+        if (o.s("state") == null || currentBootCount == null) return false
+        return o.i("boot_count") == currentBootCount
+    }
+
+    /** getRuntimeStatus `foregroundDenied`: the system refused the last foreground start. */
+    fun foregroundDenied(statusJson: String?): Boolean = parse(statusJson)?.b("foregroundDenied") == true
+
+    /** [batteryExempt]: whether the App has the battery optimisation exemption (words the foregroundDenied line). */
+    fun runtime(statusJson: String?, batteryExempt: Boolean = false): List<Line> {
         val o = parse(statusJson) ?: return listOf(Line("运行时", "读不到状态", warn = true))
         val phase = when (o.s("phase")) {
             "STARTING" -> "启动中"
@@ -38,8 +53,17 @@ object StatusText {
             Line("运行时", "$phase（pid ${o.i("pid") ?: "?"}，已运行 ${duration(o.l("uptimeMs") ?: 0)}）"),
             Line("进行中的任务", if (tasks == 0) "无" else "$tasks 个" + if (o.b("foreground") == true) "，前台运行" else ""),
         )
+        if (o.s("foregroundHold") == "desktop_access") {
+            // no task, but kept in the foreground for desktop access (F11 item 4, RuntimeLifecycle rule 6);
+            // foregroundHold is the reason, "foreground" whether the service actually is in the foreground
+            lines += if (o.b("foreground") == true) {
+                Line("保持前台", "为电脑端接入保持前台")
+            } else {
+                Line("保持前台", "电脑端接入需要保持前台，但现在不在前台", warn = true)
+            }
+        }
         if (o.b("foregroundDenied") == true) {
-            lines += Line("前台服务", "系统拒绝了前台启动，由监督进程代为拉起；建议在首次引导里允许忽略电池优化", warn = true)
+            lines += Line(BatteryText.DENIED_LABEL, BatteryText.denied(batteryExempt), warn = !batteryExempt)
         }
         return lines
     }

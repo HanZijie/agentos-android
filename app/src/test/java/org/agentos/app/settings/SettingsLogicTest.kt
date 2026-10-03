@@ -125,11 +125,56 @@ class SettingsLogicTest {
         assertEquals("关闭", Desktop.summary(Desktop.parseAccess("""{"enabled":false,"listening":false,"pairings":[],"connections":[]}""")))
         assertEquals("482913", Desktop.parseCode("""{"code":"482913","expiresAtMs":5,"ttlMs":300000}""").code)
         assertEquals("请先打开电脑端接入", Desktop.errorText("agentos.desktop.disabled: off"))
+        // F11 item 4 (M1): ask for the battery optimisation exemption only while desktop access is on and it is missing
+        assertTrue(Desktop.needsBatteryExemption(enabled = true, exempt = false))
+        assertFalse(Desktop.needsBatteryExemption(enabled = true, exempt = true))
+        assertFalse(Desktop.needsBatteryExemption(enabled = false, exempt = false))
+        // runtime status: held in the foreground for desktop access; a refused foreground start is flagged
+        val held = StatusText.runtime("""{"pid":7,"phase":"READY","tasks":0,"foreground":true,"foregroundHold":"desktop_access","foregroundDenied":false,"uptimeMs":1000}""")
+        assertTrue(held.any { it.value == "为电脑端接入保持前台" })
+        val plain = StatusText.runtime("""{"pid":7,"phase":"READY","tasks":0,"foreground":false,"foregroundHold":null,"foregroundDenied":true,"uptimeMs":1000}""")
+        assertFalse(plain.any { it.value == "为电脑端接入保持前台" })
+        // the hold is a reason, not the fact: held but refused is a warning, not "kept in the foreground"
+        val heldNotForeground = StatusText.runtime("""{"tasks":0,"foreground":false,"foregroundHold":"desktop_access","foregroundDenied":true}""")
+        assertTrue(heldNotForeground.single { it.label == "保持前台" }.let { it.warn && it.value.contains("不在前台") })
+        val denied = plain.single { it.label == BatteryText.DENIED_LABEL }
+        assertTrue(denied.warn)
+        assertTrue(denied.value.contains("任务可能被暂停") && denied.value.contains("忽略电池优化"))
+        val deniedButExempt = StatusText.runtime("""{"foregroundDenied":true}""", batteryExempt = true).single { it.label == BatteryText.DENIED_LABEL }
+        assertFalse(deniedButExempt.warn)
+        assertTrue(StatusText.foregroundDenied("""{"foregroundDenied":true}"""))
+        assertFalse(StatusText.foregroundDenied("""{"foregroundDenied":false}"""))
+        // acp-bridge pair is the way to connect; a bare adb forward is explained as not enough
+        assertTrue(Desktop.HOW_TO.indexOf("acp-bridge pair") in 0 until Desktop.HOW_TO.indexOf("adb forward"))
+        assertEquals("node tools/acp-bridge/acp-bridge.mjs pair 482913", Desktop.pairCommand("482913"))
         // F11 item 4: the note next to the switch must use the same words as C's foreground notification
         assertEquals("电脑端接入已开启", Desktop.NOTIFICATION_TITLE)
         assertEquals("关闭", Desktop.NOTIFICATION_ACTION)
         assertTrue(Desktop.FOREGROUND_NOTE.contains("常驻通知“电脑端接入已开启”"))
         assertTrue(Desktop.FOREGROUND_NOTE.contains("用完记得关闭"))
+    }
+
+    @Test
+    fun securityTextOnlyClaimsRootWhenTheSupervisorReportedThisBoot() {
+        val thisBoot = """{"protocol":1,"state":"stopped","reason":"not_launched","seq":1,"boot_count":12}"""
+        val oldBoot = """{"protocol":1,"state":"ok","reason":"runtime_up","seq":9,"boot_count":11}"""
+        assertTrue(StatusText.supervisorThisBoot(thisBoot, 12))
+        assertFalse("stored in an earlier boot", StatusText.supervisorThisBoot(oldBoot, 12))
+        assertFalse("no report", StatusText.supervisorThisBoot("{}", 12))
+        assertFalse("boot count unknown: do not claim", StatusText.supervisorThisBoot(thisBoot, null))
+
+        assertTrue(SecurityText.settings(true).startsWith("这台手机已经 root"))
+        val unknown = SecurityText.settings(false)
+        assertFalse(unknown.contains("这台手机已经 root"))
+        assertTrue(unknown.contains("如果已经 root") && unknown.contains("如果没有 root"))
+
+        assertTrue(SecurityText.welcome(true).contains("这台手机已经 root"))
+        for (r in listOf(false, null)) assertFalse(SecurityText.welcome(r).contains("已经 root"))
+        assertTrue(SecurityText.welcome(false).contains("没有检测到 AgentOS 模块"))
+        // the first-run welcome card follows the same rule
+        val base = Onboarding.Facts(null, null, false, false, false, 0)
+        assertFalse(Onboarding.steps(base)[0].detail.contains("已经 root"))
+        assertTrue(Onboarding.steps(base.copy(rooted = true))[0].detail.contains("这台手机已经 root"))
     }
 
     @Test
@@ -141,7 +186,13 @@ class SettingsLogicTest {
         assertEquals(listOf(Onboarding.Id.NOTIFICATIONS, Onboarding.Id.ASSISTANT, Onboarding.Id.BATTERY), Onboarding.pending(fresh))
         val ready = fresh.copy(modelConfigured = true, modelUsable = true, notificationsGranted = true, batteryExempt = true)
         assertEquals(listOf(Onboarding.Id.ASSISTANT), Onboarding.pending(ready))
-        assertNotNull(steps.first { it.id == Onboarding.Id.WELCOME }.detail.contains("best_effort"))
-        assertTrue(steps.first { it.id == Onboarding.Id.WELCOME }.detail.contains("监督进程"))
+        assertTrue(steps.first { it.id == Onboarding.Id.WELCOME }.detail.contains("best_effort"))
+        // the supervisor is only mentioned as guarding the runtime when it reported this boot
+        assertTrue(Onboarding.steps(fresh.copy(rooted = true)).first { it.id == Onboarding.Id.WELCOME }.detail.contains("监督进程"))
+        // the guide always asks for the battery exemption: the step, and once more on "开始使用" if skipped
+        assertEquals(BatteryText.GUIDE_STEP, steps.first { it.id == Onboarding.Id.BATTERY }.detail)
+        assertTrue(Onboarding.askBatteryOnFinish(fresh, alreadyAsked = false))
+        assertFalse(Onboarding.askBatteryOnFinish(fresh, alreadyAsked = true))
+        assertFalse(Onboarding.askBatteryOnFinish(fresh.copy(batteryExempt = true), alreadyAsked = false))
     }
 }

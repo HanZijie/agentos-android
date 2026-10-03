@@ -7,9 +7,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -74,11 +77,50 @@ class ChatControllerTest {
         assertTrue(c.state.value.busy)
         agent.emit!!(AgentUpdate.MessageChunk("Hi"))
         agent.emit!!(AgentUpdate.MessageChunk(" there"))
+        advanceTimeBy(ChatController.FRAME_MS + 1)
         assertEquals("Hi there", (c.state.value.items.last() as ChatItem.Agent).text)
         agent.finish.complete(TurnOutcome.Finished("end_turn"))
         advanceUntilIdle()
         assertFalse(c.state.value.busy)
         assertEquals(ChatState.Connection.CONNECTED, c.state.value.connection)
+    }
+
+    @Test
+    fun streamedChunksAreAppliedOncePerFrame() = withController { c, agent ->
+        c.send("stream")
+        advanceUntilIdle()
+        val seen = mutableListOf<String>()
+        val watcher = backgroundScope.launch {
+            c.state.collect { s -> (s.items.lastOrNull() as? ChatItem.Agent)?.let { seen += it.text } }
+        }
+        runCurrent()
+        repeat(100) { agent.emit!!(AgentUpdate.MessageChunk("x")) }
+        agent.emit!!(AgentUpdate.ThoughtChunk("hm"))
+        agent.emit!!(AgentUpdate.ThoughtChunk("m"))
+        runCurrent()
+        assertTrue("nothing applied inside the frame", c.state.value.items.none { it is ChatItem.Agent })
+        advanceTimeBy(ChatController.FRAME_MS + 1)
+        runCurrent()
+        val agentItem = c.state.value.items.last() as ChatItem.Agent
+        assertEquals("x".repeat(100), agentItem.text)
+        assertEquals("hmm", agentItem.thought)
+        assertEquals("one state for the whole frame", listOf("x".repeat(100)), seen)
+        watcher.cancel()
+    }
+
+    @Test
+    fun aToolCallFlushesPendingTextFirst() = withController { c, agent ->
+        c.send("tool")
+        advanceUntilIdle()
+        agent.emit!!(AgentUpdate.MessageChunk("before"))
+        agent.emit!!(AgentUpdate.ToolCallStarted("t1", "fs_read", null, ToolStatus.PENDING, null))
+        // no frame wait: the tool call applies the text before it
+        val items = c.state.value.items
+        assertEquals("before", (items[items.size - 2] as ChatItem.Agent).text)
+        assertEquals("t1", (items.last() as ChatItem.Tool).callId)
+        agent.finish.complete(TurnOutcome.Finished("end_turn"))
+        advanceUntilIdle()
+        assertFalse(c.state.value.busy)
     }
 
     @Test
