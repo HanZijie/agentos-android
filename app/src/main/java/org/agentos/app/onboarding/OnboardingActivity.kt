@@ -6,9 +6,7 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.os.PowerManager
 import android.provider.Settings
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -18,8 +16,11 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.agentos.app.R
 import org.agentos.app.settings.AgentControlClient
+import org.agentos.app.settings.Battery
+import org.agentos.app.settings.BatteryText
 import org.agentos.app.settings.Byok
 import org.agentos.app.settings.ModelSourceActivity
+import org.agentos.app.settings.StatusText
 import org.agentos.app.ui.Ui
 
 /**
@@ -32,6 +33,9 @@ class OnboardingActivity : Activity() {
     private lateinit var column: LinearLayout
     private var scope: CoroutineScope? = null
     private var model: Byok.Source? = null
+    private var rooted: Boolean? = null
+    /** The battery exemption was asked on "开始使用" in this visit (asked at most once). */
+    private var askedBattery = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,7 +49,17 @@ class OnboardingActivity : Activity() {
         render()
         scope = MainScope().also { s ->
             s.launch {
-                model = runCatching { AgentControlClient(this@OnboardingActivity).use { Byok.parseSource(it.modelSource) } }.getOrNull()
+                runCatching {
+                    AgentControlClient(this@OnboardingActivity).use { c ->
+                        val bootCount = Settings.Global.getInt(contentResolver, Settings.Global.BOOT_COUNT, -1).takeIf { it >= 0 }
+                        model = Byok.parseSource(c.modelSource)
+                        rooted = when {
+                            StatusText.supervisorThisBoot(c.supervisorStatus, bootCount) -> true
+                            StatusText.supervisorMissing(c.diagnostics) -> false
+                            else -> null
+                        }
+                    }
+                }
                 render()
             }
         }
@@ -62,8 +76,9 @@ class OnboardingActivity : Activity() {
         modelUsable = model?.usable,
         notificationsGranted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
         assistantHeld = getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true,
-        batteryExempt = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName),
+        batteryExempt = Battery.isExempt(this),
         pluginCount = 0, // M3a: Extension Host discovery
+        rooted = rooted,
     )
 
     private fun render() {
@@ -89,9 +104,7 @@ class OnboardingActivity : Activity() {
             Onboarding.Id.MODEL -> startActivity(Intent(this, ModelSourceActivity::class.java))
             Onboarding.Id.NOTIFICATIONS -> requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
             Onboarding.Id.ASSISTANT -> open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
-            Onboarding.Id.BATTERY -> open(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")),
-            )
+            Onboarding.Id.BATTERY -> Battery.request(this)
             else -> Unit
         }
     }
@@ -110,6 +123,16 @@ class OnboardingActivity : Activity() {
     }
 
     private fun finishGuide() {
+        if (Onboarding.askBatteryOnFinish(facts(), askedBattery)) {
+            askedBattery = true
+            android.app.AlertDialog.Builder(this)
+                .setTitle(BatteryText.GUIDE_DIALOG_TITLE)
+                .setMessage(BatteryText.GUIDE_DIALOG_MESSAGE)
+                .setPositiveButton("去允许") { _, _ -> Battery.request(this) } // back here afterwards; "开始使用" then leaves
+                .setNegativeButton("以后再说") { _, _ -> finishGuide() }
+                .show()
+            return
+        }
         markDone(this)
         finish()
     }

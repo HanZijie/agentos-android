@@ -73,6 +73,15 @@ class AgentUpdateAndErrorsTest {
         val revoked = AgentErrors.fromRpc(-32051, "model_not_configured: revoked", "model_not_configured", false, reason = "key_revoked")
         assertEquals("模型 key 已在设置中清除，这一轮已停止", revoked.title)
         assertEquals("model_not_configured", revoked.code)
+
+        // B6: the network exit retried before giving up; details.attempts counts all attempts
+        val network = AgentErrors.fromRpc(-32051, "model_network: connect", "model_network", true, attempts = 7)
+        assertEquals("连不上模型服务", network.title)
+        assertEquals("检查网络后再试（已自动重试，共尝试 7 次）", network.hint)
+        assertTrue(network.retryable)
+        assertEquals("检查网络后再试", AgentErrors.fromRpc(-32051, "x", "model_network", true, attempts = 1).hint)
+        val limited429 = AgentErrors.fromRpc(-32051, "429", "model_rate_limited", true, retryAfterSeconds = 90, attempts = 3)
+        assertEquals("约 90 秒后再发（已自动重试，共尝试 3 次）", limited429.hint)
     }
 
     @Test

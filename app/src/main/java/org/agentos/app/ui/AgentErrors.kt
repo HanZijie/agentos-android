@@ -71,6 +71,8 @@ object AgentErrors {
     /**
      * From a JSON-RPC error of `session/prompt` or another request. [reason] is `data.details.reason`
      * (architecture F9: `model_not_configured` with `key_revoked` = the key was cleared during this turn).
+     * [attempts] is `data.details.attempts`: the network exit retried the model request before giving up
+     * (errors.md, B6); more than one attempt is added to the hint so "try again later" is not a surprise.
      */
     fun fromRpc(
         rpcCode: Int,
@@ -79,6 +81,21 @@ object AgentErrors {
         retryable: Boolean?,
         retryAfterSeconds: Long? = null,
         reason: String? = null,
+        attempts: Int? = null,
+    ): AgentError {
+        val e = fromRpcCode(rpcCode, message, agentosCode, retryable, retryAfterSeconds, reason)
+        if (attempts == null || attempts <= 1) return e
+        val tried = "已自动重试，共尝试 $attempts 次"
+        return e.copy(hint = e.hint?.let { "$it（$tried）" } ?: tried)
+    }
+
+    private fun fromRpcCode(
+        rpcCode: Int,
+        message: String?,
+        agentosCode: String?,
+        retryable: Boolean?,
+        retryAfterSeconds: Long?,
+        reason: String?,
     ): AgentError {
         if (agentosCode == "model_not_configured" && reason == "key_revoked") {
             return AgentError("模型 key 已在设置中清除，这一轮已停止", "到设置页重新选择模型厂商并填写 key", false, agentosCode)

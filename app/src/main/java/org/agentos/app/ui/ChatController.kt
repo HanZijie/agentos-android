@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,14 +17,22 @@ import kotlinx.coroutines.Dispatchers
  * rotation keeps the conversation; the Activity only renders [state] and forwards input.
  * All state changes go through [ChatReducer]; this class adds the ordering rules:
  * one turn at a time, cancel only while a turn runs, new conversation only when idle.
+ *
+ * Streamed text is coalesced: message and thought chunks are applied at most once per [frameMs]
+ * (a model can send hundreds of small chunks a second; the screen re-renders and re-parses Markdown
+ * per state). Anything else (tool calls, the end of the turn) first applies the pending text, so the
+ * order on screen is unchanged. Everything runs on the main thread.
  */
 class ChatController(
     private val agent: AgentConnection,
     private val scope: CoroutineScope,
+    private val frameMs: Long = FRAME_MS,
 ) {
     private val _state = MutableStateFlow(ChatState())
     val state: StateFlow<ChatState> = _state.asStateFlow()
     private var turnJob: Job? = null
+    private val pending = ArrayList<AgentUpdate>()
+    private var flushJob: Job? = null
 
     init {
         scope.launch {
@@ -37,7 +46,8 @@ class ChatController(
         if (trimmed.isEmpty() || _state.value.busy) return false
         _state.update { ChatReducer.userSent(it, trimmed) }
         turnJob = scope.launch {
-            val outcome = agent.prompt(trimmed) { u -> _state.update { ChatReducer.update(it, u) } }
+            val outcome = agent.prompt(trimmed) { u -> onUpdate(u) }
+            flush()
             if (agent.consumeSessionReplaced()) {
                 _state.update {
                     ChatReducer.notice(it, ChatItem.Notice.Kind.INFO, "已开始新的会话", "之前的会话在运行时重启后不再可用")
@@ -46,6 +56,40 @@ class ChatController(
             _state.update { ChatReducer.finished(it, outcome) }
         }
         return true
+    }
+
+    private fun onUpdate(u: AgentUpdate) {
+        when (u) {
+            is AgentUpdate.MessageChunk, is AgentUpdate.ThoughtChunk -> {
+                val last = pending.lastOrNull()
+                when {
+                    last is AgentUpdate.MessageChunk && u is AgentUpdate.MessageChunk -> pending[pending.lastIndex] = AgentUpdate.MessageChunk(last.text + u.text)
+                    last is AgentUpdate.ThoughtChunk && u is AgentUpdate.ThoughtChunk -> pending[pending.lastIndex] = AgentUpdate.ThoughtChunk(last.text + u.text)
+                    else -> pending += u
+                }
+                if (flushJob == null) {
+                    flushJob = scope.launch {
+                        delay(frameMs)
+                        flushJob = null
+                        flush()
+                    }
+                }
+            }
+            else -> {
+                flush()
+                _state.update { ChatReducer.update(it, u) }
+            }
+        }
+    }
+
+    /** Applies the coalesced chunks now. */
+    private fun flush() {
+        flushJob?.cancel()
+        flushJob = null
+        if (pending.isEmpty()) return
+        val batch = pending.toList()
+        pending.clear()
+        _state.update { s -> batch.fold(s) { acc, u -> ChatReducer.update(acc, u) } }
     }
 
     /** `session/cancel`; the turn ends when the runtime answers with stop reason `cancelled`. */
@@ -74,6 +118,7 @@ class ChatController(
      */
     fun onScreenFinished() {
         val wasBusy = _state.value.busy
+        flush()
         turnJob?.cancel()
         agent.close()
         if (wasBusy) {
@@ -88,6 +133,9 @@ class ChatController(
     }
 
     companion object {
+        /** One screen update per 50 ms at most while text streams (about three display frames). */
+        const val FRAME_MS = 50L
+
         @Volatile private var instance: ChatController? = null
 
         /** Process-wide instance (main process). */

@@ -45,6 +45,7 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        foregroundRetried = false
         scope = MainScope().also { it.launch { reload() } }
     }
 
@@ -52,6 +53,15 @@ class SettingsActivity : Activity() {
         scope?.cancel()
         scope = null
         super.onPause()
+    }
+
+    /**
+     * Pulling down the notification shade does not pause the page, but the shade can change what it shows
+     * (the desktop-access notification's "关闭" turns the switch off): read again when the window is back.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) reloadLater()
     }
 
     private suspend fun reload() {
@@ -72,7 +82,19 @@ class SettingsActivity : Activity() {
             Snapshot(0, null, null, null, null, null, "连不上 AgentOS 运行时（${e.javaClass.simpleName}）")
         }
         render(snap)
+        // Desktop access is on but the runtime's foreground start was refused (started in the background without
+        // the battery exemption): ask again now, while this page makes the App's UID foreground, which the
+        // system allows. Turning the switch "on" again changes nothing (same pairings, same code) but makes
+        // the runtime request the foreground once more (RuntimeLifecycle.onHoldChanged). Once per visit.
+        if (!foregroundRetried && snap.desktop?.enabled == true && StatusText.foregroundDenied(snap.runtime)) {
+            foregroundRetried = true
+            runCatching { control.use { it.setDesktopAccessEnabled(true) } }
+            reload()
+        }
     }
+
+    /** The foreground was asked for again in this visit (see [reload]). */
+    private var foregroundRetried = false
 
     private fun render(s: Snapshot) {
         column.removeAllViews()
@@ -109,21 +131,27 @@ class SettingsActivity : Activity() {
             }
         })
 
-        // ---- security level (principle 6)
+        // ---- security level (principle 6): "rooted" only when the root supervisor reported this boot
+        val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+            .takeIf { it >= 0 }
         column.addView(Ui.sectionTitle(this, "安全等级"))
         column.addView(Ui.card(this).apply {
-            addView(Ui.line(context, "等级", "best_effort（尽力而为）"))
-            addView(Ui.paragraph(context, SECURITY_TEXT))
+            addView(Ui.line(context, "等级", SecurityText.LEVEL))
+            addView(Ui.paragraph(context, SecurityText.settings(StatusText.supervisorThisBoot(s.supervisor, bootCount))))
         })
 
         // ---- runtime and supervisor
+        val exempt = Battery.isExempt(this)
         column.addView(Ui.sectionTitle(this, "运行与监督"))
         column.addView(Ui.card(this).apply {
-            if (s.runtime != null) StatusText.runtime(s.runtime).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
-            val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
-            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount.takeIf { it >= 0 })
+            if (s.runtime != null) StatusText.runtime(s.runtime, exempt).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
+            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount)
                 .forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
-            addView(Ui.buttons(context, "刷新" to { scope?.launch { reload() } }))
+            val actions = mutableListOf<Pair<CharSequence, () -> Unit>>("刷新" to { reloadLater() })
+            if (!exempt && StatusText.foregroundDenied(s.runtime)) {
+                actions.add(0, (BatteryText.ACTION as CharSequence) to { Battery.request(this@SettingsActivity) })
+            }
+            addView(Ui.buttons(context, *actions.toTypedArray()))
         })
 
         // ---- desktop access (F11, W9)
@@ -142,8 +170,16 @@ class SettingsActivity : Activity() {
                     isChecked = d.enabled
                     contentDescription = "电脑端接入"
                     setOnCheckedChangeListener { sw, on ->
-                        if (on || (d.pairings.isEmpty() && d.connections == 0)) {
-                            desktop { it.setDesktopAccessEnabled(on) }
+                        if (on) {
+                            desktop { it.setDesktopAccessEnabled(true) }
+                            // F11 item 4: without the exemption the runtime may not get back to the foreground
+                            if (!Battery.isExempt(this@SettingsActivity)) {
+                                confirm(BatteryText.DESKTOP_DIALOG_TITLE, BatteryText.DESKTOP_DIALOG_MESSAGE, "去允许", cancelLabel = "暂不") {
+                                    Battery.request(this@SettingsActivity)
+                                }
+                            }
+                        } else if (d.pairings.isEmpty() && d.connections == 0) {
+                            desktop { it.setDesktopAccessEnabled(false) }
                         } else {
                             // turning it off disconnects every computer and voids all pairings (IAgentControl v3)
                             confirm(
@@ -157,6 +193,10 @@ class SettingsActivity : Activity() {
                 })
             })
             addView(Ui.paragraph(context, Desktop.FOREGROUND_NOTE))
+            if (Desktop.needsBatteryExemption(d.enabled, exempt)) {
+                addView(Ui.line(context, BatteryText.DENIED_LABEL, BatteryText.DESKTOP_WARNING, warn = true))
+                addView(Ui.buttons(context, BatteryText.ACTION to { Battery.request(this@SettingsActivity) }))
+            }
             if (d.enabled) {
                 addView(Ui.paragraph(context, Desktop.HOW_TO))
                 d.pairings.forEach { p ->
@@ -211,12 +251,19 @@ class SettingsActivity : Activity() {
             .show()
     }
 
-    private fun confirm(title: String, message: String, action: String, onCancel: () -> Unit = {}, onConfirm: () -> Unit) {
+    private fun confirm(
+        title: String,
+        message: String,
+        action: String,
+        cancelLabel: String = "取消",
+        onCancel: () -> Unit = {},
+        onConfirm: () -> Unit,
+    ) {
         AlertDialog.Builder(this)
             .setTitle(title)
             .setMessage(message)
             .setPositiveButton(action) { _, _ -> onConfirm() }
-            .setNegativeButton("取消") { _, _ -> onCancel() }
+            .setNegativeButton(cancelLabel) { _, _ -> onCancel() }
             .setOnCancelListener { onCancel() }
             .show()
     }
@@ -242,9 +289,13 @@ class SettingsActivity : Activity() {
                 val code = Desktop.parseCode(control.use { it.newDesktopPairingCode() })
                 // round up: a 5-minute code read a moment later should still say 5, not 4
                 val minutes = ((code.expiresAtMs - System.currentTimeMillis() + 59_999) / 60_000).coerceAtLeast(1)
+                val command = Desktop.pairCommand(code.code)
                 AlertDialog.Builder(this@SettingsActivity)
-                    .setTitle("配对码")
-                    .setMessage("${code.code}\n\n在电脑端第一次连接时输入。约 $minutes 分钟内有效，配对成功或输错 5 次后作废。")
+                    .setTitle("配对码 ${code.code}")
+                    .setMessage(
+                        "电脑用 USB 连上手机，在 AgentOS 仓库目录里运行：\n\n$command\n\n" +
+                            "约 $minutes 分钟内有效，配对成功或输错 5 次后作废。配对之后，把 acp-bridge 设为 ACP 客户端的 Agent 命令即可。",
+                    )
                     .setPositiveButton("好", null)
                     .show()
             } catch (e: Exception) {
@@ -252,13 +303,5 @@ class SettingsActivity : Activity() {
             }
             reload()
         }
-    }
-
-    companion object {
-        const val SECURITY_TEXT =
-            "这台手机已经 root，其他获得 root 权限的应用可以读取 AgentOS 的全部数据，包括加密前后的 key、对话和日志。\n\n" +
-                "AgentOS 能做的是：key 用 Android Keystore 加密保存，只在发出模型请求的那一刻注入，不写进日志、诊断和通知；" +
-                "Agent 的代码不以 root 运行，模型和插件接触不到 root。但它防不住拥有 root 权限的应用。" +
-                "请只给信任的应用授予 root 权限。"
     }
 }

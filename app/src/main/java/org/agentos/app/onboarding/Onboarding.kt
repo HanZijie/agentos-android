@@ -1,5 +1,8 @@
 package org.agentos.app.onboarding
 
+import org.agentos.app.settings.BatteryText
+import org.agentos.app.settings.SecurityText
+
 /**
  * First-run guide (F2 step 3, W8): what each step shows and whether it is done, from facts the
  * Activity collects. Pure Kotlin (OnboardingTest). Every step can be skipped; only the model is
@@ -19,6 +22,8 @@ object Onboarding {
         val assistantHeld: Boolean,
         val batteryExempt: Boolean,
         val pluginCount: Int?,
+        /** true: the root supervisor reported this boot; false: 30 s of runtime without a report; null: not known yet. */
+        val rooted: Boolean? = null,
     )
 
     data class Step(val id: Id, val title: String, val detail: String, val done: Boolean?, val action: String?)
@@ -27,9 +32,7 @@ object Onboarding {
         Step(
             Id.WELCOME, "欢迎使用 AgentOS",
             "AgentOS 是常驻在这台手机上的 Agent 服务：本 App 和其他 App 都能通过 ACP 调用它，模型用你自己的 key。\n\n" +
-                "安全等级：best_effort（尽力而为）。手机已经 root，其他获得 root 权限的应用可以读取 AgentOS 的数据（包括 key），" +
-                "AgentOS 只能尽力保护，详见设置页。\n\n" +
-                "你现在打开了 App，AgentOS 模块的监督进程从此开始守护运行时：有任务时被系统杀掉会自动拉起。",
+                SecurityText.welcome(f.rooted),
             done = true, action = null,
         ),
         Step(
@@ -55,8 +58,8 @@ object Onboarding {
             done = f.assistantHeld, action = if (f.assistantHeld) null else "打开系统设置",
         ),
         Step(
-            Id.BATTERY, "允许在后台运行",
-            "忽略电池优化后，任务在后台和灭屏时更不容易被系统中断。",
+            Id.BATTERY, "允许忽略电池优化",
+            BatteryText.GUIDE_STEP,
             done = f.batteryExempt, action = if (f.batteryExempt) null else "允许",
         ),
         Step(
@@ -71,4 +74,10 @@ object Onboarding {
 
     /** Steps still worth the user's attention (not done, and not informational). */
     fun pending(f: Facts): List<Id> = steps(f).filter { it.done == false }.map { it.id }
+
+    /**
+     * The guide always asks for the battery optimisation exemption (architecture F2 step 3, F11 item 4): if the
+     * step was skipped, "开始使用" asks once more before leaving; answering "later" there ends the guide.
+     */
+    fun askBatteryOnFinish(f: Facts, alreadyAsked: Boolean): Boolean = !f.batteryExempt && !alreadyAsked
 }

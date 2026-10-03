@@ -40,8 +40,10 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import org.agentos.acp.AcpServiceContract
@@ -249,14 +251,20 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
         }
     }
 
+    /** `data` of an AgentOS error (errors.md); read defensively, a malformed field is just absent. */
     private fun rpcError(e: JsonRpcException): AgentError {
+        fun JsonObject?.prim(key: String) = this?.get(key) as? JsonPrimitive
         val data = e.data as? JsonObject
-        val code = data?.get("agentosCode")?.jsonPrimitive?.contentOrNull
-        val retryable = data?.get("retryable")?.jsonPrimitive?.booleanOrNull
         val details = data?.get("details") as? JsonObject
-        val retryAfter = details?.get("retryAfterSeconds")?.jsonPrimitive?.longOrNull
-        val reason = details?.get("reason")?.jsonPrimitive?.contentOrNull
-        return AgentErrors.fromRpc(e.code, e.message, code, retryable, retryAfter, reason)
+        return AgentErrors.fromRpc(
+            rpcCode = e.code,
+            message = e.message,
+            agentosCode = data.prim("agentosCode")?.contentOrNull,
+            retryable = data.prim("retryable")?.booleanOrNull,
+            retryAfterSeconds = details.prim("retryAfterSeconds")?.longOrNull,
+            reason = details.prim("reason")?.contentOrNull,
+            attempts = details.prim("attempts")?.intOrNull,
+        )
     }
 
     /** bindService to the App's own AcpService in :agent, suspending until connected. */
