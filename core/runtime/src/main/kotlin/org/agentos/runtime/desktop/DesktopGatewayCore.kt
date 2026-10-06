@@ -157,7 +157,7 @@ class DesktopGatewayCore(
         n
     }
 
-    fun connections(): List<DesktopConnectionInfo> = conns.values.sortedBy { it.id }.map { it.info() }
+    fun connections(): List<DesktopConnectionInfo> = conns.values.snapshot().sortedBy { it.id }.map { it.info() }
 
     fun stats(): DesktopGatewayStats = DesktopGatewayStats(
         enabled = pairing.enabled,
@@ -174,7 +174,7 @@ class DesktopGatewayCore(
         pendingHandshakes = pending.get(),
         handshakeTimeouts = handshakeTimeouts.get(),
         handshakeFailures = handshakeFailures.mapValues { it.value.get() }.toSortedMap(),
-        recentCloses = recentCloses.toList(),
+        recentCloses = recentCloses.snapshot(),
     )
 
     /** 进程退出前：停止监听、断开连接（不改开关和配对）。 */
@@ -399,6 +399,15 @@ data class DesktopConnectionInfo(
 )
 
 data class DesktopCloseRecord(val id: Int, val pairingId: String, val aliveMillis: Long, val reason: String)
+
+/**
+ * 并发集合（ConcurrentHashMap 的视图、ConcurrentLinkedDeque）的一份快照，之后再排序、转换。
+ *
+ * 不要直接对它们用 `toList()`、`sortedBy`、`first()` 这类扩展：Kotlin 对大小 ≤ 1 的集合先读 `size`、再 `iterator().next()`，
+ * 两步之间另一个线程移走了唯一的元素就抛 NoSuchElementException（A9：关开关时最后一条连接在 IO 线程上关闭、移出连接表，
+ * 同时 setEnabled(false) 之后的 status() 在读它）。`ArrayList(collection)` 走 `toArray()`，并发修改时也不会抛。
+ */
+internal fun <T> Collection<T>.snapshot(): List<T> = ArrayList(this)
 
 /** 诊断信息：不含配对码、令牌和消息内容。 */
 data class DesktopGatewayStats(

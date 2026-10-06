@@ -3,6 +3,7 @@ package org.agentos.app.agent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import org.json.JSONObject
@@ -48,6 +49,9 @@ class DesktopGatewayDebugReceiver : BroadcastReceiver() {
                 }
             }
         } catch (e: Exception) {
+            // 完整堆栈进 logcat（A9：只有 “NoSuchElementException” 一个词时查不出是哪一行）。电脑端接入的异常消息里
+            // 没有配对码和令牌；配对码只在正常返回的 result data 里
+            Log.w(TAG, "debug op $op failed", e)
             JSONObject().put("ok", false).put("error", e.message ?: e.javaClass.simpleName)
         }
         resultCode = if (result.optBoolean("ok")) RESULT_OK_CODE else RESULT_ERROR_CODE
@@ -55,6 +59,7 @@ class DesktopGatewayDebugReceiver : BroadcastReceiver() {
     }
 
     companion object {
+        private const val TAG = "DesktopGatewayDebug"
         const val RESULT_OK_CODE = 1
         const val RESULT_ERROR_CODE = 2
     }

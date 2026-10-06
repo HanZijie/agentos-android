@@ -14,6 +14,7 @@ import org.agentos.runtime.acp.LineTransportStats
 import org.agentos.runtime.desktop.DesktopConnectionInfo
 import org.agentos.runtime.desktop.DesktopEndpoint
 import org.agentos.runtime.desktop.DesktopGatewayCore
+import org.agentos.runtime.desktop.DesktopGatewayStats
 import org.agentos.runtime.desktop.DesktopListener
 import org.agentos.runtime.desktop.DesktopListenerFactory
 import org.agentos.runtime.desktop.DesktopPairing
@@ -89,22 +90,21 @@ class DesktopGateway(private val process: AgentProcess) {
     fun connections(): List<DesktopConnectionInfo> = core.connections()
 
     /** 给设置页：开关、是否在监听、监听失败原因、配对码到期时间、已配对的电脑、当前连接。不含配对码和令牌。 */
-    fun status(): JSONObject {
-        val s = core.stats()
-        return JSONObject()
-            .put("enabled", s.enabled)
-            .put("listening", s.listening)
-            .put("socket", SOCKET_NAME)
-            .put("listenError", s.listenError ?: JSONObject.NULL)
-            .put("code", s.code?.let { JSONObject().put("expiresAtMs", it.expiresAtMillis).put("attemptsLeft", it.attemptsLeft) } ?: JSONObject.NULL)
-            .put("pairings", JSONArray(core.pairing.pairings().map { it.toJson() }))
-            .put("connections", JSONArray(s.connections.map { it.toJson() }))
-    }
+    fun status(): JSONObject = status(core.stats())
 
-    /** 诊断（AgentProcess.diagnostics 的 `desktop`）：不含配对码、令牌和消息内容。 */
+    private fun status(s: DesktopGatewayStats): JSONObject = JSONObject()
+        .put("enabled", s.enabled)
+        .put("listening", s.listening)
+        .put("socket", SOCKET_NAME)
+        .put("listenError", s.listenError ?: JSONObject.NULL)
+        .put("code", s.code?.let { JSONObject().put("expiresAtMs", it.expiresAtMillis).put("attemptsLeft", it.attemptsLeft) } ?: JSONObject.NULL)
+        .put("pairings", JSONArray(core.pairing.pairings().map { it.toJson() }))
+        .put("connections", JSONArray(s.connections.map { it.toJson() }))
+
+    /** 诊断（AgentProcess.diagnostics 的 `desktop`）：不含配对码、令牌和消息内容。状态和计数来自同一份快照。 */
     fun stats(): JSONObject {
         val s = core.stats()
-        return status()
+        return status(s)
             .put("accepted", s.accepted)
             .put("served", s.served)
             .put("closed", s.closed)
