@@ -152,7 +152,9 @@ class HostFetch(
     }
 
     fun abortAll() {
-        for (id in active.keys.toList()) abort(id)
+        // Snapshot the live concurrent-key view via toArray(); keys.toList() can read size=1 and
+        // then observe an empty iterator when the sole request finishes between those operations.
+        for (id in ArrayList(active.keys)) abort(id)
     }
 
     private fun finish(reqId: Long) {
