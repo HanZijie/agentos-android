@@ -337,7 +337,9 @@ class PiRuntime(
         pending.clear()
         timers.values.forEach { it.complete("cancelled") }
         timers.clear()
-        fetches.keys.toList().forEach { abortFetch(it) }
+        // ConcurrentHashMap.keys is a live view. ArrayList uses toArray() for the snapshot; unlike
+        // Kotlin's toList() fast path, it cannot observe size=1 followed by an empty iterator.
+        ArrayList(fetches.keys).forEach { abortFetch(it) }
         commands.close()
     }
 

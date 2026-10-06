@@ -224,6 +224,18 @@ class PiRuntimeTest {
     }
 
     @Test
+    fun `concurrent fetch key snapshot does not use the fragile toList fast path`() {
+        // Models the exact race: ConcurrentHashMap.keys still reports one entry while its sole
+        // request has already been removed before the iterator is consumed.
+        val raced = object : java.util.AbstractCollection<Long>() {
+            override val size get() = 1
+            override fun iterator(): MutableIterator<Long> = mutableListOf<Long>().iterator()
+        }
+        assertFailsWith<NoSuchElementException> { raced.toList() }
+        assertEquals(emptyList<Long>(), ArrayList(raced))
+    }
+
+    @Test
     fun `memory usage is available while the pump runs`() = runBlocking<Unit> {
         val rt = runtime(Recorder())
         rt.start(bundle())
