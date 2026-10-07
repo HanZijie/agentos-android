@@ -35,7 +35,11 @@ acp-channel 的 in-app 执行器（ext-e2e 场景）让真实运行时调用插�
   ./gradlew --max-workers=2 :app:assembleDebug :tests:device:mcp-plugin:plugin:assembleDebug \\
       :tests:device:acp-channel:client:assembleDebug -Pagentos.skipPiBundle=true
   ANDROID_SERIAL=emulator-5572 python3 tests/device/mcp-plugin/run.py --serial emulator-5572 [--only a,b] [--label x]
-      [--no-install] [--no-clear] [--skip-rotation] [--idle-wait 40]
+      [--no-install] [--no-clear | --clear] [--skip-rotation] [--idle-wait 40]
+
+  pm clear：模拟器上默认清（从首次发现开始）；**真机默认不清**（会抹掉模型源和配对），要清必须显式 --clear。
+  主机上找不到 apksigner / keytool 时 signature 用例自动跳过。
+  不清数据时 discover 的“默认关闭”等检查取决于设备上原有的状态。
 """
 import argparse
 import json
@@ -509,10 +513,12 @@ def run_e2e(c, name, args, mode, tool, expect_prompt, expect_answer=None):
     new = entries[before:]
     prompted = bool(new)
     answer_ok = expect_answer is None or (prompted and new[-1].get("answeredWith") == expect_answer)
-    no_always = all("ALWAYS_ALLOW" not in e.get("options", []) for e in new)
+    # “始终允许”（ApprovalWriter 经 IExtensionHost 写回，C7b）：写级工具提供、高风险不提供；自动应答从不选它（测试不改用户策略）
+    always_rule = all(("ALWAYS_ALLOW" in e.get("options", [])) == (e.get("risk") == "WRITE") for e in new)
+    never_picked = all(e.get("answeredWith") != "ALWAYS_ALLOW" for e in new)
     r.setdefault("checks", {})
     r["checks"].update({"consentModeSet": set_mode.get("ok") is True, "consentAsExpected": prompted == expect_prompt,
-                        "consentAnswer": answer_ok, "noAlwaysAllowOffered": no_always})
+                        "consentAnswer": answer_ok, "alwaysAllowOnlyForWrite": always_rule, "alwaysAllowNeverPicked": never_picked})
     r["consent"] = new[-3:]
     r["ok"] = bool(r.get("ok")) and all(r["checks"].values())
     r["summary"] = f"{r.get('summary', '')} consent={[(e.get('risk'), e.get('answeredWith'), e.get('options')) for e in new]}"
@@ -574,11 +580,16 @@ def case_e2e_disabled(c):
 
 
 def build_tools():
+    """apksigner（最新的 build-tools）与 JDK 21 的 keytool；找不到返回 (None, None)。"""
     root = os.path.expanduser("~/Library/Android/sdk/build-tools")
+    if not os.path.isdir(root):
+        return None, None
     versions = sorted(os.listdir(root), key=lambda v: [int(x) if x.isdigit() else 0 for x in re.split(r"[.-]", v)])
-    apksigner = os.path.join(root, versions[-1], "apksigner")
+    apksigner = os.path.join(root, versions[-1], "apksigner") if versions else None
     java_home = subprocess.run(["/usr/libexec/java_home", "-v", "21"], capture_output=True, text=True).stdout.strip()
-    return apksigner, os.path.join(java_home, "bin", "keytool")
+    keytool = os.path.join(java_home, "bin", "keytool") if java_home else None
+    ok = apksigner and os.path.exists(apksigner) and keytool and os.path.exists(keytool)
+    return (apksigner, keytool) if ok else (None, None)
 
 
 def rotated_apk(src):
@@ -663,6 +674,8 @@ def case_policy_corrupt(c):
 def case_signature(c):
     if c.args.skip_rotation:
         return {"ok": True, "skipped": True, "summary": "skipped (--skip-rotation)"}
+    if build_tools()[0] is None:
+        return {"ok": True, "skipped": True, "summary": "skipped (apksigner / keytool not found on this host)"}
     c.ensure_enabled()
     digest0 = (c.plugin() or {}).get("signingDigest")
     apk, work = rotated_apk(plugin_apk())
@@ -734,7 +747,9 @@ def main():
     ap.add_argument("--only", help="逗号分隔的用例名")
     ap.add_argument("--label", default="")
     ap.add_argument("--no-install", action="store_true")
-    ap.add_argument("--no-clear", action="store_true", help="不清 AgentOS 的数据（默认 pm clear，从首次发现开始）")
+    ap.add_argument("--no-clear", action="store_true", help="不清 AgentOS 的数据")
+    ap.add_argument("--clear", action="store_true",
+                    help="清 AgentOS 的数据（pm clear，从首次发现开始）。模拟器上默认清；真机默认不清（会抹掉模型源和配对），要清必须显式给这个参数")
     ap.add_argument("--skip-rotation", action="store_true")
     ap.add_argument("--idle-wait", type=int, default=40, help="空闲回收用例等待的秒数（Extension Host 是 30 秒）")
     a = ap.parse_args()
@@ -746,8 +761,12 @@ def main():
         acp.install(adb, os.path.join(ACP, "client", "build", "outputs", "apk", "debug", "client-debug.apk"))
         adb.run("uninstall", PLUGIN_PKG, check=False, timeout=120)
         install_plugin(adb)
-    if not a.no_clear:
+    emulator = adb.prop("ro.kernel.qemu") == "1" or adb.prop("ro.boot.qemu") == "1"
+    clear = a.clear or (emulator and not a.no_clear)
+    if clear:
         adb.sh(f"pm clear {APP_PKG}", check=False)
+    else:
+        print(f"keeping AgentOS data ({'--no-clear' if a.no_clear else 'real device: pass --clear to wipe'})", flush=True)
     adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
     adb.sh("wm dismiss-keyguard", check=False)
     device = {"serial": a.serial, "model": adb.prop("ro.product.model"), "sdk": adb.prop("ro.build.version.sdk"),
