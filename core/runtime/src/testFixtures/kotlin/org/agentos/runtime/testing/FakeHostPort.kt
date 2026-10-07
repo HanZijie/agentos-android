@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.agentos.runtime.errors.ErrorCode
+import org.agentos.runtime.broker.ApprovalPolicy
+import org.agentos.runtime.ports.ApprovalPolicyPort
 import org.agentos.runtime.ports.CatalogTool
 import org.agentos.runtime.ports.Clock
 import org.agentos.runtime.ports.ConsentDecision
@@ -24,7 +26,10 @@ import org.agentos.runtime.ports.ModelSpec
 import org.agentos.runtime.ports.RuntimeLog
 import org.agentos.runtime.ports.SafeModeState
 import org.agentos.runtime.ports.SecretPort
+import org.agentos.runtime.ports.SkillCatalog
+import org.agentos.runtime.ports.SkillContent
 import org.agentos.runtime.ports.SkillPort
+import org.agentos.runtime.ports.SkillSummary
 import org.agentos.runtime.ports.StoragePort
 import org.agentos.runtime.ports.ToolCatalog
 import org.agentos.runtime.ports.ToolInvocation
@@ -32,6 +37,7 @@ import org.agentos.runtime.ports.ToolInvocationResult
 import org.agentos.runtime.ports.ToolPort
 import org.agentos.runtime.ports.ToolResult
 import org.agentos.runtime.ports.ToolRisk
+import org.agentos.runtime.ports.ToolSource
 import java.io.File
 import java.nio.file.Files
 import java.util.Collections
@@ -53,10 +59,10 @@ class ManualClock(start: Long = 1_700_000_000_000L) : Clock {
 }
 
 /** 内存里的工具目录：测试注册工具实现，或让某个工具返回 NotDispatched / Unknown。 */
-class FakeToolPort : ToolPort {
+open class FakeToolPort : ToolPort {
     private val impls = mutableMapOf<String, suspend (ToolInvocation) -> ToolInvocationResult>()
     private val _catalog = MutableStateFlow(ToolCatalog.EMPTY)
-    override val catalog: StateFlow<ToolCatalog> = _catalog
+    override val catalog: StateFlow<ToolCatalog> get() = _catalog
 
     /** 按发生顺序记录的调用。 */
     val invocations: MutableList<ToolInvocation> = Collections.synchronizedList(mutableListOf())
@@ -65,17 +71,18 @@ class FakeToolPort : ToolPort {
         name: String,
         risk: ToolRisk = ToolRisk.READ,
         inputSchema: JsonObject = OBJECT_SCHEMA,
+        source: ToolSource? = null,
         impl: suspend (ToolInvocation) -> ToolInvocationResult,
     ) = synchronized(this) {
         impls[name] = impl
         val tools = _catalog.value.tools.filter { it.name != name } +
-            CatalogTool(name, "fake tool $name", inputSchema, risk, provider = "fake")
+            CatalogTool(name, "fake tool $name", inputSchema, risk, provider = "fake", source = source)
         _catalog.value = ToolCatalog(_catalog.value.version + 1, tools)
     }
 
     /** 注册一个直接返回结果的工具。 */
-    fun registerSimple(name: String, risk: ToolRisk = ToolRisk.READ, impl: suspend (JsonObject) -> ToolResult) =
-        register(name, risk) { ToolInvocationResult.Completed(impl(it.arguments)) }
+    fun registerSimple(name: String, risk: ToolRisk = ToolRisk.READ, source: ToolSource? = null, impl: suspend (JsonObject) -> ToolResult) =
+        register(name, risk, source = source) { ToolInvocationResult.Completed(impl(it.arguments)) }
 
     fun unregister(name: String) = synchronized(this) {
         impls.remove(name)
@@ -91,6 +98,44 @@ class FakeToolPort : ToolPort {
 
     companion object {
         val OBJECT_SCHEMA: JsonObject = buildJsonObject { put("type", "object") }
+    }
+}
+
+/** 内存里的 Skill：测试注册 Skill（id → 内容和附属文件），读取时路径不在里面就抛 NoSuchElementException。 */
+class FakeSkillPort : SkillPort {
+    private val flow = MutableStateFlow(SkillCatalog.EMPTY)
+    private val files = mutableMapOf<String, Map<String, String>>()
+    override val catalog: StateFlow<SkillCatalog> = flow
+
+    /** 读这些 Skill 时报告“已截断”。 */
+    val truncated: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
+
+    /** 注册一个 Skill：[files] 的键是相对 Skill 目录的路径，`SKILL.md` 必须有。 */
+    fun register(id: String, description: String, provider: String = "fake", files: Map<String, String>) {
+        this.files[id] = files
+        flow.value = SkillCatalog(flow.value.version + 1, flow.value.skills.filter { it.id != id } + SkillSummary(id, id.substringAfter(':'), description, provider))
+    }
+
+    fun unregister(id: String) {
+        files.remove(id)
+        flow.value = SkillCatalog(flow.value.version + 1, flow.value.skills.filter { it.id != id })
+    }
+
+    override suspend fun read(skillId: String, path: String?): SkillContent {
+        val skill = files[skillId] ?: throw NoSuchElementException("unknown skill: $skillId")
+        val rel = if (path.isNullOrEmpty()) "SKILL.md" else path
+        require(!rel.startsWith("/") && ".." !in rel.split('/')) { "invalid path" }
+        return SkillContent(skill[rel] ?: throw NoSuchElementException("no such file in skill $skillId: $rel"), skillId in truncated)
+    }
+}
+
+/** 内存里的用户工具策略：测试直接改 [policy]。 */
+class FakeApprovalPolicyPort(initial: ApprovalPolicy = ApprovalPolicy.DEFAULT) : ApprovalPolicyPort {
+    private val flow = MutableStateFlow(initial)
+    override val policy: StateFlow<ApprovalPolicy> = flow
+
+    fun update(change: (ApprovalPolicy) -> ApprovalPolicy) {
+        flow.value = change(flow.value)
     }
 }
 
@@ -131,7 +176,8 @@ class FakeHostPort(
     override val tools: FakeToolPort = FakeToolPort(),
     override val consent: FakeConsentPort = FakeConsentPort(),
     override val hooks: FakeHookPort = FakeHookPort(),
-    override val skills: SkillPort = SkillPort.NONE,
+    override val approvals: FakeApprovalPolicyPort = FakeApprovalPolicyPort(),
+    override val skills: FakeSkillPort = FakeSkillPort(),
     override val clock: ManualClock = ManualClock(),
     override val log: CollectingLog = CollectingLog(),
     databaseFile: File = Files.createTempDirectory("agentos-store").resolve("agent.db").toFile(),

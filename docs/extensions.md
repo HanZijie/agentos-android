@@ -71,7 +71,7 @@ my-plugin/
 
 - 只认根目录的 `plugin.json`。`$schema` 和 `name` 必填：
   - `$schema` 固定为 `https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`；
-  - `name` 最长 64 个字符，只能用小写字母、数字、`.`、`-`，不能出现 `--` 或 `..`。
+  - `name` 最长 64 个字符，只能用小写字母、数字、`.`、`-`，首尾必须是字母或数字，不能出现 `--` 或 `..`（以固定的 schema 为准，`ManifestReader` 的测试逐项核对）。
 - Skills 固定放在 `skills/`，MCP 固定放在 `mcp.json`，这是 Agent Plugins 的可移植约定。
 - 客户端专属的内容放在 `extensions` 下，按反向域名分区。规范不规定分区里的内容：
   - `extensions."com.openai"`：读取 `hooks` 和 `interface`（显示名、图标、简介，用于插件页展示），忽略 `apps`；
@@ -166,7 +166,15 @@ AgentOS 这一侧：
 
 - 在 Manifest 的 `<queries>` 里声明这个 action，否则 Android 11 及以上看不到其他 App；
 - 用 `queryIntentServices(org.agentos.intent.action.PLUGIN)` 找候选，再通过 `createPackageContext(包名, 0).assets` 读取插件包。**这一步不 bind**；
-- 插件身份记录为“包名 + 签名证书摘要 + versionCode”。签名变化时插件被停用，需要用户重新确认；App 卸载后插件自动移除，已有的连接和授权全部撤销；
+- 插件身份记录为“包名 + 签名证书摘要 + versionCode”（实现：`core/extensions` 的 `registry/PluginScanLogic`，纯函数，A8）。规则：
+  - **签名变化**：变化的那一次发出 `SignatureChanged` 和 `Revoke`（关闭该插件已有的 MCP 连接），用户策略清空并停用，插件状态为“需要重新确认”，没有可用服务器。用户确认（`confirmSignature`）后插件恢复为可用，但**仍然停用**，要再启用一次（整合人 2026-10-07 确认：安全优先；插件页把“确认”和“启用”做在同一个对话框里）。签名变回之前信任过的那一个时自动恢复。自带插件免重新确认。
+  - **升级**（versionCode 变、签名不变）：重新读清单，保留用户策略；升级后改名则清掉旧名字的策略并撤销旧连接。
+  - **卸载**：插件自动移除，已有的连接和授权全部撤销，策略清掉；
+  - **第三方插件默认关闭**（plugin 级 `enabled=false`，不覆盖用户已写的值）；自带插件例外；
+  - **声明了服务器却一个都不能用**（三项检查：属于本包、已导出、要求 `BIND_MCP_SERVICE`，任一项不满足就拒绝这个服务器）、并且没有 Skills 和 Hooks 时，整个插件标为不可用（`NO_USABLE_SERVER`）；还有可用的 https 远端服务器、或只有 Skills / Hooks 的插件正常；
+  - 清单被拒绝、assets 缺失、名字冲突的插件以“不可用”保留在注册表里，带原因和全部问题，插件页显示；
+  - 插件名唯一（自带 > 原来的主人 > id 小的，与扫描顺序无关），`user.` 前缀保留给用户配置的 MCP；一个 App 有多个 assets 目录时每个目录是独立插件（id = 包名/目录）；
+  - 注册表记忆（`PersistedRegistry`，JSON version=1）读不出来时**不能当空继续**（空记忆 = 把当前签名当可信）：调用方只传 `previous = null`（从来没有过记忆文件的首次运行传 `PersistedRegistry.EMPTY`，文件存在但读不出来才传 `null`），所有第三方插件按“签名未确认”处理（状态 `SIGNATURE_UNCONFIRMED`、没有可用服务器、策略清空并停用，发 `MemoryLost` 和每个插件一条 `Revoke`），自带插件不受影响；确认后恢复可用但仍停用，流程同签名变化；
 - `extensions."org.agentos".mcpServers` 里的每个 Service 都必须属于本包、已导出、要求 `BIND_MCP_SERVICE`，任何一项不满足就拒绝这个服务器。
 
 `org.agentos.permission.BIND_MCP_SERVICE` 由 AgentOS App 定义，保护级别是 signature，只有 AgentOS 自己持有。所以提供插件的 App 不需要和 AgentOS 用同一个证书，而其他 App 也 bind 不了它的 MCP 服务。
@@ -215,16 +223,16 @@ interface IMcpService {                   // 提供插件的 App 导出，要求
 
 规则：
 
-- 单条消息上限与 ACP 相同（初定 128 KiB，S3 测定后冻结）。图片等大内容用 `content://` URI 并临时授予读权限，由 Extension Host 读取后按需压缩，再交给运行时。
+- 单条消息上限与 ACP 相同（65,536 字符，S3 定参，见 binder-channel-v1）；单个工具结果编码后超过上限时，SDK 把它换成一个 `isError` 结果。图片等大内容用 `content://` URI 并临时授予读权限，由 Extension Host 读取后按需压缩，再交给运行时。
 - 插件 App 每次调用 `IChannel.send` 时，Extension Host 用 `Binder.getCallingUid()` 校验它等于这个 App 的 UID。
-- **连接生命周期**：第一次用到时 `bindService(BIND_AUTO_CREATE)` → `open` → MCP 初始化 → `tools/list` 并缓存（收到 `tools/list_changed` 时刷新）→ 空闲 30 秒后 `close` 并 unbind，App 进程可以被系统回收。
+- **连接生命周期**（实现：`core/extensions` 的 `host/ExtensionToolHost`，纯 JVM，A9；Android 侧只有连接器 `BinderMcpConnector`）：启用后、开机后、注册表或策略变化后，对没有缓存的可用服务器先 `bindService(BIND_AUTO_CREATE)` → `open` → MCP 初始化 → `tools/list` 取一次并缓存（收到 `tools/list_changed` 或重连后刷新）；空闲 30 秒（没有在途调用）后 `close` 并 unbind，App 进程可以被系统回收，下次用到时重连。**连不上或 App 进程死亡时，缓存的工具仍留在目录里，调用被拒绝（确定没发出）；从没连成功过的服务器不列出工具。**连接失败后 30 秒内不自动重试，只在 `refreshNow(force)` 和调用时重试；运行时在任务开始前调 `refreshNow`（有等待上限），已有缓存的服务器不会因此重连。
 - **App 进程死亡**：通过 `linkToDeath` 感知。进行中的调用返回错误；已经发出、结果未知的，按 [architecture.md](architecture.md) F8 标为“结果未知”；下次用到时重新连接。
-- **SDK**：两端都用官方 MCP Kotlin SDK。`McpBinderTransport` 在 `binder-channel` 上实现 SDK 的 Transport 接口，Extension Host（客户端）和 `plugin-sdk` 的 `McpBinderService`（服务端）共用它。
-- **协议版本**：MCP 协议修订版本和 SDK 版本在 S5 一起固定。2026-07-28 修订版改动较大（去掉了协议层会话，改为每个请求自带元数据）；一条 Binder 通道天然对应一次连接，按 SDK 支持的修订版实现生命周期即可。
+- **实现**：**不引入官方 MCP Kotlin SDK**（S5 结论，见 [spikes/S5.md](spikes/S5.md)：它每个还在维护的版本都要求 kotlinx-serialization ≥ 1.9.0、kotlinx-io ≥ 0.8，与 ACP 0.30.1 共用并锁定的 1.7.3 / 0.5.4 冲突；唯一兼容的 0.4.0 太旧，还把 Ktor 服务端带进每个插件 App）。`sdk/plugin-sdk` 自己实现 MCP 的 tools 子集：`McpBinderTransport` 在 `binder-channel` 上收发 JSON-RPC，Extension Host 一侧的 `McpBinderClient` 和插件 App 一侧的 `McpBinderService` 共用同一套编码。
+- **协议版本**：实现 2025-06-18 修订版，兼容 2025-03-26、2024-11-05（`initialize` 协商）。2026-07-28 修订版改动较大（去掉了协议层会话，改为每个请求自带元数据）；一条 Binder 通道天然对应一次连接，将来升级只改 `plugin-sdk` 的生命周期部分，公开接口不变。
 
 ### 5.2 远端：Streamable HTTP
 
-- 用 MCP Kotlin SDK 的 `StreamableHttpClientTransport`，底层 HTTP 引擎用 Ktor 的 OkHttp 引擎；版本在 S5 选定。
+- 用现有的 OkHttp 自己实现 Streamable HTTP 客户端（W19；S5 结论：不引入 MCP Kotlin SDK 和 Ktor）。
 - 只允许 `https://`，按系统默认方式校验证书；不支持 OAuth。
 - 请求头里的凭据来自 Keystore 加密存储，不写进插件包、日志、事件和模型输入。
 - 断线后按退避重连；正在进行的调用按“结果未知”处理，不自动重放。
@@ -236,9 +244,18 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 
 工具名格式为 `mcp__<插件名>__<服务器名>__<工具名>`，并做以下处理，以兼容各家模型 API 对工具名的限制：
 
-- 只保留 `[A-Za-z0-9_-]`，插件名里的 `.` 换成 `_`；
-- 总长超过 64 个字符时截断，再加 6 位哈希后缀，保证唯一；
+- 不在 `[A-Za-z0-9_-]` 里的字符（包括插件名里的 `.`）一律换成 `_`，保留单词边界，不删除字符（整合人 2026-10-07 确认）；
+- 工具名对**所有已知工具**（含被用户策略禁用的）一起算，所以用户来回启用 / 禁用某个工具不会让别的工具改名；
+- 总长超过 64 个字符时截断，再加 6 位哈希后缀，保证唯一；哈希取自插件名、服务器名、原始工具名的原文；
+- 目录内重名的工具**全部**加后缀（不偏袒任何一个），结果只取决于目录的内容、与顺序无关；仍然重名时哈希从 6 位加长到 8 / 12 / 16 / 24 位。规则见 `ToolNaming.assign`，要拿整个目录一起算。目录里新增一个会撞名的工具，会让原来不带后缀的那个改名：用户策略按（插件、服务器、原始工具名）记，不受影响，只有按工具名写的 Hook `matcher` 会受影响；
 - Hook 的 `matcher` 按处理后的最终名字匹配。
+
+工具的风险等级与结果规则（`ExtensionToolHost`）：
+
+- 风险等级用 `RiskPolicy.effectiveRisk`：`destructiveHint` → 高风险；**自带插件**的 `readOnlyHint=true` 声明为“读”（自带插件由 AgentOS 自己签名，信任它的注解；整合人 2026-10-07 确认），其余来源的 `readOnlyHint` 不降低等级；
+- 目录限额：描述截 1,024 字符、title 截 128、单个服务器最多 128 个工具、schema 超过 16,384 字符的工具不列出；重名或空名的工具丢弃；
+- 结果：`isError` 原样保留，服务端回的 JSON-RPC 错误也作为 `isError` 结果交回模型；文字和图片原样，其他内容类型换成一句“省略了 <类型> 内容”；文字超过 32,768 字符时截断并加说明，总长不超过上限，所以 `CapabilityBroker.afterExecute` 不会再截一次；
+- 每个服务器同时在途的调用上限 8，超过的排队，排队时间计入调用方自己的超时。
 
 工具描述和返回结果都来自第三方，一律当作不可信输入处理。
 
@@ -336,7 +353,7 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 
 ## 9. 与运行时的接口
 
-运行时（`:agent`）用 `BIND_AUTO_CREATE` 绑定 Extension Host 的 `IExtensionHost`，并注册一个 `IExtensionCallback`。两个接口都不导出，服务端校验调用方 UID 等于本 App。
+运行时（`:agent`）用 `BIND_AUTO_CREATE` 绑定 Extension Host 的 `IExtensionHost`，并注册一个 `IExtensionCallback`。两个接口都不导出，服务端校验调用方 UID 等于本 App。`:ext` 里 `mcp/` 部分的纯 JVM 主体是 `core/extensions/host/ExtensionToolHost`（实现 `ToolPort`：目录、连接生命周期、调用的三种结局、撤销处理），`:agent` 侧的 `ToolPort` 是 `IExtensionHost` 的薄代理；用户策略只在 `:ext` 里有一个 `ApprovalStore` 作唯一写入方，`:agent` 的 `HostPort.approvals` 是镜像（收到第一份策略之前 fail closed），执行时 `ExtensionToolHost` 还会再查一次策略。
 
 | 方法 / 回调 | 方向 | 用途 |
 |---|---|---|
@@ -395,7 +412,8 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 
 | 位置 | 内容 |
 |---|---|
-| `app/src/main/java/org/agentos/app/ext/` | Extension Host（`:ext` 进程）：`registry/`、`policy/`、`mcp/`、`skills/`、`hooks/`、`runner/`、`ExtensionHostService` |
+| `core/extensions/` | 扩展的纯逻辑（JVM）：`ManifestReader`、`ToolNaming`、`registry/`（`PluginScanLogic`、`PersistedRegistry`、`ApprovalStore`，A7 / A8）；依赖 `core:runtime`（取 `ApprovalPolicy`），反向没有依赖 |
+| `app/src/main/java/org/agentos/app/ext/` | Extension Host（`:ext` 进程）：`registry/`（`AppPluginScanner` 只是 PackageManager → `InstalledAppView` 的薄适配层）、`policy/`（只剩文件路径与接线）、`mcp/`、`skills/`、`hooks/`、`runner/`、`ExtensionHostService` |
 | `app/src/main/aidl/org/agentos/internal/` | `IExtensionHost`、`IExtensionCallback` |
 | `app/src/main/java/org/agentos/app/builtin/`、`app/src/main/assets/agent-plugin/` | AgentOS 自带插件 |
 | `runner/` | Runner APK |
@@ -414,7 +432,7 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 | 项目 | 说明 |
 |---|---|
 | S4：插件 App 的发现与 Binder 连接 | 读取对方 App 的 assets、后台 bind、跨进程往返、`linkToDeath`、没有权限的 App bind 失败 |
-| S5：MCP Kotlin SDK 在 Android 上 | 编译、D8、R8；`McpBinderTransport`；连一个真实的远端 Streamable HTTP 服务；固定 SDK 版本、MCP 协议修订版，以及与 ACP SDK 共用的 Kotlin / Ktor 版本 |
+| S5：MCP Kotlin SDK 在 Android 上 | **结论：不引入官方 SDK，自写 tools 子集**（C7a；Binder 部分已验证：JVM、API 36 跨进程、R8 release）；远端 Streamable HTTP 未做，W19 用 OkHttp 实现 |
 | S6：Runner | 普通 App UID 下用 `/system/bin/sh` 执行命令；超时和进程组清理；输出上限；读不到 AgentOS 的数据、绑定不了内部服务；`bash` 转发是否可行；一次 Hook 往返的耗时 |
 | 只支持 Streamable HTTP | 只提供旧 HTTP+SSE 传输的远端服务连不上，导入时标为不支持 |
 | 不为插件提供解释器 | `:agent` 里的 QuickJS 只运行 Pi Agent core，不对插件开放。生态里的 stdio MCP 服务，以及依赖 python、node、jq 的 Hook 和 Skill 脚本，在手机上都不能用。导入时标出不支持的部分，Hook 失败进诊断页 |
