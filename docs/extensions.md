@@ -174,7 +174,7 @@ AgentOS 这一侧：
   - **声明了服务器却一个都不能用**（三项检查：属于本包、已导出、要求 `BIND_MCP_SERVICE`，任一项不满足就拒绝这个服务器）、并且没有 Skills 和 Hooks 时，整个插件标为不可用（`NO_USABLE_SERVER`）；还有可用的 https 远端服务器、或只有 Skills / Hooks 的插件正常；
   - 清单被拒绝、assets 缺失、名字冲突的插件以“不可用”保留在注册表里，带原因和全部问题，插件页显示；
   - 插件名唯一（自带 > 原来的主人 > id 小的，与扫描顺序无关），`user.` 前缀保留给用户配置的 MCP；一个 App 有多个 assets 目录时每个目录是独立插件（id = 包名/目录）；
-  - 注册表记忆（`PersistedRegistry`，JSON version=1）读不出来时**不能当空继续**（空记忆 = 把当前签名当可信）：保留上一份，或让所有第三方插件重新确认；
+  - 注册表记忆（`PersistedRegistry`，JSON version=1）读不出来时**不能当空继续**（空记忆 = 把当前签名当可信）：调用方只传 `previous = null`（从来没有过记忆文件的首次运行传 `PersistedRegistry.EMPTY`，文件存在但读不出来才传 `null`），所有第三方插件按“签名未确认”处理（状态 `SIGNATURE_UNCONFIRMED`、没有可用服务器、策略清空并停用，发 `MemoryLost` 和每个插件一条 `Revoke`），自带插件不受影响；确认后恢复可用但仍停用，流程同签名变化；
 - `extensions."org.agentos".mcpServers` 里的每个 Service 都必须属于本包、已导出、要求 `BIND_MCP_SERVICE`，任何一项不满足就拒绝这个服务器。
 
 `org.agentos.permission.BIND_MCP_SERVICE` 由 AgentOS App 定义，保护级别是 signature，只有 AgentOS 自己持有。所以提供插件的 App 不需要和 AgentOS 用同一个证书，而其他 App 也 bind 不了它的 MCP 服务。
