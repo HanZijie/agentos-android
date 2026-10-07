@@ -30,6 +30,7 @@ import org.agentos.app.agent.supervisor.SupervisorStatus
 import org.agentos.app.agent.supervisor.SupervisorStatusReceiver
 import org.agentos.runtime.AgentRuntime
 import org.agentos.runtime.AgentRuntimes
+import org.agentos.runtime.RuntimeConfig
 import org.agentos.runtime.RuntimeEngine
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.pi.ModelCatalog
@@ -66,11 +67,19 @@ class AgentProcess private constructor(val app: Context) {
         catalogSource = { app.assets.open(MODEL_CATALOG_ASSET).bufferedReader().use { ModelCatalog.parse(it.readText()) } },
         log = runtimeLog,
     )
+    /** 自动选会话的 Jev endpoint 和 key（自己的 Keystore 主密钥）；没有 key 时路由回退为新建会话（jev_unconfigured）。 */
+    val jev = JevSources(File(app.filesDir, JEV_DIR), AndroidKeystoreCipher(JevSources.JEV_ALIAS), secrets, runtimeLog)
     val environment = AndroidEnvironment()
-    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog)
+
+    /** Extension Host（`:ext`）的代理：工具目录、调用、用户策略的镜像（C7b，docs/extensions.md 第 9 节）。 */
+    val extensions = ExtensionClient(app, runtimeLog)
+    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals)
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
-    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, PiAgentCores.create(app, hostPort))
+    val engine: RuntimeEngine = AgentRuntimes.create(
+        hostPort, PiAgentCores.create(app, hostPort),
+        RuntimeConfig(jev = ConfiguredJevProvider(jev, secrets)),
+    )
     val runtime: AgentRuntime = engine
     @Volatile private var engineStarted = false
 
@@ -136,6 +145,8 @@ class AgentProcess private constructor(val app: Context) {
     init {
         AcpAndroid.ensureInitialized()
         installCrashHandler()
+        // BIND_AUTO_CREATE：:ext 随 :agent 存活；目录和策略到了之后才有第三方工具（之前 fail closed）
+        extensions.start()
         // 先订阅任务数，再开始恢复：恢复期间登记的任务不会漏掉
         scope.launch(CoroutineName("run-state")) {
             runtime.runState.collect { lifecycle.onTasksChanged() }
@@ -312,6 +323,7 @@ class AgentProcess private constructor(val app: Context) {
                 .put("runState", JSONObject().put("activeTasks", rs.activeTasks).put("queuedTasks", rs.queuedTasks)
                     .put("recoveryPending", rs.recoveryPending).put("core", rs.core.toString())
                     .put("lastError", rs.lastError?.code?.wire ?: JSONObject.NULL)))
+            .put("extensions", extensions.stats())
             .put("startCommands", JSONArray(startCommands.toList()))
             .put("lastExit", lastExit ?: JSONObject.NULL)
             .put("heartbeat", JSONObject()
@@ -380,6 +392,7 @@ class AgentProcess private constructor(val app: Context) {
 
         /** BYOK 模型来源（明文部分 + key 的密文），CE 存储 files/ 下。 */
         const val BYOK_DIR = "byok"
+        const val JEV_DIR = "jev"
 
         /** B 的 core/pi-runtime/build.mjs 生成的厂商预设。 */
         const val MODEL_CATALOG_ASSET = "model-catalog.json"

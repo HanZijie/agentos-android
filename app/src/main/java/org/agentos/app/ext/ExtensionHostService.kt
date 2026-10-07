@@ -1,60 +1,170 @@
 package org.agentos.app.ext
 
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Binder
 import android.os.IBinder
 import android.os.Process
 import android.os.RemoteCallbackList
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.agentos.extensions.host.ServerKey
+import org.agentos.extensions.host.ServerState
 import org.agentos.internal.IExtensionCallback
 import org.agentos.internal.IExtensionHost
-import org.agentos.runtime.broker.ApprovalPolicy
-import org.json.JSONArray
-import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Extension Host（docs/extensions.md 第 2、9 节）：`:ext` 进程，不导出，只接受本 App 的 UID。
+ * Extension Host（docs/extensions.md 第 2、9 节）：`:ext` 进程，不导出，只接受本 App 的 UID。逻辑都在 [ExtensionHost]，
+ * 这里是 IExtensionHost 的 Binder 外壳：调用方校验、错误归一、订阅回调、包变化时重新扫描。
  *
- * **C7a 是桩实现**：接口、调用方校验、订阅回调和错误格式按正式约定，但还没有插件（listPlugins 为空、目录为空、
- * callTool 一律不受理）。D 的插件管理页可以先对着它做。C7b 换成真正的实现（AppPluginScanner、McpClientManager、ToolCatalog）。
+ * 进程生命周期：运行时（:agent）用 BIND_AUTO_CREATE 绑定，`:ext` 随它存活；没有人绑定时系统可以回收 `:ext`，
+ * 下次绑定时重建（重建后重新扫描、重新推送目录）。
  */
 class ExtensionHostService : Service() {
 
-    private val callbacks = RemoteCallbackList<IExtensionCallback>()
+    private lateinit var host: ExtensionHost
+    private val callbacks = object : RemoteCallbackList<IExtensionCallback>() {
+        override fun onCallbackDied(callback: IExtensionCallback?) {
+            callback?.asBinder()?.let { host.cancelCallsOf(it) }
+        }
+    }
+    private val broadcastLock = Any()
+    private var packageReceiver: BroadcastReceiver? = null
+    @Volatile private var pendingRescan: Job? = null
+
+    /** 调用方（callTool 的 callback）的死亡监听：它死了，它的调用全部取消。 */
+    private val owners = ConcurrentHashMap<IBinder, IBinder.DeathRecipient>()
+
+    override fun onCreate() {
+        super.onCreate()
+        host = ExtensionHost(applicationContext)
+        host.start()
+        host.scope.launch {
+            host.snapshot.collect { s -> broadcast { it.onCatalogChanged(s.version) } }
+        }
+        host.scope.launch {
+            var last: Map<ServerKey, ServerState> = emptyMap()
+            host.tools.serverStates.collect { states ->
+                for ((k, s) in states) {
+                    if (last[k] != s) {
+                        val json = ExtensionHost.stateJson(k, s).toString()
+                        broadcast { it.onConnectionState(json) }
+                    }
+                }
+                last = states
+            }
+        }
+        registerPackageReceiver()
+        Log.i(TAG, "extension host created (pid ${Process.myPid()})")
+    }
+
+    override fun onBind(intent: Intent?): IBinder = binder
+
+    override fun onDestroy() {
+        packageReceiver?.let { runCatching { unregisterReceiver(it) } }
+        callbacks.kill()
+        host.close()
+        Log.i(TAG, "extension host destroyed")
+        super.onDestroy()
+    }
+
+    /** 安装、升级、卸载、启用状态变化：合并 [RESCAN_DEBOUNCE_MS] 内的多条后重新扫描。 */
+    private fun registerPackageReceiver() {
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.data?.schemeSpecificPart == packageName) return
+                pendingRescan?.cancel()
+                pendingRescan = host.scope.launch(Dispatchers.IO) {
+                    delay(RESCAN_DEBOUNCE_MS)
+                    Log.i(TAG, "package change (${intent.action?.substringAfterLast('.')}): rescanning")
+                    host.registry.rescanQuietly()
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        // 系统广播：NOT_EXPORTED 不影响接收，只是不让别的 App 伪造
+        registerReceiver(r, filter, Context.RECEIVER_NOT_EXPORTED)
+        packageReceiver = r
+    }
+
+    private inline fun broadcast(block: (IExtensionCallback) -> Unit) = synchronized(broadcastLock) {
+        val n = callbacks.beginBroadcast()
+        try {
+            for (i in 0 until n) {
+                try {
+                    block(callbacks.getBroadcastItem(i))
+                } catch (e: Exception) {
+                    // 回调方死了：RemoteCallbackList 会自己移除
+                }
+            }
+        } finally {
+            callbacks.finishBroadcast()
+        }
+    }
+
+    private fun watchOwner(callback: IExtensionCallback) {
+        val b = callback.asBinder()
+        if (owners.containsKey(b)) return
+        val recipient = IBinder.DeathRecipient {
+            owners.remove(b)
+            host.cancelCallsOf(b)
+        }
+        try {
+            b.linkToDeath(recipient, 0)
+            owners[b] = recipient
+        } catch (e: Exception) {
+            host.cancelCallsOf(b)
+        }
+    }
 
     private val binder = object : IExtensionHost.Stub() {
         override fun getVersion(): Int = VERSION
 
-        override fun listPlugins(): String = guarded { JSONArray().toString() }
+        override fun listPlugins(): String = managed { host.pluginsJson() }
 
-        override fun setPluginEnabled(pluginId: String?, enabled: Boolean): String = guarded {
-            throw ExtError.notFound(pluginId)
+        override fun setPluginEnabled(pluginId: String?, enabled: Boolean): String = managed {
+            host.registry.setPluginEnabled(pluginId, enabled)
+            host.pluginJson(pluginId)
         }
 
-        override fun confirmSignature(pluginId: String?): String = guarded { throw ExtError.notFound(pluginId) }
-
-        override fun setPluginApproval(pluginId: String?, mode: String?): String = guarded {
-            ExtError.checkMode(mode)
-            throw ExtError.notFound(pluginId)
+        override fun confirmSignature(pluginId: String?): String = managed {
+            host.registry.confirmSignature(pluginId)
+            host.pluginJson(pluginId)
         }
 
-        override fun listTools(pluginId: String?): String = guarded { throw ExtError.notFound(pluginId) }
-
-        override fun setToolEnabled(toolName: String?, enabled: Boolean): String = guarded {
-            throw ExtError.notFound(toolName)
+        override fun setPluginApproval(pluginId: String?, mode: String?): String = managed {
+            host.registry.setPluginApproval(pluginId, mode)
+            host.pluginJson(pluginId)
         }
 
-        override fun setToolApproval(toolName: String?, mode: String?): String = guarded {
-            ExtError.checkMode(mode)
-            throw ExtError.notFound(toolName)
-        }
+        override fun listTools(pluginId: String?): String = managed { host.listTools(pluginId) }
 
-        override fun rescan(): String = guarded { JSONArray().toString() }
+        override fun setToolEnabled(toolName: String?, enabled: Boolean): String = managed { host.setToolEnabled(toolName, enabled) }
+
+        override fun setToolApproval(toolName: String?, mode: String?): String = managed { host.setToolApproval(toolName, mode) }
+
+        override fun rescan(): String = guarded {
+            host.registry.rescan()
+            host.pluginsJson()
+        }
 
         override fun subscribe(callback: IExtensionCallback?) = guarded {
             if (callback != null && callbacks.register(callback)) {
-                runCatching { callback.onCatalogChanged(CATALOG_VERSION) }
+                runCatching { callback.onCatalogChanged(host.snapshot.value.version) }
             }
         }
 
@@ -62,18 +172,23 @@ class ExtensionHostService : Service() {
             if (callback != null) callbacks.unregister(callback)
         }
 
-        override fun getCatalog(): String = guarded {
-            JSONObject().put("version", CATALOG_VERSION).put("tools", JSONArray())
-                .put("policy", JSONObject(ApprovalPolicy.DEFAULT.toJson())).toString()
+        override fun getCatalog(): String = guarded { host.catalogJson() }
+
+        override fun callTool(callId: String?, requestJson: String?, callback: IExtensionCallback?): Boolean = guarded {
+            callback?.let { watchOwner(it) }
+            host.callTool(callId, requestJson, callback?.asBinder()) { outcome -> callback?.onToolResult(callId, outcome) }
         }
 
-        override fun callTool(callId: String?, requestJson: String?, callback: IExtensionCallback?): Boolean = guarded { false }
+        override fun cancelTool(callId: String?) = guarded { host.cancelTool(callId) }
 
-        override fun cancelTool(callId: String?) = guarded { }
+        override fun getDiagnostics(): String = guarded { host.diagnosticsJson(callbacks.registeredCallbackCount) }
 
-        override fun getDiagnostics(): String = guarded {
-            JSONObject().put("implementation", "stub").put("version", VERSION).put("plugins", 0)
-                .put("subscribers", callbacks.registeredCallbackCount).toString()
+        override fun refreshTools(timeoutMs: Long, force: Boolean): String = guarded { host.refreshTools(timeoutMs, force) }
+
+        /** 插件管理：先等启动后的第一次扫描。 */
+        private inline fun <T> managed(block: () -> T): T = guarded {
+            host.awaitFirstScan()
+            block()
         }
 
         /** 调用方校验 + 异常归一：Binder 只能传回少数几类异常，其他类型换成 agentos.ext.internal。 */
@@ -95,17 +210,10 @@ class ExtensionHostService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder = binder
-
-    override fun onDestroy() {
-        callbacks.kill()
-        super.onDestroy()
-    }
-
     companion object {
         private const val TAG = "ExtensionHost"
-        const val VERSION = 1
-        private const val CATALOG_VERSION = 0L
+        const val VERSION = 2
+        const val RESCAN_DEBOUNCE_MS = 500L
     }
 }
 
@@ -121,6 +229,7 @@ internal object ExtError {
 
     fun notFound(what: String?) = IllegalArgumentException("${PREFIX}not_found: no such plugin or tool: $what")
     fun badMode(mode: String?) = IllegalArgumentException("${PREFIX}bad_mode: approval mode must be ask, always or \"\" (clear), got $mode")
+    fun badRequest(detail: String) = IllegalArgumentException("${PREFIX}bad_request: $detail")
     fun notReady(detail: String) = IllegalStateException("${PREFIX}not_ready: $detail")
     fun notNeeded(detail: String) = IllegalStateException("${PREFIX}not_needed: $detail")
     fun highRisk(tool: String) = IllegalArgumentException("${PREFIX}high_risk: $tool is a high-risk tool and cannot be set to always")

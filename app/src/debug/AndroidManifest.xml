@@ -17,6 +17,15 @@
             android:permission="android.permission.DUMP"
             android:process=":agent" />
 
+        <!--
+          lane C（C7b）：Extension Host 的测试入口（tests/device/mcp-plugin 用它发现、启停插件、调用工具、取消、等目录变化）。
+          要求 DUMP 权限；跑在主进程，经 IExtensionHost 访问 :ext（与插件管理页相同的路径）。
+        -->
+        <receiver
+            android:name=".ext.ExtensionDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
     </application>
 
 </manifest>
