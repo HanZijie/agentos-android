@@ -45,7 +45,7 @@ agentos-android/
 │   │   ├── pi/{PiAdapter,PiEventMapper,JsEngine,PiRuntime,ModelCatalog}.kt   [W3] 新写：Pi 适配层；JsEngine 是 QuickJS 的抽象，Android 和电脑上各一个实现；PiRuntime 是常驻泵
 │   │   ├── net/HostFetch.kt                                       [W3] 新写：给 Pi 用的 fetch（OkHttp），按 endpoint 注入 key，错误分为可重试和不可重试
 │   │   ├── broker/CapabilityBroker.kt                             [W2] 按目录校验工具名；[W16] 接 Extension Host，处理超时和取消
-│   │   ├── broker/RiskPolicy.kt                                   [W16] 新写
+│   │   ├── broker/{RiskPolicy,ApprovalPolicy}.kt                  [W16 的策略部分，A7 已完成] 风险等级与确认决定；按插件、服务器、工具的启用与审批设置（JSON version=1）
 │   │   ├── hooks/HookPoints.kt                                    [W22] 新写：在会话、prompt、工具调用（Pi 的 beforeToolCall / afterToolCall）、停止等节点发出 Hook 事件，按决定执行
 │   │   ├── skills/SkillPrompt.kt                                  [W20] 新写：把 Skill 目录写进系统提示；内置 read_skill 工具
 │   │   ├── ports/{HostPort,AgentCore}.kt                          [W2] 新写：HostPort 是宿主层对 Android 的全部依赖（工具、Skill、Hook、确认、存储、密钥、时钟）；AgentCore 是宿主层对 Agent 循环的依赖，由 Pi 适配层实现，测试时用假实现
@@ -97,7 +97,7 @@ agentos-android/
 │       │   ├── registry/AppPluginScanner.kt         [W14] ← AgentManagerService.java 的发现与签名校验
 │       │   ├── registry/{PackageImporter,PluginStore}.kt   [W18]
 │       │   ├── registry/UserMcpConfig.kt            [W19]
-│       │   ├── policy/ApprovalPolicy.kt             [W14] 按插件、服务器、工具的启用与审批设置
+│       │   ├── policy/ApprovalStore.kt              [W14] 用户策略的持久化（读写 `ApprovalPolicy.toJson/fromJson` 的文件；读失败时不回到默认）和插件页的读写操作。`ApprovalPolicy` 本身在 core/runtime 的 broker/（Broker 要读），A7 已完成
 │       │   ├── policy/TrustStore.kt                 [W22] Hook 信任审核（按内容哈希）
 │       │   ├── mcp/{McpClientManager,ToolCatalog}.kt   [W15] 连接管理、工具目录
 │       │   ├── mcp/HttpMcpClient.kt                 [W19] 远端 Streamable HTTP，凭据用 Keystore 加密保存
@@ -456,9 +456,10 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 #### W14 Extension Host 与插件发现
 - [ ] `:ext` 进程：`ExtensionHostService`、`IExtensionHost`、`IExtensionCallback`
-- [ ] 把 Agent Plugins 1.0 的 schema 副本放进 `core/protocol/agent-plugins-1.0/`
-- [ ] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`
-- [ ] `AppPluginScanner`、`ApprovalPolicy`
+- [x] 把 Agent Plugins 1.0 的 schema 副本放进 `core/protocol/agent-plugins-1.0/`（A7）
+- [x] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`（A7��30 项测试，含三个示例 App 的全部工具名）
+- [x] `ApprovalPolicy`（A7，在 core/runtime 的 broker/，Broker 已按它决定可用与确认）
+- [ ] `AppPluginScanner`（检查 Service 属于本包、已导出、要求 `BIND_MCP_SERVICE`）、`ApprovalStore`（持久化）
 - [ ] 设置页：插件管理（启用、禁用、审批方式）
 - [ ] 测试：清单解析与校验、工具命名
 
@@ -468,7 +469,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] `tests/device/` 的 MCP Binder 用例：`bindService()` 失败、后台 bind、插件 App 进程死亡、调用超时、发送方 UID 不符、签名变化后停用
 
 #### W16 风险策略与确认
-- [ ] `RiskPolicy`（MCP 工具默认按“写”处理，注解只能调高等级）
+- [x] `RiskPolicy`（A7：MCP 工具默认按“写”处理，注解只能调高等级；`CapabilityBroker` 已按用户策略决定可用与确认，被禁用的工具对模型等同不存在）
 - [ ] `CapabilityBroker` 接上 Extension Host：按目录校验工具名，转发、超时、取消
 - [ ] `ConsentCoordinator` 与 `consent/` 界面：前台弹窗、后台通知、写明发起请求的 App
 - [ ] `session/request_permission`：按“只能追加拒绝”的规则接入
