@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.agentos.app.agent.AndroidRuntimeLog
@@ -169,23 +170,26 @@ class ExtensionHost(
 
     // ------------------------------------------------------------------ 插件管理
 
-    fun pluginsJson(): String = JSONArray(registry.registry.value.plugins.map { pluginView(it) }).toString()
+    fun pluginsJson(): String = JsonArray(registry.registry.value.plugins.map { pluginView(it) }).toString()
 
     fun pluginJson(id: String?): String = pluginView(registry.plugin(id)).toString()
 
-    private fun pluginView(p: PluginRecord): JSONObject {
-        val problems = skills.problems.value[p.id].orEmpty()
-        return registry.pluginJson(p, serverViews(p.id))
-            // SkillSummary.provider 是插件名（A10），不是插件 ID
-            .put("skillCount", skills.catalog.value.skills.count { p.name != null && it.provider == p.name })
-            .put("skillProblems", JSONArray(problems.map { JSONObject().put("code", it.code).put("message", it.message) }))
-    }
+    /** 插件页的插件 JSON：[ExtWire.pluginJson]（键固定，含 trustedSigningDigest）。 */
+    private fun pluginView(p: PluginRecord): JsonObject = ExtWire.pluginJson(
+        p = p,
+        policy = registry.approvals.policy.value,
+        versionName = registry.versionName(p),
+        servers = serverViews(p.id),
+        // SkillSummary.provider 是插件名（A10），不是插件 ID
+        skillCount = skills.catalog.value.skills.count { p.name != null && it.provider == p.name },
+        skillProblems = skills.problems.value[p.id].orEmpty(),
+    )
 
-    private fun serverViews(pluginId: String): Map<String, ExtRegistry.ServerView> {
+    private fun serverViews(pluginId: String): Map<String, ExtWire.ServerView> {
         val catalog = tools.catalog.value
         return tools.serverStates.value.filterKeys { it.pluginId == pluginId }.entries.associate { (key, state) ->
             val count = catalog.tools.count { it.provider == pluginId && it.source?.server == key.server }
-            key.server to ExtRegistry.ServerView(stateName(state), stateError(state), count)
+            key.server to ExtWire.ServerView(stateName(state), stateError(state), count)
         }
     }
 

@@ -82,6 +82,10 @@ T = lambda tool: f"mcp__mcptest__test__{tool}"  # noqa: E731
 ALL_TOOLS = sorted(T(x) for x in ("add_tool", "die", "echo", "remove_tool", "slow", "stats", HIGH_RISK_TOOL))
 # IExtensionHost.listTools 每一项的键（与 core:extensions 的 KnownTool 一一对应，按输出顺序）
 KNOWN_TOOL_KEYS = ["name", "pluginId", "source", "title", "description", "inputSchema", "risk", "enabled", "approval", "mayAlwaysAllow"]
+# 插件 JSON 的键（ExtWire.PLUGIN_KEYS，按输出顺序）
+PLUGIN_KEYS = ["id", "source", "packageName", "name", "displayName", "description", "versionName", "versionCode",
+               "signingDigest", "trustedSigningDigest", "status", "unavailableReason", "builtin", "enabled", "approval",
+               "problems", "unsupported", "servers", "rejectedServers", "toolCount", "skillCount", "skillProblems"]
 
 
 class Ctx:
@@ -213,6 +217,9 @@ def case_discover(c):
         "noToolsInCatalog": not any(n.startswith("mcp__mcptest__") for n in names),
         "policyHealthy": cat.get("policyFailClosed") is False and diag.get("policyHealth") == "ok",
         "memoryIntact": diag.get("memoryLost") is False,
+        # 插件 JSON 键固定；首次发现即信任当时的签名，所以确认过的摘要就是现在的
+        "pluginShape": p is not None and list(p.keys()) == PLUGIN_KEYS,
+        "trustedDigestIsCurrent": p is not None and bool(p.get("signingDigest")) and p.get("trustedSigningDigest") == p.get("signingDigest"),
     }
     return verdict(checks, f"status={(p or {}).get('status')} enabled={(p or {}).get('enabled')} server={server.get('state')}",
                    plugin=p, diag=diag)
@@ -763,10 +770,13 @@ def case_signature(c):
     checks = {
         "installed": "Success" in inst,
         "signatureChanged": p.get("status") == "signature_changed" and p.get("signingDigest") not in (None, digest0),
+        # 插件页显示“之前的签名 / 现在的签名”：确认过的仍是轮换前的
+        "trustedDigestIsPrevious": p.get("trustedSigningDigest") == digest0,
         "disabled": p.get("enabled") is False,
         "toolsRemoved": bool(gone.get("met")),
         "enableRefused": "not_ready" in str(refused.get("error")),
-        "confirmedStillOff": confirmed.get("status") == "ready" and confirmed.get("enabled") is False,
+        "confirmedStillOff": confirmed.get("status") == "ready" and confirmed.get("enabled") is False
+                             and confirmed.get("trustedSigningDigest") == confirmed.get("signingDigest") != digest0,
         "reEnabled": enabled.get("ok") is True and bool(back.get("met")),
     }
     return verdict(checks, f"status={p.get('status')} digest {str(digest0)[:8]}->{str(p.get('signingDigest'))[:8]}")

@@ -12,7 +12,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import org.agentos.extensions.McpServerDecl
 import org.agentos.extensions.host.KnownTool
+import org.agentos.extensions.registry.PluginProblem
+import org.agentos.extensions.registry.PluginRecord
+import org.agentos.extensions.registry.PluginStatus
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.RiskPolicy
 import org.agentos.runtime.errors.ErrorCode
@@ -77,6 +81,92 @@ object ExtWire {
 
     /** [knownToolJson] 的全部键，按输出顺序。 */
     val KNOWN_TOOL_KEYS = listOf("name", "pluginId", "source", "title", "description", "inputSchema", "risk", "enabled", "approval", "mayAlwaysAllow")
+
+    // ------------------------------------------------------------------ 插件（插件页）
+
+    /** 一个服务器在插件页上的状态（来自 ExtensionToolHost.serverStates；toolCount 是它在目录里的工具数）。 */
+    data class ServerView(val state: String, val error: String?, val toolCount: Int)
+
+    /**
+     * 插件页的插件（listPlugins 的一项；setPluginEnabled / confirmSignature / setPluginApproval 的返回值）。键固定为 [PLUGIN_KEYS]，
+     * 值为空时是 null，不省略；servers 的每一项键固定为 [SERVER_KEYS]。D 的插件页依赖这个形状。
+     *
+     * - `signingDigest`：当前安装包的签名摘要（AppPluginScanner：SHA-256 小写十六进制；多签名者时排序拼接后再 SHA-256）。
+     * - `trustedSigningDigest`：注册表记住的、上一次确认过的签名摘要（`PluginRecord.trustedSigner`，同一种摘要）；
+     *   还没有确认过（记忆丢失后的 signature_unconfirmed）时为 null，从不是空串。`signature_changed` 时它与 signingDigest 不同。
+     *
+     * @param servers 服务器名 → 状态；没有的按 disabled（插件不可用或停用）/ idle 推断
+     */
+    fun pluginJson(
+        p: PluginRecord,
+        policy: ApprovalPolicy,
+        versionName: String?,
+        servers: Map<String, ServerView>,
+        skillCount: Int,
+        skillProblems: List<PluginProblem>,
+    ): JsonObject {
+        val m = p.manifest
+        val enabled = p.name != null && policy.pluginEnabled(p.name!!)
+        val approval = p.name?.let { policy.plugins[it]?.entry?.approval }
+        fun str(v: String?) = v?.let { JsonPrimitive(it) } ?: JsonNull
+        return buildJsonObject {
+            put("id", p.id)
+            put("source", "app")
+            put("packageName", p.identity.packageName)
+            put("name", str(p.name))
+            put("displayName", m?.displayName ?: p.name ?: p.identity.packageName)
+            put("description", str(m?.description ?: m?.display?.shortDescription))
+            put("versionName", str(versionName))
+            put("versionCode", p.identity.versionCode)
+            put("signingDigest", p.identity.signerDigest)
+            put("trustedSigningDigest", str(p.trustedSigner.takeIf { it.isNotBlank() }))
+            put("status", p.status.name.lowercase())
+            put("unavailableReason", str(p.unavailableReason?.name?.lowercase()))
+            put("builtin", p.builtin)
+            put("enabled", enabled)
+            put("approval", str(approval?.wire))
+            put("problems", buildJsonArray { p.problems.forEach { add(problemJson(it)) } })
+            put("unsupported", buildJsonArray {
+                m?.unsupported.orEmpty().forEach {
+                    add(buildJsonObject { put("kind", it.kind.name.lowercase()); put("location", it.location); put("detail", it.reason) })
+                }
+            })
+            put("servers", buildJsonArray {
+                p.servers.forEach { s ->
+                    val v = servers[s.name]
+                    val state = v?.state ?: if (p.status != PluginStatus.READY || !enabled) "disabled" else "idle"
+                    add(buildJsonObject {
+                        put("name", s.name)
+                        put("service", str((s as? McpServerDecl.Binder)?.service))
+                        put("url", str((s as? McpServerDecl.StreamableHttp)?.url))
+                        put("state", state)
+                        put("error", str(v?.error))
+                        put("toolCount", v?.toolCount ?: 0)
+                    })
+                }
+            })
+            put("rejectedServers", buildJsonArray {
+                p.rejectedServers.forEach {
+                    add(buildJsonObject { put("name", it.name); put("service", it.service); put("reason", it.reason.name.lowercase()) })
+                }
+            })
+            put("toolCount", servers.values.sumOf { it.toolCount })
+            put("skillCount", skillCount)
+            put("skillProblems", buildJsonArray { skillProblems.forEach { add(problemJson(it)) } })
+        }
+    }
+
+    private fun problemJson(p: PluginProblem) = buildJsonObject { put("code", p.code); put("message", p.message) }
+
+    /** [pluginJson] 的全部键，按输出顺序。 */
+    val PLUGIN_KEYS = listOf(
+        "id", "source", "packageName", "name", "displayName", "description", "versionName", "versionCode",
+        "signingDigest", "trustedSigningDigest", "status", "unavailableReason", "builtin", "enabled", "approval",
+        "problems", "unsupported", "servers", "rejectedServers", "toolCount", "skillCount", "skillProblems",
+    )
+
+    /** [pluginJson] 里 servers 每一项的键（service 只对 Binder 服务器有值，url 只对远端服务器有值，另一个为 null）。 */
+    val SERVER_KEYS = listOf("name", "service", "url", "state", "error", "toolCount")
 
     /** getCatalog 的返回值。[failClosed]：策略文件坏了又没有可用的副本，第三方插件一律当作禁用（toJson 不带这个状态）。 */
     fun catalogJson(version: Long, catalog: ToolCatalog, policy: ApprovalPolicy, skills: SkillCatalog = SkillCatalog.EMPTY): String = buildJsonObject {
