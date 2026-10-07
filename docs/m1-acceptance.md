@@ -68,6 +68,7 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 | 假模型 + 确认协调器全链路（`sample_apps_consent_e2e.py`） | 15/15：HIGH 只有“允许一次 / 拒绝”，拒绝在新会话里仍然生效 |
 | 单测 | 日历 99 项（含 `dump` 5 项），`core:extensions` 168 项，合入 main 后重跑 0 失败 |
 | key 泄漏扫描 | `--live` 的 14358 行 logcat 与结果文件命中 0 次 |
+| main 全量回归（`e4b98fc`：`clean test lint assembleDebug assembleRelease :app:assembleReleaseTest`） | 1575 项测试，0 失败、0 错误、跳过 1 项；lint 通过；release 包的 dex 里没有 `ConsentDebugReceiver`、`ExtensionDebugReceiver`、`DesktopGatewayDebugReceiver`、`JevDebugReceiver`；仓库里两把 key 命中 0 次 |
 
 **没做 / 限制**：
 - **release 构建里需要确认的调用仍一律拒绝**（D5.2 真实确认界面未合入）。上面所有写操作都是 debug 构建的 `ConsentDebugReceiver` 放行的；这一步完成前，真实用户还不能用这三个 App。
