@@ -70,21 +70,54 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21) ANDROID_HOME=$HOME/Library/Andr
 
 JVM 单元测试（不需要设备）：`OccurrencesTest`（重复展开、夏令时、跨日 / 跨月 / 全天、月网格）、`CalendarRepositoryTest`（增删改查与校验、级联删除、搜索）、`FreeSlotsTest`、`ReminderPlannerTest`、`WeekLayoutTest`、`CalendarToolsTest`（每个工具的正常 / 缺参数 / 非法值 / 不存在的 id，以及工具清单、必填参数、注解的契约检查）。
 
-## 设备上验证
+## 设备上验证与调试（仅 debug 包）
 
-debug 包带两个只给 `adb` 用的入口（要求 `DUMP` 权限，release 里没有）：
+debug 包带两个只给 `adb` 用的接收器（要求 `DUMP` 权限，只有 shell 能发；release 里没有）：
 
 ```bash
 A=org.agentos.sample.calendar
-# 灌示例数据 / 清空 / 造“N 分钟后开始、提前 M 分钟提醒”的日程
+# 灌示例数据 / 造“N 分钟后开始、提前 M 分钟提醒”的日程（结果写 logcat，tag CalendarDebug）
 adb shell am broadcast -n $A/.debug.DebugReceiver -a x --es cmd seed
 adb shell am broadcast -n $A/.debug.DebugReceiver -a x --es cmd remind_test --ei start_in 2 --ei lead 1
 # MCP 自测：在独立的 :selftest 进程里经 McpBinderClient 绑定本 App 的 CalendarMcpService（真正跨进程的 Binder），
-# initialize、tools/list、再把全部工具（含错误路径）走一遍，结果是一行 JSON，写 logcat（tag CalendarMcpSelfTest）
+# initialize、tools/list、再把全部工具（含错误路径）走一遍，结果是一行 JSON，写 logcat（tag CalendarMcpSelfTest）和广播 result data
 adb shell am broadcast -n $A/.debug.McpSelfTestReceiver
 # 只经 MCP 创建一个 3 分钟后开始、提前 1 分钟提醒的日程并保留（看界面实时刷新和到点通知）
 adb shell am broadcast -n $A/.debug.McpSelfTestReceiver --es mode create --ei start_in 3 --ei lead 1
 ```
+
+### 读状态：`dump`（只读）与清空：`reset`
+
+用来在真机上核对 AgentOS 经 MCP 的操作结果。两条命令的返回都放在**广播的 result data**（一个 JSON 字符串；result code 1 = 成功，2 = 失败，失败时 `{"error":"..."}`），不进 logcat。
+
+```bash
+adb shell am broadcast -n $A/.debug.DebugReceiver -a x --es cmd dump [--ei offset N --ei limit M]
+adb shell am broadcast -n $A/.debug.DebugReceiver -a x --es cmd reset
+```
+
+`dump` 返回：
+
+```json
+{
+  "calendars": [{"id":"…","name":"My Calendar","color":"#E4572E","visible":true,"is_default":true,"event_count":1}],
+  "events": [{
+    "id":"…","series_id":"…","calendar_id":"…","calendar_name":"My Calendar","title":"…",
+    "start":"2026-10-07T23:29:19+08:00","end":"2026-10-07T23:59:19+08:00","all_day":false,
+    "location":"…","description":"","color":"#E4572E","reminder_minutes":[1],
+    "recurrence":"none","recurrence_until":null,"timezone":"Asia/Shanghai",
+    "hidden":false,"created_at":"…","updated_at":"…"
+  }],
+  "reminders_scheduled": [{"id":"<日程 id>","title":"…","minutes_before":1,"fire_at":"2026-10-07T23:28:19+08:00","registered":true}],
+  "timezone":"Asia/Shanghai","total":1,"offset":0,"limit":50,"count":1,"next_offset":null
+}
+```
+
+- `calendars[]` 和 `events[]` 用与 MCP 工具**同一个序列化函数**，字段名和格式一致；`events[]` 每个**系列**一行（重复日程只出现一次，带 `recurrence` / `recurrence_until`，`start` / `end` 是系列第一次出现），多出 `hidden`（所属日历是否被隐藏）、`created_at`、`updated_at`。
+- 分页只切 `events[]`：`limit` 默认 50、最大 200（超出按边界取），`offset` 默认 0；按开始时间排序；`total` 是系列总数，`count` 是这次返回的条数，还有剩余时 `next_offset` 是下一页的 `offset`，否则为 `null`。页内字符数超过约 200,000 时在元素边界上提前截断（`count` 会小于 `limit`，照 `next_offset` 接着取）。
+- `reminders_scheduled[]`：App 同一时间只向 AlarmManager 挂**一个**精确闹钟（指向全部日程里最早的未触发提醒），所以最多一项。`registered` 是向系统实测的（`FLAG_NO_CREATE` 取同一个 `PendingIntent`，取到才是 `true`），能证明提醒真的排进了系统，不只是记录；没有待触发的提醒时数组为空。
+- 不返回任何 key 或凭据。
+
+`reset` 删除全部日程和非默认日历（默认日历保留，没有它 App 起不来），取消已排的提醒闹钟，返回 `{"cleared":<删掉的日程数>,"calendars_remaining":1,"remaining_scheduled":0}`。`seed` 之前也会先做同样的清空；旧命令 `clear` 保留，只清数据、写 logcat。
 
 ## 目录
 
@@ -96,5 +129,5 @@ src/main/java/org/agentos/sample/calendar/
   reminder/   ReminderPlanner（纯函数）、ReminderScheduler、通知与广播接收器
   ui/         主题、月 / 周 / 议程 / 详情 / 编辑 / 日历管理 / 搜索
 src/main/assets/agent-plugin/   plugin.json + skills/calendar/SKILL.md
-src/debug/                      DebugReceiver、McpSelfTestReceiver
+src/debug/                      DebugReceiver（seed / remind_test / dump / reset）、DebugDump、McpSelfTestReceiver
 ```

@@ -4,6 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.agentos.sample.calendar.CalendarGraph
 import org.agentos.sample.calendar.data.CalendarRepository
 import org.agentos.sample.calendar.data.EventSeries
@@ -14,11 +17,17 @@ import java.time.LocalTime
 import kotlin.concurrent.thread
 
 /**
- * 仅 debug 构建。用法：
+ * Debug builds only. Every command is an adb broadcast to this receiver:
+ *
  *   adb shell am broadcast -n org.agentos.sample.calendar/.debug.DebugReceiver -a x --es cmd seed
- *   ... --es cmd clear
- *   ... --es cmd remind_test --ei start_in 2 --ei lead 1     （N 分钟后开始、提前 M 分钟提醒的测试日程）
- * 结果写 logcat（tag CalendarDebug）。
+ *   ... --es cmd remind_test --ei start_in 2 --ei lead 1     (event starting in N minutes, reminder M minutes before)
+ *   ... --es cmd dump [--ei offset N --ei limit M]           (read-only state dump, JSON in the broadcast result data)
+ *   ... --es cmd reset                                       (delete everything and cancel the reminder alarm)
+ *   ... --es cmd clear                                       (older name of reset's data part; logs only)
+ *
+ * seed / clear / remind_test report in logcat (tag CalendarDebug). dump and reset put one JSON string in the broadcast
+ * result data (result code 1 = ok, 2 = error) and never log it. The receiver requires android.permission.DUMP, so only
+ * the shell (adb) can send these.
  */
 class DebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -30,13 +39,44 @@ class DebugReceiver : BroadcastReceiver() {
                     "seed" -> seed(repo)
                     "clear" -> clear(repo)
                     "remind_test" -> remindTest(repo, intent.getIntExtra("start_in", 2), intent.getIntExtra("lead", 1))
+                    "dump" -> answer(pending, 1, dump(context, repo, intent))
+                    "reset" -> answer(pending, 1, reset(context, repo))
                     else -> Log.w(TAG, "unknown cmd: $cmd")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "debug command failed", e)
+                answer(pending, 2, error(e.message ?: e.javaClass.simpleName))
             } finally {
                 pending.finish()
             }
+        }
+    }
+
+    private fun answer(pending: PendingResult, code: Int, json: JsonObject) {
+        pending.resultCode = code
+        pending.resultData = json.toString()
+    }
+
+    private fun error(message: String): JsonObject = buildJsonObject { put("error", message) }
+
+    private fun dump(context: Context, repo: CalendarRepository, intent: Intent): JsonObject {
+        val offset = intent.getIntExtra("offset", 0).coerceAtLeast(0)
+        val limit = intent.getIntExtra("limit", DebugDump.DEFAULT_LIMIT).coerceIn(1, DebugDump.MAX_LIMIT)
+        val scheduler = CalendarGraph.scheduler(context)
+        val armed = scheduler.armed()?.let { (at, id, lead) -> ArmedReminder(at, id, lead, scheduler.isAlarmRegistered()) }
+        return DebugDump.build(repo, CalendarGraph.tools(context), armed, offset, limit)
+    }
+
+    private fun reset(context: Context, repo: CalendarRepository): JsonObject {
+        val cleared = repo.events.value.size
+        clear(repo)
+        // The reschedule after a data change is debounced (250 ms); do it now and wait for the result so the answer is final.
+        val scheduler = CalendarGraph.scheduler(context)
+        scheduler.reschedule()
+        return buildJsonObject {
+            put("cleared", cleared)
+            put("calendars_remaining", repo.calendars.value.size)
+            put("remaining_scheduled", if (scheduler.isAlarmRegistered()) 1 else 0)
         }
     }
 
