@@ -1,8 +1,10 @@
 """A fake phone for testing the acceptance driver without a device (A12).
 
 It models what the driver touches, with the same shapes as the real thing:
-  - the three apps' SQLite databases (same tables and columns as the real stores; the driver reads them through `run-as ... cat` = pull_private),
-    changed by simple Python versions of the tools;
+  - the three apps' SQLite databases (same tables and columns as the real stores) changed by simple Python versions of the tools, and the apps' debug
+    `dump` / `reset` receivers with the real JSON shapes (the driver never reads the databases: it has no way to, a real phone has no sqlite3);
+  - the calendar's single armed reminder alarm: the earliest upcoming reminder of all events, re-armed after a data change with a lag (the real app
+    debounces by 250 ms), so a dump read right after a change can still show the old alarm;
   - AgentOS: plugin enable/disable, catalog with risk levels (ExtensionDebugReceiver), auto-consent (ConsentDebugReceiver), desktop gateway;
   - a bridge whose session/prompt plays the fake-model script (scripted_tools.plan_round, the real planner) round by round against those tools,
     and returns session/update notes the way the runtime maps them (tool_call pending -> tool_call_update completed/failed with text).
@@ -39,6 +41,9 @@ class FakePhone:
         self.consent_log = []       # ConsentDebugReceiver `recent` entries, oldest first (max 50)
         self.remembered = set()     # (session id, tool) answered with "allow for this session"
         self._req = 0
+        self.armed = None           # the calendar's armed reminder: {series, start_ms, minutes_before, fire_ms}
+        self.dirty = False          # a data change the calendar has not re-armed for yet
+        self.rearm_lag = 0          # dump reads that still show the old alarm after a change
         self.orphans = {}           # alarm id -> fire_at that stays registered with AlarmManager after a (faulty) delete / switch-off
         self.model = {"modelUsable": True, "modelBaseUrl": "http://127.0.0.1:18787", "modelId": "fake-model"}
         self.desktop = False
@@ -99,18 +104,6 @@ class FakePhone:
     adb = "fake-adb"
     serial = "fake:0"
 
-    def pull_private(self, package, relpath):
-        pkg = next((s for s in L.SAMPLES.values() if s.package == package), None)
-        name = os.path.basename(relpath)
-        if pkg is None or not relpath.startswith("databases/") or name != pkg.db:
-            return None
-        if pkg.name != "calendar":
-            raise AssertionError("the driver must read %s through the app's debug dump, not by copying its database" % pkg.name)
-        if "no-db-" + pkg.name in self.faults:
-            return None
-        with open(self.db_path(name), "rb") as f:
-            return f.read()
-
     # ------------------------------------------------------------------ debug receivers
     def _broadcast(self, cmd):
         parts = shlex.split(cmd)
@@ -137,8 +130,9 @@ class FakePhone:
         elif comp.endswith("/.debug.DebugCallReceiver"):
             data = self._notes_app(extras)
         elif comp.endswith("/.debug.DebugReceiver"):
-            self._calendar_app(extras)
-            return "Broadcasting: Intent { }\nBroadcast completed: result=0\n"   # the calendar app answers in logcat only
+            data = self._calendar_app(extras)
+            if data is None:
+                return "Broadcasting: Intent { }\nBroadcast completed: result=0\n"   # seed / clear / remind_test answer in logcat only
         else:
             return "Broadcast completed: result=0\n"
         code = 1 if data.get("ok", "error" not in data) else 2
@@ -261,10 +255,86 @@ class FakePhone:
                            "content_length": len(r["content"]), "revision": r["revision"]} for r in page],
                 "tags": [{"name": k, "count": v} for k, v in sorted(tags.items())], "total": len(rows), "offset": offset, "count": len(page), "next_offset": nxt}
 
+    NOW_MS = int(datetime(2026, 10, 7, 12, 0, tzinfo=TZ).timestamp() * 1000)
+
+    def _occurrence_id(self, r, start):
+        return "%s@%d" % (r["id"], start)
+
+    def _compute_armed(self):
+        """The earliest upcoming reminder of all events (what ReminderPlanner.next gives)."""
+        best = None
+        for r, s0 in self._occurrences(self.NOW_MS - 86400000, self.NOW_MS + 400 * 86400000):
+            for m in [int(x) for x in r["reminders"].split(",") if x]:
+                fire = s0 - m * 60000
+                if fire > self.NOW_MS and (best is None or (fire, r["title"], m) < (best["fire_ms"], best["title"], best["minutes_before"])):
+                    best = {"series": r["id"], "start_ms": s0, "title": r["title"], "minutes_before": m, "fire_ms": fire}
+        return best
+
+    def _events_changed(self, deleted=False):
+        """A change to events or calendars: the calendar re-arms its reminder alarm a moment later (debounced)."""
+        if deleted and "delete-keeps-armed" in self.faults:
+            return
+        self.dirty = True
+        self.rearm_lag = 1
+
+    def _sync_armed(self, force=False):
+        if not self.dirty:
+            return
+        if force or self.rearm_lag == 0:
+            if "reminder-never-armed" not in self.faults or force:
+                self.armed = self._compute_armed()
+            self.dirty = False
+        else:
+            self.rearm_lag -= 1
+
     def _calendar_app(self, ex):
-        if ex.get("cmd") == "clear" and "calendar-clear-noop" not in self.faults:
-            self.q("calendar.db", "DELETE FROM events")
-            self.q("calendar.db", "DELETE FROM calendars WHERE is_default = 0")
+        cmd = ex.get("cmd")
+        if cmd == "clear":      # logs only
+            if "calendar-reset-noop" not in self.faults:
+                self.q("calendar.db", "DELETE FROM events")
+                self.q("calendar.db", "DELETE FROM calendars WHERE is_default = 0")
+                self._events_changed()
+            return None
+        if cmd == "reset":
+            n = len(self.q("calendar.db", "SELECT id FROM events"))
+            if "calendar-reset-noop" not in self.faults:
+                self.q("calendar.db", "DELETE FROM events")
+                self.q("calendar.db", "DELETE FROM calendars WHERE is_default = 0")
+                self.dirty = True
+                self._sync_armed(force=True)            # reset reschedules synchronously
+            left = 1 if (self.armed is not None or "calendar-reset-leaves-registered" in self.faults) else 0
+            return {"cleared": n, "calendars_remaining": len(self.q("calendar.db", "SELECT id FROM calendars")), "remaining_scheduled": left}
+        if cmd != "dump":
+            return None
+        if "dump-fails-calendar" in self.faults:
+            return {"error": "IllegalStateException: boom"}
+        self._sync_armed()
+        rows = self.q("calendar.db", "SELECT * FROM events ORDER BY start_utc, id")
+        offset, limit, nxt = self._page(ex, len(rows))
+        cals = self.q("calendar.db", "SELECT * FROM calendars ORDER BY is_default DESC, created_at")
+        hidden = {c["id"] for c in cals if not c["visible"]}
+        counts = {c["id"]: len([r for r in rows if r["calendar_id"] == c["id"]]) for c in cals}
+        names = {c["id"]: c["name"] for c in cals}
+        events = []
+        for r in rows[offset:offset + limit]:
+            e = self._event_json(r)
+            e.update({"id": self._occurrence_id(r, r["start_utc"]), "series_id": r["id"], "calendar_id": r["calendar_id"], "calendar_name": names.get(r["calendar_id"]),
+                      "end": self._iso(r["end_utc"]), "all_day": bool(r["all_day"]), "description": r["description"], "color": "#4285F4",
+                      "recurrence_until": self._iso(r["recurrence_until"]) if r["recurrence_until"] else None, "timezone": r["tz"],
+                      "hidden": r["calendar_id"] in hidden, "created_at": "2026-10-07T12:00:00+08:00", "updated_at": "2026-10-07T12:00:00+08:00"})
+            events.append(e)
+        reminders = []
+        if self.armed is not None:
+            cur = self.q("calendar.db", "SELECT title FROM events WHERE id = ?", self.armed["series"])
+            reminders.append({"id": "%s@%d" % (self.armed["series"], self.armed["start_ms"]), "title": cur[0]["title"] if cur else None,
+                              "minutes_before": self.armed["minutes_before"], "fire_at": self._iso(self.armed["fire_ms"]),
+                              "registered": "reminder-not-registered" not in self.faults})
+            if "two-armed" in self.faults:
+                reminders.append(dict(reminders[0], id=reminders[0]["id"] + "-b"))
+        return {"calendars": [{"id": c["id"], "name": c["name"], "color": "#34A853", "visible": bool(c["visible"]), "is_default": bool(c["is_default"]),
+                               "event_count": counts[c["id"]]} for c in cals],
+                "events": events, "reminders_scheduled": reminders, "timezone": "Asia/Shanghai", "total": len(rows), "offset": offset, "limit": limit,
+                "count": len(events), "next_offset": nxt}
 
     # ------------------------------------------------------------------ running a tool the way AgentOS would
     def call_tool(self, name, args, session="sess-1"):
@@ -394,6 +464,7 @@ class FakePhone:
         n = len(self.q("calendar.db", "SELECT id FROM events WHERE calendar_id=?", a["id"]))
         self.q("calendar.db", "DELETE FROM events WHERE calendar_id=?", a["id"])
         self.q("calendar.db", "DELETE FROM calendars WHERE id=?", a["id"])
+        self._events_changed(deleted=True)
         return {"deleted": True, "id": a["id"], "deleted_events": n}
 
     def _event_json(self, r, start=None):
@@ -413,6 +484,7 @@ class FakePhone:
         eid = "ev-" + uuid.uuid4().hex[:6]
         self.q("calendar.db", "INSERT INTO events VALUES (?,?,?,?,?,0,?,?,?,0,0,NULL,?,?,?,0,0)", eid, a.get("calendar_id", "cal-default"), a["title"], a.get("description", ""), a.get("location", ""),
                start, end, "Asia/Shanghai", ",".join(str(x) for x in a.get("reminder_minutes", [])), a.get("recurrence", "none"), until)
+        self._events_changed()
         return self._event_json(self._event(eid))
 
     def _event(self, eid):
@@ -426,12 +498,15 @@ class FakePhone:
 
     def t_event_update(self, a):
         r = self._event(a.get("id", ""))
-        self.q("calendar.db", "UPDATE events SET title=?, location=? WHERE id=?", a.get("title", r["title"]), a.get("location", r["location"]), r["id"])
+        reminders = ",".join(str(x) for x in a["reminder_minutes"]) if "reminder_minutes" in a else r["reminders"]
+        self.q("calendar.db", "UPDATE events SET title=?, location=?, reminders=? WHERE id=?", a.get("title", r["title"]), a.get("location", r["location"]), reminders, r["id"])
+        self._events_changed()
         return self._event_json(self._event(r["id"]))
 
     def t_event_delete(self, a):
         r = self._event(a.get("id", ""))
         self.q("calendar.db", "DELETE FROM events WHERE id=?", r["id"])
+        self._events_changed(deleted=True)
         return {"deleted": True, "id": a["id"], "series_id": r["id"], "title": r["title"]}
 
     def _occurrences(self, lo, hi):
