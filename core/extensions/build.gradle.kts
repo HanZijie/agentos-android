@@ -25,3 +25,17 @@ tasks.named<ProcessResources>("processResources") {
         into("org/agentos/extensions/agent-plugins-1.0")
     }
 }
+
+// A12：SamplePluginsConformanceTest 读仓库根的 plugins/samples/*（App 合入 main 之前用 AGENTOS_SAMPLES_ROOT 指到各自的 worktree，
+// 路径用 : 分隔）和 docs/sample-apps.md。它们（以及环境变量）要算进测试任务的输入，否则文件变了 Gradle 还会拿缓存的结果。
+tasks.named<Test>("test") {
+    val samplesRoot = providers.environmentVariable("AGENTOS_SAMPLES_ROOT").orElse("")
+    inputs.property("agentosSamplesRoot", samplesRoot)
+    val sampleFiles = listOf("assets/agent-plugin/**", "AndroidManifest.xml", "java/**/*.kt", "kotlin/**/*.kt")
+    val roots = listOf(rootProject.layout.projectDirectory.asFile) + samplesRoot.get().split(File.pathSeparatorChar).filter { it.isNotBlank() }.map { File(it) }
+    for (root in roots) {
+        inputs.files(fileTree(File(root, "plugins/samples")) { include(sampleFiles.map { "*/src/main/$it" }); exclude("**/build/**") })
+            .withPropertyName("sampleApps-${root.name}").withPathSensitivity(PathSensitivity.ABSOLUTE).optional()
+    }
+    inputs.file(rootProject.layout.projectDirectory.file("docs/sample-apps.md")).withPropertyName("sampleAppsDoc").optional()
+}
