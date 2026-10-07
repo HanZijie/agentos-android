@@ -50,6 +50,10 @@ bridge = None
 tunnel = None
 try:
     adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
+    # 注意顺序：名字不以 live- / byok- 开头的场景（desktop-access 等）会先跑 ensureTestModel，把模型源改成回环假端点。
+    # 所以先开电脑端接入，**最后**才配真实模型，并在发 prompt 前核对模型源的 baseUrl。
+    R.run_one(adb, "nl-off", R.INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
+    R.run_one(adb, "nl-on", R.INAPP_ACTIVITY, "desktop-access", {"on": True}, 60)
     if TUNNEL:
         import live_tunnel
         tunnel = live_tunnel.MiniMaxTunnel(key).start()
@@ -64,9 +68,11 @@ try:
         R.push_key(adb, "live_key", key)
         r = R.run_one(adb, "nl-live-model", R.INAPP_ACTIVITY, "live-model-set", {"provider": "minimax-cn", "model": os.environ.get("LIVE_MODEL", "MiniMax-M3")}, 60)
         check("real MiniMax model configured (key via stdin)", r and r.get("ok"), r and r.get("summary"))
+        st = D.debug_op(adb, "status")
+        check("model source is the REAL endpoint (not the loopback fake)",
+              st.get("modelUsable") is True and str(st.get("modelBaseUrl") or "").startswith("https://api.minimaxi.com") and st.get("modelId") == os.environ.get("LIVE_MODEL", "MiniMax-M3"),
+              {k: st.get(k) for k in ("modelUsable", "modelBaseUrl", "modelId")})
     bcast("org.agentos.app/.agent.ConsentDebugReceiver", op="mode", mode="allow")
-    R.run_one(adb, "nl-off", R.INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
-    R.run_one(adb, "nl-on", R.INAPP_ACTIVITY, "desktop-access", {"on": True}, 60)
     code = D.debug_op(adb, "pair").get("code")
     bridge = D.Bridge(adb, os.path.join(state_dir.name, "acp-bridge.json"), code=code, label="live-nl")
     bridge.request("initialize", {"protocolVersion": 1, "clientCapabilities": {}}, 40)
