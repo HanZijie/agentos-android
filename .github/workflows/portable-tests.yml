@@ -142,3 +142,18 @@ jobs:
         run: |
           AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=anthropic npm test
           AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=openai npm test
+
+  device-test-scripts:
+    name: 设备测试脚本的单元测试（假模型端点、验收驱动；不需要设备）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 单元测试（tests/device/acp-channel/unit）
+        working-directory: tests/device/acp-channel
+        run: python3 -m unittest discover -s unit -p 'test_*.py' -v

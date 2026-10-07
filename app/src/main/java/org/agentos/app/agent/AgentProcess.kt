@@ -30,6 +30,7 @@ import org.agentos.app.agent.supervisor.SupervisorStatus
 import org.agentos.app.agent.supervisor.SupervisorStatusReceiver
 import org.agentos.runtime.AgentRuntime
 import org.agentos.runtime.AgentRuntimes
+import org.agentos.runtime.RuntimeConfig
 import org.agentos.runtime.RuntimeEngine
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.pi.ModelCatalog
@@ -66,14 +67,34 @@ class AgentProcess private constructor(val app: Context) {
         catalogSource = { app.assets.open(MODEL_CATALOG_ASSET).bufferedReader().use { ModelCatalog.parse(it.readText()) } },
         log = runtimeLog,
     )
+    /** 自动选会话的 Jev endpoint 和 key（自己的 Keystore 主密钥）；没有 key 时路由回退为新建会话（jev_unconfigured）。 */
+    val jev = JevSources(File(app.filesDir, JEV_DIR), AndroidKeystoreCipher(JevSources.JEV_ALIAS), secrets, runtimeLog)
     val environment = AndroidEnvironment()
 
     /** Extension Host（`:ext`）的代理：工具目录、调用、用户策略的镜像（C7b，docs/extensions.md 第 9 节）。 */
     val extensions = ExtensionClient(app, runtimeLog)
-    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals, skills = extensions.skills)
+    /**
+     * 工具调用的用户确认。**release 仍是“一律拒绝”**，直到 D5.2 的确认界面（ConsentSurface）接入；
+     * debug 构建里先接上 A11 的 ConsentCoordinator + AutoConsentResponder，让 adb 无人值守端到端测试能放行（ConsentDebugReceiver 设置 mode）。
+     */
+    val autoConsent: org.agentos.runtime.consent.AutoConsentResponder? =
+        if (debuggable) org.agentos.runtime.consent.AutoConsentResponder() else null
+    private val consentPort: org.agentos.runtime.ports.ConsentPort = autoConsent?.let { responder ->
+        // “始终允许”的跨进程写回已经有了（extensions.approvalWriter，C7b），但 sample_apps_consent_e2e.py 还按“不提供始终允许”断言：
+        // 换上它要同时改那条断言，由整合人决定；在那之前保持不可用（安全默认）
+        org.agentos.runtime.consent.ConsentCoordinator(responder, org.agentos.runtime.consent.ApprovalWriter.UNAVAILABLE, scope, log = runtimeLog)
+            .also { responder.attach(it) }
+    } ?: NotOpen.CONSENT
+    val hostPort = HostPortImpl(
+        store, models, secrets, environment, runtimeLog,
+        tools = extensions, approvals = extensions.approvals, skills = extensions.skills, consent = consentPort,
+    )
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
-    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, PiAgentCores.create(app, hostPort))
+    val engine: RuntimeEngine = AgentRuntimes.create(
+        hostPort, PiAgentCores.create(app, hostPort),
+        RuntimeConfig(jev = ConfiguredJevProvider(jev, secrets)),
+    )
     val runtime: AgentRuntime = engine
     @Volatile private var engineStarted = false
 
@@ -386,6 +407,7 @@ class AgentProcess private constructor(val app: Context) {
 
         /** BYOK 模型来源（明文部分 + key 的密文），CE 存储 files/ 下。 */
         const val BYOK_DIR = "byok"
+        const val JEV_DIR = "jev"
 
         /** B 的 core/pi-runtime/build.mjs 生成的厂商预设。 */
         const val MODEL_CATALOG_ASSET = "model-catalog.json"

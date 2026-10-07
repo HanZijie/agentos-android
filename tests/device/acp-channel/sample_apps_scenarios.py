@@ -1,0 +1,482 @@
+"""Sample-apps acceptance: the scenarios (A12). Building blocks are in sample_apps_lib.py, the driver is sample_apps_e2e.py.
+
+Scripted mode (deterministic, fake model): every Step is one prompt turn. The prompt is a fake-model script (fake_model.py `toolCalls`);
+AgentOS runs the real Pi + CapabilityBroker + ExtensionToolHost + the app's MCP service, and after the turn the driver reads the app's
+database (sample_apps_lib state readers) and compares it with what the step must have done. Steps that need an id from an earlier step
+read it from `ctx.vars` (captured from the tool result the app really returned).
+
+Data written by a run carries the marker `e2e-<run id>` (alarm label, calendar and event titles, note text) so that leftovers can be
+found and removed (cleanup()) even after a failed run.
+"""
+import json
+from datetime import datetime
+
+import sample_apps_lib as L
+from sample_apps_lib import Call, Check, DriverError, Step, eq, truth
+
+
+NOT_OFFERED = "not found|tool_not_in_catalog"
+
+
+def var(v, name):
+    if name not in v:
+        raise DriverError("needs %r from an earlier step that did not produce it" % name)
+    return v[name]
+
+
+def series_of(event):
+    """The id of the event series: a recurring event is reported with an occurrence id (`<series>@<key>`), `series_id` is the row id."""
+    return str(event.get("series_id") or event["id"].split("@")[0])
+
+
+def find(rows, id):
+    return next((r for r in rows if r["id"] == id), None)
+
+
+def fields(what, row, **expect):
+    """One check per expected field of a database row (a missing row is one failed check)."""
+    if row is None:
+        return [Check("%s exists in the app database" % what, False, "a row", "no row")]
+    return [eq("%s: %s" % (what, k), want, row.get(k)) for k, want in expect.items()]
+
+
+def unchanged(sample_key, name):
+    def verify(before, after, turn, ctx):
+        return [eq("%s data unchanged" % name, before[sample_key], after[sample_key])]
+    return verify
+
+
+# ---------------------------------------------------------------------- AgentOS side (not an app step)
+
+WAIT_SCALE = 1.0  # unit tests shrink the catalog waits
+
+
+def wait_catalog(ctx, pred, timeout=10):
+    import time
+    end = time.time() + timeout * WAIT_SCALE
+    cat = ctx.ext.catalog()
+    while not pred(cat) and time.time() < end:
+        time.sleep(0.5 * WAIT_SCALE)
+        cat = ctx.ext.catalog()
+    return cat
+
+
+def run_check_step(id, title, fn, ctx):
+    import time
+    t0 = time.time()
+    checks, error = [], None
+    try:
+        checks = fn(ctx)
+    except Exception as e:  # noqa: BLE001
+        error = "%s: %s" % (type(e).__name__, e)
+    ok = error is None and bool(checks) and all(c.ok for c in checks)
+    return {"id": id, "sample": None, "title": title, "ok": ok, "ms": round((time.time() - t0) * 1000), "error": error,
+            "checks": [c.to_json() for c in checks], "turn": None}
+
+
+def setup_discover(allow_enabled):
+    def fn(ctx):
+        plugins = ctx.ext.plugins()
+        out = []
+        for name, s in L.SAMPLES.items():
+            p = next((x for x in plugins if x["package"] == s.package or (x["package"] is None and x["name"] == name)), None)
+            out.append(Check("plugin %s is discovered (package %s)" % (name, s.package), p is not None, "listed by ExtensionDebugReceiver", [x["package"] or x["name"] for x in plugins]))
+            if p is not None and not allow_enabled:
+                out.append(eq("plugin %s is off by default" % name, False, p["enabled"]))
+        return out
+    return fn
+
+
+def setup_enable(ctx):
+    for s in L.SAMPLES.values():
+        ctx.ext.enable(s.package)
+    cat = wait_catalog(ctx, lambda c: all(L.model_name(s.name, t) in c for s in L.SAMPLES.values() for t in s.tools), timeout=20)
+    plugins = ctx.ext.plugins()
+    out = []
+    for name, s in L.SAMPLES.items():
+        p = next((x for x in plugins if x["package"] == s.package), None)
+        out.append(eq("plugin %s is on after enable" % name, True, bool(p and p["enabled"])))
+    out.append(truth("the catalog is not empty after enable", "tools of all three plugins", bool(cat), len(cat)))
+    return out
+
+
+def setup_catalog(ctx):
+    cat = ctx.ext.catalog()
+    out = []
+    extras = {}
+    for name, s in L.SAMPLES.items():
+        for t in s.tools:
+            n = L.model_name(name, t)
+            out.append(eq("%s is offered as %s with risk" % (t, n), L.expected_risk(t), cat.get(n)))
+        prefix = "mcp__%s__%s__" % (name, name)
+        extras[name] = sorted(n[len(prefix):] for n in cat if n.startswith(prefix) and n[len(prefix):] not in s.tools)
+    ctx.vars["_extra_tools"] = extras
+    return out
+
+
+def setup_consent_allow(ctx):
+    ctx.consent.set_mode("allow")
+    return [truth("auto-consent is on (mode=allow)", "ConsentDebugReceiver accepted mode=allow", True, "ok")]
+
+
+# ---------------------------------------------------------------------- alarm
+
+def alarm_steps(ctx):
+    mark = "e2e-" + ctx.run_id
+    pkg = L.SAMPLES["alarm"].package
+    S = []
+
+    def v_create(b, a, t, c):
+        row = find(a["alarms"], var(c.vars, "alarm_id"))
+        return fields("alarm", row, time="07:15", label=mark, days=["mon", "tue"], enabled=True) + [eq("one alarm more", len(b["alarms"]) + 1, len(a["alarms"]))]
+
+    S.append(Step("alarm.create", "alarm", "alarm_create: a 07:15 alarm on Mon+Tue",
+                  [Call("alarm", "alarm_create", {"time": "07:15", "label": mark, "days": ["mon", "tue"]})],
+                  capture=lambda tools, c: {"alarm_id": str(tools[0].json()["id"])}, verify=v_create))
+
+    def v_list(b, a, t, c):
+        r = t.tools[0].json() or {}
+        ids = [x.get("id") for x in r.get("alarms", [])]
+        return [eq("alarm_list count equals the rows in alarms.db", len(a["alarms"]), r.get("count")),
+                truth("the new alarm is in the list", "id %s in %s" % (c.vars["alarm_id"], ids), c.vars["alarm_id"] in ids, ids)]
+
+    S.append(Step("alarm.list", "alarm", "alarm_list sees it", [Call("alarm", "alarm_list")], verify=v_list))
+
+    S.append(Step("alarm.update", "alarm", "alarm_update: 08:30, new label (days stay)",
+                  lambda v: [Call("alarm", "alarm_update", {"id": var(v, "alarm_id"), "time": "08:30", "label": mark + "-b"})],
+                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), time="08:30", label=mark + "-b", days=["mon", "tue"], enabled=True)))
+
+    S.append(Step("alarm.switch_off", "alarm", "alarm_set_enabled false",
+                  lambda v: [Call("alarm", "alarm_set_enabled", {"id": var(v, "alarm_id"), "enabled": False})],
+                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=False, time="08:30")))
+
+    def v_next_off(b, a, t, c):
+        r = t.tools[0].json()
+        ours = isinstance(r, dict) and (r.get("alarm") or {}).get("id") == c.vars["alarm_id"]
+        return [truth("a switched-off alarm is not the next one", "null or another alarm", not ours, r)]
+
+    S.append(Step("alarm.next_while_off", "alarm", "alarm_next ignores the switched-off alarm", [Call("alarm", "alarm_next")], verify=v_next_off))
+
+    S.append(Step("alarm.switch_on", "alarm", "alarm_set_enabled true",
+                  lambda v: [Call("alarm", "alarm_set_enabled", {"id": var(v, "alarm_id"), "enabled": True})],
+                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=True)))
+
+    def v_get(b, a, t, c):
+        r = t.tools[0].json() or {}
+        return [eq("alarm_get id", c.vars["alarm_id"], str(r.get("id"))), eq("alarm_get time", "08:30", r.get("time")),
+                truth("an enabled alarm has a next_fire_at", "ISO-8601 time", bool(r.get("next_fire_at")), r.get("next_fire_at"))]
+
+    S.append(Step("alarm.get", "alarm", "alarm_get shows the next ring time",
+                  lambda v: [Call("alarm", "alarm_get", {"id": var(v, "alarm_id")})], verify=v_get))
+
+    def v_next(b, a, t, c):
+        r = t.tools[0].json()
+        enabled_any = any(x["enabled"] for x in a["alarms"])
+        shape = (r is None) if not enabled_any else (isinstance(r, dict) and bool(r.get("next_fire_at")) and (r.get("fires_in_minutes") or 0) >= 0)
+        return [truth("alarm_next returns the next ring time (or null when nothing is on)", "object with next_fire_at when an alarm is on, null otherwise", shape, r)]
+
+    S.append(Step("alarm.next", "alarm", "alarm_next with an alarm on", [Call("alarm", "alarm_next")], verify=v_next))
+
+    S.append(Step("alarm.delete", "alarm", "alarm_delete (high risk: confirmed by the auto-consent)",
+                  lambda v: [Call("alarm", "alarm_delete", {"id": var(v, "alarm_id")})],
+                  verify=lambda b, a, t, c: [truth("the alarm is gone from alarms.db", "no row with id %s" % c.vars["alarm_id"], find(a["alarms"], c.vars["alarm_id"]) is None, None),
+                                             eq("one alarm less", len(b["alarms"]) - 1, len(a["alarms"]))]))
+
+    # ---- failure paths
+    S.append(Step("alarm.err.missing_time", "alarm", "alarm_create without time: error to the model, nothing written",
+                  [Call("alarm", "alarm_create", {"label": mark}, ok=False)], verify=unchanged("alarms", "alarm")))
+    S.append(Step("alarm.err.bad_time", "alarm", "alarm_create with time 25:99: error, nothing written",
+                  [Call("alarm", "alarm_create", {"time": "25:99", "label": mark}, ok=False)], verify=unchanged("alarms", "alarm")))
+    S.append(Step("alarm.err.unknown_id", "alarm", "alarm_get with an id that does not exist: error",
+                  [Call("alarm", "alarm_get", {"id": "999999999"}, ok=False)], verify=unchanged("alarms", "alarm")))
+    S.append(Step("alarm.denied", "alarm", "confirmation declined: tool_denied reaches the model, nothing written",
+                  [Call("alarm", "alarm_create", {"time": "06:00", "label": mark}, ok=False, error_has="tool_denied")],
+                  pre=lambda c: c.consent.set_mode("deny"), post=lambda c: c.consent.set_mode("allow"), verify=unchanged("alarms", "alarm")))
+    S += plugin_off_steps(ctx, "alarm", pkg, Call("alarm", "alarm_list"), "alarms", "alarm")
+    return S
+
+
+def plugin_off_steps(ctx, sample, pkg, probe_call, state_key, label):
+    s = L.SAMPLES[sample]
+
+    def pre(c):
+        c.ext.disable(pkg)
+        c.vars["_off_catalog"] = wait_catalog(c, lambda cat: not any(L.model_name(sample, t) in cat for t in s.tools))
+
+    def verify(b, a, t, c):
+        cat = c.vars.pop("_off_catalog", {})
+        left = [n for n in cat if n.startswith("mcp__%s__%s__" % (sample, sample))]
+        return [truth("no %s tool is offered while the plugin is off" % label, "none of mcp__%s__*" % sample, not left, left),
+                truth("a call to it is refused (Pi: not found, or the broker: tool_not_in_catalog)", "text says so", bool(t.tools) and L.not_offered(t.tools[0].text), t.tools[0].text[:200] if t.tools else None),
+                eq("%s data unchanged" % label, b[state_key], a[state_key])]
+
+    off = Step("%s.plugin_off" % sample, sample, "plugin disabled: its tools vanish, a call is refused", [Call(sample, probe_call.tool, probe_call.arguments, ok=False, error_has=NOT_OFFERED)],
+               pre=pre, verify=verify)
+
+    def pre_on(c):
+        c.ext.enable(pkg)
+        c.vars["_on_catalog"] = wait_catalog(c, lambda cat: all(L.model_name(sample, t) in cat for t in s.tools))
+
+    def verify_on(b, a, t, c):
+        cat = c.vars.pop("_on_catalog", {})
+        return [truth("all documented %s tools are back after re-enabling" % label, "all %d tools" % len(s.tools), all(L.model_name(sample, t) in cat for t in s.tools), sorted(n for n in cat if n.startswith("mcp__%s__" % sample))[:20])]
+
+    on = Step("%s.plugin_on" % sample, sample, "plugin enabled again: tools are back and work", [probe_call], pre=pre_on, verify=verify_on)
+    return [off, on]
+
+
+# ---------------------------------------------------------------------- calendar
+
+def calendar_steps(ctx):
+    mark = "e2e-" + ctx.run_id
+    pkg = L.SAMPLES["calendar"].package
+    d = ctx.day(10)
+    S = []
+
+    def v_cal(b, a, t, c):
+        row = find(a["calendars"], var(c.vars, "cal_id"))
+        return fields("calendar", row, name=mark + "-cal") + [eq("one calendar more", len(b["calendars"]) + 1, len(a["calendars"]))]
+
+    S.append(Step("calendar.create_calendar", "calendar", "calendar_create", [Call("calendar", "calendar_create", {"name": mark + "-cal"})],
+                  capture=lambda tools, c: {"cal_id": str(tools[0].json()["id"])}, verify=v_cal))
+
+    def v_event(b, a, t, c):
+        row = find(a["events"], var(c.vars, "event_id"))
+        return fields("event", row, title=mark + " 周会", calendar_id=c.vars["cal_id"], location="A1", recurrence="weekly", reminders=[10], all_day=False,
+                      start_utc=c.epoch_ms(d, "10:00"), end_utc=c.epoch_ms(d, "11:00")) + [eq("one event more", len(b["events"]) + 1, len(a["events"]))]
+
+    S.append(Step("calendar.create_event", "calendar", "event_create: weekly 10:00-11:00 with a reminder, in the new calendar",
+                  lambda v: [Call("calendar", "event_create", {"title": mark + " 周会", "start": ctx.local(d, "10:00"), "end": ctx.local(d, "11:00"), "calendar_id": var(v, "cal_id"),
+                                                               "location": "A1", "reminder_minutes": [10], "recurrence": "weekly",
+                                                               "recurrence_until": ctx.local(ctx.day(38), "23:59")})],
+                  capture=lambda tools, c: {"event_id": series_of(tools[0].json())}, verify=v_event))
+
+    def v_list(b, a, t, c):
+        r = t.tools[0].json() or {}
+        evs = r.get("events", [])
+        return [eq("a weekly series shows up once per week in the range (3 occurrences in 15 days)", 3, len(evs)),
+                truth("every occurrence belongs to the series", "series_id %s" % c.vars["event_id"], all(e.get("series_id") == c.vars["event_id"] for e in evs), [e.get("series_id") for e in evs])]
+
+    S.append(Step("calendar.list_range", "calendar", "event_list over 15 days expands the series",
+                  lambda v: [Call("calendar", "event_list", {"from": ctx.local(d, "00:00"), "to": ctx.local(ctx.day(25), "00:00"), "calendar_id": var(v, "cal_id")})], verify=v_list))
+
+    def v_search(b, a, t, c):
+        r = t.tools[0].json() or {}
+        ids = [e.get("series_id") for e in r.get("events", [])]
+        return [truth("event_search finds the series by its title", "series %s in results" % c.vars["event_id"], c.vars["event_id"] in ids, ids)]
+
+    S.append(Step("calendar.search", "calendar", "event_search by title", [Call("calendar", "event_search", {"query": mark + " 周会"})], verify=v_search))
+
+    def v_free(b, a, t, c):
+        r = t.tools[0].json() or {}
+        busy_from, busy_to = datetime.fromisoformat(ctx.local(d, "10:00")), datetime.fromisoformat(ctx.local(d, "11:00"))
+        overlap = []
+        for s in r.get("slots", []):
+            s0, s1 = datetime.fromisoformat(s["start"]), datetime.fromisoformat(s["end"])
+            if s0 < busy_to and s1 > busy_from:
+                overlap.append(s)
+        return [truth("free_slots has slots", "a non-empty list", bool(r.get("slots")), r.get("slots")),
+                truth("no free slot overlaps the 10:00-11:00 event", "no overlap", not overlap, overlap)]
+
+    S.append(Step("calendar.free_slots", "calendar", "free_slots on the day: the 10:00-11:00 event blocks its hour",
+                  [Call("calendar", "free_slots", {"date": d.isoformat(), "duration_minutes": 60})], verify=v_free))
+
+    S.append(Step("calendar.update_event", "calendar", "event_update: new title and place (series stays weekly)",
+                  lambda v: [Call("calendar", "event_update", {"id": var(v, "event_id"), "title": mark + " 周会(改)", "location": "B2"})],
+                  verify=lambda b, a, t, c: fields("event", find(a["events"], c.vars["event_id"]), title=mark + " 周会(改)", location="B2", recurrence="weekly", reminders=[10],
+                                                    start_utc=c.epoch_ms(d, "10:00"))))
+
+    S.append(Step("calendar.delete_event", "calendar", "event_delete (high risk)",
+                  lambda v: [Call("calendar", "event_delete", {"id": var(v, "event_id")})],
+                  verify=lambda b, a, t, c: [truth("the event row is gone", "no row", find(a["events"], c.vars["event_id"]) is None, None),
+                                             eq("one event less", len(b["events"]) - 1, len(a["events"]))]))
+
+    S.append(Step("calendar.delete_calendar", "calendar", "calendar_delete (high risk)",
+                  lambda v: [Call("calendar", "calendar_delete", {"id": var(v, "cal_id")})],
+                  verify=lambda b, a, t, c: [truth("the calendar row is gone", "no row", find(a["calendars"], c.vars["cal_id"]) is None, None),
+                                             eq("one calendar less", len(b["calendars"]) - 1, len(a["calendars"]))]))
+
+    # ---- failure paths
+    S.append(Step("calendar.err.missing_title", "calendar", "event_create without title: error, nothing written",
+                  [Call("calendar", "event_create", {"start": ctx.local(d, "09:00")}, ok=False)], verify=unchanged("events", "calendar")))
+    S.append(Step("calendar.err.bad_time", "calendar", "event_create with an unparsable start: error, nothing written",
+                  [Call("calendar", "event_create", {"title": mark, "start": "tomorrow 3pm"}, ok=False)], verify=unchanged("events", "calendar")))
+    S.append(Step("calendar.err.unknown_id", "calendar", "event_get with an unknown id: error",
+                  [Call("calendar", "event_get", {"id": "no-such-event"}, ok=False)], verify=unchanged("events", "calendar")))
+    S.append(Step("calendar.denied", "calendar", "confirmation declined: tool_denied, nothing written",
+                  [Call("calendar", "event_create", {"title": mark + " denied", "start": ctx.local(d, "12:00")}, ok=False, error_has="tool_denied")],
+                  pre=lambda c: c.consent.set_mode("deny"), post=lambda c: c.consent.set_mode("allow"), verify=unchanged("events", "calendar")))
+    S += plugin_off_steps(ctx, "calendar", pkg, Call("calendar", "calendar_list"), "calendars", "calendar")
+    return S
+
+
+# ---------------------------------------------------------------------- notes
+
+def notes_steps(ctx):
+    mark = "e2e-" + ctx.run_id
+    pkg = L.SAMPLES["notes"].package
+    S = []
+    body = "# %s 备忘\n第一行" % mark
+
+    S.append(Step("notes.create", "notes", "note_create with a tag",
+                  [Call("notes", "note_create", {"content": body, "tags": ["e2e"]})],
+                  capture=lambda tools, c: {"note_id": str(tools[0].json()["id"])},
+                  verify=lambda b, a, t, c: fields("note", find(a["notes"], var(c.vars, "note_id")), content=body, tags=["e2e"], status="active")
+                  + [eq("one note more", len(b["notes"]) + 1, len(a["notes"]))]))
+
+    S.append(Step("notes.append", "notes", "note_append adds a line at the end",
+                  lambda v: [Call("notes", "note_append", {"id": var(v, "note_id"), "text": "追加的一行"})],
+                  verify=lambda b, a, t, c: [truth("the body ends with the appended line", "…追加的一行",
+                                                     (find(a["notes"], c.vars["note_id"]) or {}).get("content", "").endswith("追加的一行"),
+                                                     (find(a["notes"], c.vars["note_id"]) or {}).get("content"))]))
+
+    def v_search(b, a, t, c):
+        r = t.tools[0].json() or {}
+        ids = [x.get("id") for x in r.get("results", [])]
+        return [truth("note_search finds it by the appended text", "id %s in results" % c.vars["note_id"], c.vars["note_id"] in ids, ids)]
+
+    S.append(Step("notes.search", "notes", "note_search", [Call("notes", "note_search", {"query": "追加的一行"})], verify=v_search))
+
+    S.append(Step("notes.retag", "notes", "note_update replaces the tag list",
+                  lambda v: [Call("notes", "note_update", {"id": var(v, "note_id"), "tags": ["e2e", "工作"]})],
+                  verify=lambda b, a, t, c: fields("note", find(a["notes"], c.vars["note_id"]), tags=["e2e", "工作"], status="active")))
+
+    def v_tags(b, a, t, c):
+        r = t.tools[0].json() or {}
+        names = [x.get("name") for x in r.get("tags", [])]
+        return [truth("tag_list shows the new tags", "e2e and 工作 in %s" % names, "e2e" in names and "工作" in names, names)]
+
+    S.append(Step("notes.tag_list", "notes", "tag_list", [Call("notes", "tag_list")], verify=v_tags))
+
+    for sid, tool, status, title in (("trash", "note_trash", "trashed", "note_trash moves it to the trash"), ("restore", "note_restore", "active", "note_restore brings it back"),
+                                      ("trash_again", "note_trash", "trashed", "note_trash again")):
+        S.append(Step("notes." + sid, "notes", title, lambda v, tool=tool: [Call("notes", tool, {"id": var(v, "note_id")})],
+                      verify=lambda b, a, t, c, status=status: fields("note", find(a["notes"], c.vars["note_id"]), status=status)))
+
+    S.append(Step("notes.delete", "notes", "note_delete from the trash is permanent (high risk)",
+                  lambda v: [Call("notes", "note_delete", {"id": var(v, "note_id")})],
+                  verify=lambda b, a, t, c: [truth("the note row is gone", "no row", find(a["notes"], c.vars["note_id"]) is None, None),
+                                             eq("one note less", len(b["notes"]) - 1, len(a["notes"]))]))
+
+    # ---- failure paths
+    S.append(Step("notes.create_keep", "notes", "note_create a note that must survive the next refusals",
+                  [Call("notes", "note_create", {"content": mark + " keep me"}), ],
+                  capture=lambda tools, c: {"keep_id": str(tools[0].json()["id"])},
+                  verify=lambda b, a, t, c: fields("note", find(a["notes"], c.vars["keep_id"]), status="active")))
+    S.append(Step("notes.err.delete_active", "notes", "note_delete on a note that is not in the trash: refused, the note stays",
+                  lambda v: [Call("notes", "note_delete", {"id": var(v, "keep_id")}, ok=False, error_has="trash")],
+                  verify=lambda b, a, t, c: fields("note", find(a["notes"], c.vars["keep_id"]), status="active") + [eq("notes unchanged", b["notes"], a["notes"])]))
+    S.append(Step("notes.err.missing_text", "notes", "note_append without text: error, nothing written",
+                  lambda v: [Call("notes", "note_append", {"id": var(v, "keep_id")}, ok=False)], verify=unchanged("notes", "notes")))
+    S.append(Step("notes.err.unknown_id", "notes", "note_get with an unknown id: error",
+                  [Call("notes", "note_get", {"id": "no-such-note"}, ok=False)], verify=unchanged("notes", "notes")))
+    S.append(Step("notes.denied", "notes", "confirmation declined: tool_denied, nothing written",
+                  [Call("notes", "note_create", {"content": mark + " denied"}, ok=False, error_has="tool_denied")],
+                  pre=lambda c: c.consent.set_mode("deny"), post=lambda c: c.consent.set_mode("allow"), verify=unchanged("notes", "notes")))
+    S += plugin_off_steps(ctx, "notes", pkg, Call("notes", "tag_list"), "notes", "notes")
+    return S
+
+
+def scripted_steps(ctx):
+    return alarm_steps(ctx) + calendar_steps(ctx) + notes_steps(ctx)
+
+
+# ---------------------------------------------------------------------- leftovers
+
+def leftovers(ctx):
+    """Rows this run created (marker in the text) that are still there: {app: [descriptions]}."""
+    mark = "e2e-" + ctx.run_id
+    out = {}
+    a = ctx.state("alarm")["alarms"]
+    out["alarm"] = [("alarm_delete", {"id": x["id"]}) for x in a if mark in x["label"]]
+    c = ctx.state("calendar")
+    ev = [("event_delete", {"id": e["id"]}) for e in c["events"] if mark in e["title"]]
+    cal = [("calendar_delete", {"id": x["id"]}) for x in c["calendars"] if mark in x["name"]]
+    out["calendar"] = ev + cal
+    n = ctx.state("notes")["notes"]
+    out["notes"] = [("note_trash", {"id": x["id"]}) for x in n if mark in x["content"] and x["status"] != "trashed"] \
+        + [("note_delete", {"id": x["id"]}) for x in n if mark in x["content"]]
+    return {k: v for k, v in out.items() if v}
+
+
+def cleanup(ctx, timeout=90):
+    """Remove what a (failed) run left behind, with the same path as the run: a scripted turn per app. Returns what was found."""
+    found = leftovers(ctx)
+    for app, calls in found.items():
+        script = {"toolCalls": [{"name": L.model_name(app, tool), "arguments": args} for tool, args in calls], "final": "cleanup-done"}
+        ctx.session.prompt(json.dumps(script, ensure_ascii=False), timeout)
+    return {app: [t for t, _ in calls] for app, calls in found.items()}
+
+
+# ---------------------------------------------------------------------- live (real model, natural language)
+
+class LiveCase:
+    def __init__(self, id, sample, prompt, verify):
+        self.id, self.sample, self.prompt, self.verify = id, sample, prompt, verify
+
+
+def next_weekday(today, weekday, next_week):
+    """The date of `weekday` (Mon=0) in the next ISO week (next_week) or the next strictly-later occurrence."""
+    from datetime import timedelta
+    if next_week:
+        monday = today - timedelta(days=today.weekday())
+        return monday + timedelta(days=7 + weekday)
+    delta = (weekday - today.weekday()) % 7 or 7
+    return today + timedelta(days=delta)
+
+
+def live_cases(ctx):
+    def v_alarm(b, a, t, c):
+        new = [x for x in a["alarms"] if x["id"] not in {y["id"] for y in b["alarms"]}]
+        ours = [x for x in new if x["time"] == "07:00"]
+        return [truth("an alarm at 07:00 was created", "one new alarm with time 07:00", bool(ours), new),
+                truth("it is enabled and one-time (no repeat days), for 'tomorrow morning'", "enabled, days []", bool(ours) and ours[0]["enabled"] and ours[0]["days"] == [], ours)]
+
+    def v_event(b, a, t, c):
+        known = {y["id"] for y in b["events"]}
+        new = [e for e in a["events"] if e["id"] not in known]
+        wed = {next_week_wed.isoformat() for next_week_wed in (next_weekday(c.today, 2, True), next_weekday(c.today, 2, False))}
+        hit = [e for e in new if "王总" in e["title"] or "王总" in (e["description"] or "")]
+        starts = []
+        for e in hit:
+            local = datetime.fromtimestamp(e["start_utc"] / 1000, tz=datetime.fromisoformat(c.local(c.today, "00:00")).tzinfo)
+            starts.append(local.strftime("%Y-%m-%d %H:%M"))
+        right_time = any(s[11:] == "15:00" and s[:10] in wed for s in starts)
+        return [truth("a new event mentions 王总", "one new event with 王总 in its title", bool(hit), [e["title"] for e in new]),
+                truth("it starts next Wednesday 15:00 (next ISO week, or the next Wednesday after today)", "date in %s, 15:00" % sorted(wed), right_time, starts),
+                truth("it has a 15 minute reminder", "reminders contains 15", any(15 in e["reminders"] for e in hit), [e["reminders"] for e in hit])]
+
+    def v_note(b, a, t, c):
+        known = {y["id"] for y in b["notes"]}
+        new = [n for n in a["notes"] if n["id"] not in known]
+        hit = [n for n in new if "新品发布" in n["title"] + n["content"]]
+        return [truth("a new note about 新品发布", "one new note mentioning it", bool(hit), [n["title"] for n in new]),
+                truth("tagged 工作", "tags contains 工作", any("工作" in n["tags"] for n in hit), [n["tags"] for n in hit])]
+
+    return [LiveCase("live.alarm", "alarm", "明早 7 点叫我起床", v_alarm),
+            LiveCase("live.calendar", "calendar", "下周三下午 3 点和王总开会，提前 15 分钟提醒", v_event),
+            LiveCase("live.notes", "notes", "记一条关于新品发布的备忘，打上工作标签", v_note)]
+
+
+def run_live_case(case, ctx, timeout=240):
+    """One natural-language prompt to the real model; the checks read the app state. The tool sequence and timing are recorded."""
+    import time
+    t0 = time.time()
+    checks, turn, error = [], None, None
+    try:
+        before = ctx.state(case.sample)
+        turn = ctx.session.prompt(case.prompt, timeout)
+        after = ctx.state(case.sample)
+        checks.append(eq("turn ends normally", "end_turn", turn.stop_reason if not turn.timeout else "timeout"))
+        checks.append(truth("the model called at least one tool", ">= 1 tool call", bool(turn.tools), [t.name for t in turn.tools]))
+        checks.append(truth("no tool call was refused", "no failed call", all(t.status == "completed" for t in turn.tools),
+                            [(t.name, t.status) for t in turn.tools if t.status != "completed"]))
+        checks += case.verify(before, after, turn, ctx)
+    except Exception as e:  # noqa: BLE001
+        error = "%s: %s" % (type(e).__name__, e)
+    ok = error is None and bool(checks) and all(c.ok for c in checks)
+    r = {"id": case.id, "sample": case.sample, "title": case.prompt, "ok": ok, "ms": round((time.time() - t0) * 1000), "error": error,
+         "checks": [c.to_json() for c in checks], "turn": turn.to_json() if turn else None}
+    if turn:
+        r["toolSequence"] = [{"name": t.name, "status": t.status} for t in turn.tools]
+    return r

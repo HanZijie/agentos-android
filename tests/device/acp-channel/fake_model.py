@@ -14,6 +14,10 @@ What a request streams is decided from the latest real user message (the prompt 
       tool: NAME -> round 0 streams the text and ends with a tool_use NAME{} (stop_reason tool_use);
       toolInput: {...} -> the tool_use input (default {}; C7b: e2e calls of plugin tools with arguments);
                     the next round (after the tool result) streams "after-tool:<result text>".
+      toolCalls: [{"name": FINAL_TOOL_NAME | "mcp": [plugin, server, tool], "arguments": {...}}, ...], final: TEXT
+                 -> one tool_use per round in order (arguments may reference earlier results: "$result[0].id"), then the
+                    final text; see scripted_tools.py for the placeholder rules. Every request record carries "plan"
+                    (what this round streamed) and "toolResults" (the results that came back this turn).
   - anything else echoes 20 lines "echo[i]: <first 64 chars>\n", 20 ms apart.
 
 Keys: only the keys given to the server are accepted (x-api-key); others get 401. Every request is
@@ -21,10 +25,15 @@ recorded with the kind of key it presented ("test", "byok", "none", "placeholder
 never recorded. GET /_log returns the records, POST /_reset clears them.
 """
 import json
+import os
 import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scripted_tools  # noqa: E402
 
 DEVICE_PORT = 18787
 
@@ -110,11 +119,13 @@ class FakeModel:
                 except ValueError:
                     body = {}
                 user, since, messages = conversation(body)
+                results = turn_tool_results(body)
                 with fake.lock:
                     fake.seq += 1
                     rec = {"id": fake.seq, "t": time.time(), "key": kind, "model": body.get("model"),
                            "userText": user[:200], "userChars": len(user), "round": since,
-                           "messages": messages, "status": 0, "sent": 0, "completed": False, "disconnected": False}
+                           "messages": messages, "toolResults": [{"isError": r["isError"], "text": r["text"][:4000]} for r in results],
+                           "plan": None, "status": 0, "sent": 0, "completed": False, "disconnected": False}
                     fake.log.append(rec)
                 if kind not in ("test", "byok"):
                     rec["status"] = 401
@@ -126,7 +137,7 @@ class FakeModel:
                 except OSError:
                     pass
                 try:
-                    self._stream(rec, body, user, since, messages)
+                    self._stream(rec, body, user, since, messages, results)
                     rec["completed"] = True
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.timeout, OSError):
                     rec["disconnected"] = True
@@ -144,7 +155,7 @@ class FakeModel:
                 d.update(data)
                 self._chunk("event: %s\ndata: %s\n\n" % (typ, json.dumps(d, ensure_ascii=False)))
 
-            def _stream(self, rec, body, user, since, messages):
+            def _stream(self, rec, body, user, since, messages, results):
                 self.send_response(200)
                 self.send_header("content-type", "text/event-stream")
                 self.send_header("cache-control", "no-cache")
@@ -173,7 +184,24 @@ class FakeModel:
                             time.sleep(pause)
                     self._ev("content_block_stop", {"index": i})
 
-                if script is None:
+                if scripted_tools.is_plan_script(script):
+                    plan = scripted_tools.plan_round(script, since, results)
+                    rec["plan"] = dict(plan, round=since)
+                    if plan["kind"] == "tool":
+                        i = index
+                        index += 1
+                        self._ev("content_block_start", {"index": i, "content_block": {
+                            "type": "tool_use", "id": "toolu_%d" % rec["id"], "name": plan["name"], "input": {}}})
+                        raw = json.dumps(plan["arguments"], ensure_ascii=False)
+                        half = max(1, len(raw) // 2)  # two deltas, like a real stream: the client has to join partial JSON
+                        for part in (raw[:half], raw[half:]):
+                            if part:
+                                self._ev("content_block_delta", {"index": i, "delta": {"type": "input_json_delta", "partial_json": part}})
+                        self._ev("content_block_stop", {"index": i})
+                        stop = "tool_use"
+                    else:
+                        text_block([(plan["text"], 0)])
+                elif script is None:
                     text_block(("echo[%d]: %s\n" % (i, user[:64]), 0.02) for i in range(20))
                 elif script.get("tool") and since >= 1:
                     result = last_tool_result(body)
@@ -254,6 +282,31 @@ def conversation(body):
         return "", 0, summary
     since = sum(1 for m in msgs[user_at + 1:] if m.get("role") == "assistant")
     return _text_of(msgs[user_at].get("content")), since, summary
+
+
+def turn_tool_results(body):
+    """The tool results of the current turn (after the latest real user message), in order: [{"isError", "text"}]."""
+    msgs = body.get("messages") or []
+    user_at = -1
+    for i in range(len(msgs) - 1, -1, -1):
+        m = msgs[i]
+        if m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if isinstance(c, list) and c and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
+            continue
+        user_at = i
+        break
+    out = []
+    for m in msgs[user_at + 1:]:
+        c = m.get("content")
+        if m.get("role") != "user" or not isinstance(c, list):
+            continue
+        for b in c:
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                inner = b.get("content")
+                out.append({"isError": bool(b.get("is_error")), "text": inner if isinstance(inner, str) else _text_of(inner)})
+    return out
 
 
 def last_tool_result(body):
