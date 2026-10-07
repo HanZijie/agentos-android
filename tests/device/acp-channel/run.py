@@ -23,6 +23,7 @@ import os
 import secrets
 import shutil
 
+import fake_jev
 import fake_model
 import subprocess
 import sys
@@ -103,6 +104,8 @@ def app_cases():
         ("pi-tool-round", a, "pi-tool-round", {}, 120, "check"),
         ("pi-context", a, "pi-context", {}, 120, "check"),
         ("recovery-context", a, "recovery-context", {}, 180, "check"),
+        # D5.1：自动选会话经 Jev（假 Jev 经 adb reverse；jev 用例的随机测试 key 经 stdin 投递）
+        ("jev-autoselect", a, "jev-autoselect", {"keyFile": "test/jev_key"}, 240, "jev"),
         # C7：Extension Host（:ext）的 IExtensionHost：跨进程调用、错误码原样传回
         ("ext-host", a, "ext-host", {}, 60, "check"),
         # C6：电脑端接入打开期间 :agent 留在前台、不被 cached-apps freezer 冻结（desktop_idle.py；releaseTest 不走 acp-bridge）
@@ -356,11 +359,16 @@ def main():
     only = set(a.only.split(",")) if a.only else None
     cases = sdk_cases() if a.suite == "sdk" else app_cases()
     test_key = make_test_key()
+    jev_key = make_test_key()
     real_key = live_key()
     fm = None
+    fj = None
     if a.suite == "app":
         # 假模型端点认两把测试 key：通道用例的固定 key 和 BYOK 用例的随机 key
         fm = start_fake_model(adb, {"agtest-fake-model-key": "test", test_key: "byok"})
+        # 假 Jev（D5.1）：只认 jev 用例的随机 key
+        fj = fake_jev.FakeJev({jev_key: "test"}).start()
+        adb.run("reverse", f"tcp:{fake_jev.DEVICE_PORT}", f"tcp:{fj.port}")
     results, failed = {}, []
     for name, activity, scenario, args, timeout, kind in cases:
         if only and name not in only:
@@ -370,6 +378,8 @@ def main():
             push_attempts = None
             if kind == "byok":
                 push_attempts = push_key(adb, "byok_key", test_key)
+            if kind == "jev":
+                push_attempts = push_key(adb, "jev_key", jev_key)
             if kind == "live" and real_key:
                 push_attempts = push_key(adb, "live_key", real_key)
             if scenario == "client-kill":
@@ -384,8 +394,8 @@ def main():
                 r = run_one(adb, name, activity, scenario, args, timeout)
         except Exception as e:  # noqa: BLE001
             r = {"ok": False, "error": f"driver: {e}"}
-        if r is not None and kind in ("byok", "live") and (kind == "byok" or real_key):
-            leak = leak_scan(adb, test_key if kind == "byok" else real_key, r)
+        if r is not None and kind in ("byok", "live", "jev") and (kind in ("byok", "jev") or real_key):
+            leak = leak_scan(adb, {"byok": test_key, "jev": jev_key}.get(kind, real_key), r)
             r["leakScan"] = leak
             r["summary"] = f"{r.get('summary', '')} logcatHits={leak['logcatHits']}/{leak['logcatLines']} resultHits={leak['resultHits']}"
             if leak["logcatHits"] or leak["resultHits"]:
@@ -407,6 +417,9 @@ def main():
     if fm is not None:
         adb.run("reverse", "--remove", f"tcp:{fake_model.DEVICE_PORT}", check=False)
         fm.stop()
+    if fj is not None:
+        adb.run("reverse", "--remove", f"tcp:{fake_jev.DEVICE_PORT}", check=False)
+        fj.stop()
     if a.suite == "app":
         # 兜底：不留任何测试 key / 真实 key 文件在设备上（用例读完本来就会删）
         dropped = run_one(adb, "drop-keys", INAPP_ACTIVITY, "drop-keys", {}, 60)

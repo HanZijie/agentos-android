@@ -14,6 +14,7 @@ class AgentScenarioActivity : ScenarioActivityBase() {
         // BYOK 和真实对话用例自己管理模型来源；其他用例都要一个可用的模型，否则宿主层以 model_not_configured 拒绝任务
         if (!name.startsWith("byok-") && !name.startsWith("live-")) ensureTestModel(this)
         return AgentServiceScenarios(this, work, status).run(name, args)
+            ?: JevScenarios(this, work, status).run(name, args)
             ?: ByokStoreScenarios(this, work, runId, status).run(name, args)
             ?: PiScenarios(this, work, status).run(name, args)
             ?: ChannelScenarios(this, work, runId, AppTarget(this), status).run(name, args)
