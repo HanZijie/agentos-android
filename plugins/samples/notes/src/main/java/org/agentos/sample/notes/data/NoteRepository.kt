@@ -185,6 +185,19 @@ class NoteRepository(
         ids.size
     }
 
+    /**
+     * 清空全部数据（含归档和回收站），返回删掉的条数。**不对界面和 MCP 开放**：只给 debug 包的 reset 命令（设备验收前清场）和测试用；
+     * release 里没人引用，会被 R8 去掉。
+     */
+    suspend fun clearAll(): Int = mutex.withLock {
+        loadLocked()
+        val ids = _notes.value.map { it.id }
+        if (ids.isEmpty()) return@withLock 0
+        withContext(io) { store.delete(ids) }
+        _notes.value = emptyList()
+        ids.size
+    }
+
     // ---- 内部 ----
 
     private fun find(id: String): Note? = _notes.value.firstOrNull { it.id == id }

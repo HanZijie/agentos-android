@@ -328,7 +328,10 @@ class NotesTools(
     private fun iso(epochMillis: Long): String =
         Instant.ofEpochMilli(epochMillis).atZone(zone()).truncatedTo(ChronoUnit.SECONDS).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
 
-    private fun summaryJson(note: Note): JsonObject = buildJsonObject { putNoteFields(note, summary = true) }
+    private fun summaryJson(note: Note): JsonObject = noteJson(note, summary = true)
+
+    /** 一条备忘录的 JSON（字段与 note_get / note_list 一致，不含正文；[summary] 时带 200 字摘要）。debug 的 dump 也用它，保证两边字段相同。 */
+    fun noteJson(note: Note, summary: Boolean = false): JsonObject = buildJsonObject { putNoteFields(note, summary) }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.putNoteFields(note: Note, summary: Boolean = false) {
         put("id", note.id)
