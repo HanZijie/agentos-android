@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- 仅 debug：adb am broadcast 驱动的测试入口（灌示例数据、造提醒测试日程、MCP 自测），release 包里没有 -->
+        <receiver
+            android:name="org.agentos.sample.calendar.debug.DebugReceiver"
+            android:exported="true" />
+    </application>
+</manifest>

@@ -1,4 +1,112 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">日历</string>
+    <string name="default_calendar_name">我的日历</string>
+
+    <!-- 标签页与顶栏 -->
+    <string name="tab_month">月</string>
+    <string name="tab_week">周</string>
+    <string name="tab_agenda">日程</string>
+    <string name="action_search">搜索</string>
+    <string name="action_calendars">日历管理</string>
+    <string name="action_new">新建</string>
+    <string name="action_add_event">添加日程</string>
+    <string name="action_save">保存</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_delete">删除</string>
+    <string name="action_edit">编辑</string>
+    <string name="action_close">关闭</string>
+    <string name="action_back">返回</string>
+    <string name="action_ok">好</string>
+    <string name="action_undo">撤销</string>
+    <string name="action_clear">清除</string>
+    <string name="action_discard">放弃</string>
+    <string name="action_keep_editing">继续编辑</string>
+
+    <string name="today">今天</string>
+    <string name="tomorrow">明天</string>
+    <string name="yesterday">昨天</string>
+    <string name="all_day">全天</string>
+    <string name="no_title">（无标题）</string>
+    <plurals name="event_count">
+        <item quantity="other">%d 个日程</item>
+    </plurals>
+
+    <!-- 空状态 -->
+    <string name="empty_day_title">这一天没有日程</string>
+    <string name="empty_day_hint">点右下角的“新建”，安排点什么吧</string>
+    <string name="empty_agenda_title">接下来没有日程</string>
+    <string name="empty_agenda_hint">添加一个日程，它会按日期出现在这里</string>
+    <string name="today_empty_row">今天没有日程</string>
+    <string name="empty_search_title">想找哪个日程？</string>
+    <string name="empty_search_hint">按标题、地点或备注搜索</string>
+    <string name="no_results_title">没有找到相关日程</string>
+    <string name="no_results_hint">没有任何日程包含“%s”</string>
+    <string name="search_hint">搜索日程</string>
+
+    <!-- 编辑 -->
+    <string name="editor_new">新建日程</string>
+    <string name="editor_edit">编辑日程</string>
+    <string name="field_title">标题</string>
+    <string name="field_all_day">全天</string>
+    <string name="field_starts">开始</string>
+    <string name="field_ends">结束</string>
+    <string name="field_location">地点</string>
+    <string name="field_notes">备注</string>
+    <string name="add_reminder">添加提醒</string>
+    <string name="repeat_until">重复至</string>
+    <string name="repeat_until_date">重复至 %s</string>
+    <string name="repeat_forever">永不结束</string>
+    <string name="error_title_required">请输入标题</string>
+    <string name="error_end_before_start">结束时间不能早于开始时间</string>
+    <string name="error_until_before_start">重复截止日期不能早于开始日期</string>
+    <string name="discard_title">放弃修改？</string>
+    <string name="discard_message">还没保存的修改会丢失。</string>
+
+    <string name="repeat_none">不重复</string>
+    <string name="repeat_daily">每天</string>
+    <string name="repeat_weekly">每周</string>
+    <string name="repeat_monthly">每月</string>
+    <string name="repeat_yearly">每年</string>
+
+    <string name="reminder_at_time">准时</string>
+    <plurals name="reminder_minutes_before"><item quantity="other">提前 %d 分钟</item></plurals>
+    <plurals name="reminder_hours_before"><item quantity="other">提前 %d 小时</item></plurals>
+    <plurals name="reminder_days_before"><item quantity="other">提前 %d 天</item></plurals>
+    <plurals name="reminder_weeks_before"><item quantity="other">提前 %d 周</item></plurals>
+    <string name="reminder_allday_same_day">当天 09:00</string>
+    <plurals name="reminder_allday_days_before"><item quantity="other">提前 %d 天，09:00</item></plurals>
+    <string name="list_separator">、</string>
+
+    <!-- 详情 -->
+    <string name="series_note">这是重复日程：修改或删除会作用于整个系列。</string>
+    <string name="delete_event_title">删除日程？</string>
+    <string name="delete_event_message">“%s”将被删除。</string>
+    <string name="delete_series_message">“%s”是重复日程，将删除整个系列。</string>
+    <string name="event_deleted">已删除“%s”</string>
+    <string name="event_saved">已保存</string>
+
+    <!-- 日历管理 -->
+    <string name="calendars_title">我的日历</string>
+    <string name="calendars_hint">关掉开关只是在这个 App 里隐藏该日历的日程，数据和提醒不受影响。</string>
+    <string name="calendar_new">新建日历</string>
+    <string name="calendar_edit">编辑日历</string>
+    <string name="calendar_name">名称</string>
+    <string name="calendar_default">默认</string>
+    <string name="calendar_delete">删除这个日历</string>
+    <string name="calendar_delete_title">删除日历？</string>
+    <string name="calendar_delete_message">将同时删除“%1$s”下的 %2$d 个日程，无法恢复。</string>
+    <string name="calendar_deleted">已删除“%1$s”（含 %2$d 个日程）</string>
+
+    <!-- 通知 -->
+    <string name="notif_banner">开启通知，才能收到日程提醒</string>
+    <string name="notif_banner_action">开启</string>
+    <string name="channel_reminders">日程提醒</string>
+    <string name="channel_reminders_desc">日程开始前的提醒通知</string>
+    <string name="reminder_now">现在开始</string>
+    <plurals name="reminder_in_minutes"><item quantity="other">%d 分钟后开始</item></plurals>
+    <plurals name="reminder_in_hours"><item quantity="other">%d 小时后开始</item></plurals>
+    <plurals name="reminder_in_days"><item quantity="other">%d 天后开始</item></plurals>
+    <plurals name="reminder_in_weeks"><item quantity="other">%d 周后开始</item></plurals>
+    <string name="reminder_all_day">全天日程</string>
 </resources>
