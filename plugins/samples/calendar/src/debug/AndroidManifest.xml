@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- 仅 debug：adb am broadcast 驱动的测试入口（灌示例数据、造提醒测试日程），release 包里没有 -->
+        <receiver
+            android:name="org.agentos.sample.calendar.debug.DebugReceiver"
+            android:permission="android.permission.DUMP"
+            android:exported="true" />
+
+        <!--
+          仅 debug 的 MCP 自测：adb shell am broadcast -n org.agentos.sample.calendar/.debug.McpSelfTestReceiver
+          运行在单独的 :selftest 进程，经 McpBinderClient 绑定本 App 的 CalendarMcpService，所以是真正跨进程的 Binder。
+          要求 DUMP（只有 shell 和系统能发）。
+        -->
+        <receiver
+            android:name="org.agentos.sample.calendar.debug.McpSelfTestReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":selftest" />
+    </application>
+</manifest>
