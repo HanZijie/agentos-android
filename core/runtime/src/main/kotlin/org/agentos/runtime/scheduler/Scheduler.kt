@@ -1,6 +1,7 @@
 package org.agentos.runtime.scheduler
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -26,6 +27,7 @@ import org.agentos.runtime.errors.ErrorInfo
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.events.PendingEvent
 import org.agentos.runtime.ports.AgentSessionConfig
+import org.agentos.runtime.skills.SkillPrompt
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.FinishReason
 import org.agentos.runtime.ports.HostPort
@@ -205,6 +207,7 @@ internal class Scheduler(
             if (r != null && r.taskId == requestedRunning) {
                 r.cancelReason = by
                 r.cancelDeadline = host.clock.nowMillis() + config.cancelGraceMillis
+                r.runner?.requestCancel()
                 if (r.runner != null) runCatching { cores.peek(sessionId)?.abort() }
             }
         }
@@ -261,11 +264,13 @@ internal class Scheduler(
 
     private fun launchRunner(task: TaskRecord, ownerKey: String, model: org.agentos.runtime.ports.ModelSpec) {
         val caller = CallerIdentity(task.callerUid, task.callerKind, task.callerLabel)
-        val sessionConfig = AgentSessionConfig(model, config.systemPrompt, broker.declarations(), config.maxToolRounds)
         val entry = Running(task.id, ownerKey, task.executionDeadline)
         running[task.sessionId] = entry
         val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             val outcome: TurnOutcome = try {
+                // 工具目录和 Skill 目录在这里（任务开始时）取一次：目录之后变了，进行中的任务不受影响，下一个任务用新的
+                prepareTools()
+                val sessionConfig = AgentSessionConfig(model, systemPrompt(), broker.declarations(), config.maxToolRounds)
                 val coreSession = cores.acquire(task.sessionId, sessionConfig)
                 val runner = TaskRunner(task.sessionId, task.id, ownerKey, caller, coreSession, broker, store, config)
                 entry.runner = runner
@@ -282,6 +287,27 @@ internal class Scheduler(
         }
         entry.job = job
         job.start()
+    }
+
+    /** 任务开始前让工具提供方准备好目录（Extension Host 刷新还没有缓存的 MCP 服务器）；超时或失败都不影响任务开始。 */
+    private suspend fun prepareTools() {
+        val timeout = config.toolPrepareTimeoutMillis
+        if (timeout <= 0) return
+        try {
+            withTimeoutOrNull(timeout) { host.tools.prepare(timeout) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            host.log.warn(TAG, "tool preparation failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /** 基础系统提示 + Skill 目录（第三方文本，已转义并标明来源，见 [SkillPrompt]）。 */
+    private fun systemPrompt(): String {
+        val limits = SkillPrompt.Limits(config.skillPromptMaxChars, config.skillPromptDescriptionChars)
+        val rendered = SkillPrompt.render(host.skills.catalog.value.skills, limits)
+        if (rendered.omitted.isNotEmpty()) host.log.warn(TAG, "skill list truncated in the system prompt: ${rendered.omitted.size} skills left out")
+        return SkillPrompt.compose(config.systemPrompt, rendered)
     }
 
     /** 启动前已经被请求取消（取消与启动交错）：返回原因。 */

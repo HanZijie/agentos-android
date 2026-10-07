@@ -26,7 +26,7 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | window-violation | 绕过流控连发，服务端以 `window exceeded` 关闭 |
 | stream-noflow（负向） | 关掉流控打满：允许写爆，但必须在超时内结束，不能挂住（S3 问题 1） |
 
-**`--suite app`（W6）**：AgentOS 的 `:agent`（`AcpService`、`AgentService`、`AgentControlService`）。执行器是注入 debug 包（或 releaseTest 包，见下）的 `inapp/`（AgentOS 自己的 UID，`:acptest` 进程），第三方身份的用例由 `client/` 跑。宿主层是真正的 `RuntimeEngine`（A3：ACP、Store、调度、恢复），Agent core 是真正的 Pi（B3 的 `PiAgentCores`：PiAdapter + QuickJsEngine）。Pi 的模型请求经 HostFetch 发到 run.py 在电脑上起的**假模型端点** `fake_model.py`（Anthropic Messages 流式，经 `adb reverse` 映射到设备的 `127.0.0.1:18787`）：它按 prompt 里的同一套 JSON 脚本出字（chunks、chunkChars、intervalMs、burst、cjk、bigChunkChars，`tool` 让第一轮以 tool_use 结束），不是 JSON 时回显 20 行；只认测试 key，记录每个请求（只记 key 的类别），`GET /_log` 给执行器核对。
+**`--suite app`（W6）**：AgentOS 的 `:agent`（`AcpService`、`AgentService`、`AgentControlService`）。执行器是注入 debug 包（或 releaseTest 包，见下）的 `inapp/`（AgentOS 自己的 UID，`:acptest` 进程），第三方身份的用例由 `client/` 跑。宿主层是真正的 `RuntimeEngine`（A3：ACP、Store、调度、恢复），Agent core 是真正的 Pi（B3 的 `PiAgentCores`：PiAdapter + QuickJsEngine）。Pi 的模型请求经 HostFetch 发到 run.py 在电脑上起的**假模型端点** `fake_model.py`（Anthropic Messages 流式，经 `adb reverse` 映射到设备的 `127.0.0.1:18787`）：它按 prompt 里的同一套 JSON 脚本出字（chunks、chunkChars、intervalMs、burst、cjk、bigChunkChars，`tool` 让第一轮以 tool_use 结束），不是 JSON 时回显 20 行；只认测试 key，记录每个请求（只记 key 的类别），`GET /_log` 给执行器核对。A12 起还有 `toolCalls` 脚本（见下一节“假模型的多步工具脚本”）。
 
 与 SDK 回归的差别（`AcpTarget.hostRuntime`）：宿主层按 32 ms 合并文字增量、把长文字切成不超过 8,192 字符的块、不带 `_meta.seq / t`，所以通道用例按**文字总字符数**校验，不按条数和顺序号，也测不出端到端延迟；连接断开不取消任务（F7）。宿主层没有配置模型时拒绝任务（`model_not_configured`），所以执行器在每个非 BYOK / live 用例之前把模型来源设成假模型端点（自定义端点 `http://127.0.0.1:18787`，固定的测试 key）。
 
@@ -102,3 +102,20 @@ python3 tests/device/acp-channel/desktop_idle.py --serial $ANDROID_SERIAL [--idl
 脚本给 App 授予通知权限（首次引导里请求的），故意不给电池优化豁免：验证的是从前台界面打开开关这条正常路径。后台打开（例如 debug 入口的广播）时系统不允许进入前台（`Background started FGS: Disallowed`），有电池优化豁免时允许。
 
 app 用例要求 APK 里有 `assets/model-catalog.json`（BYOK 的厂商预设和自定义端点模板都来自它）：先在 `core/pi-runtime` 里 `npm ci`，构建时不加 `-Pagentos.skipPiBundle=true`，或者先单独跑一次 `node build.mjs`。
+
+## 假模型的多步工具脚本（A12，`scripted_tools.py`）
+
+`tool: NAME` 只能发一个空参数的工具。验收要跑确定性的多步流程，所以 prompt 里可以写：
+
+```json
+{"toolCalls": [{"mcp": ["alarm", "alarm", "alarm_create"], "arguments": {"time": "07:00", "label": "起床"}},
+               {"name": "mcp__alarm__alarm__alarm_set_enabled", "arguments": {"id": "$result[0].id", "enabled": false}}],
+ "final": "闹钟 ${result[0].id} 已建好并关闭"}
+```
+
+- 每一轮（Pi 的一次模型请求）按顺序发**一个** tool_use，工具结果回来后进入下一个，`toolCalls` 用完后输出 `final`（默认空）并 end_turn。
+- 工具名：`name` 是目录里的最终名字；`mcp: [插件, 服务器, 工具]`（或 `{"plugin","server","tool"}`）是原始三元组，由 Python 按 `ToolNaming.nameOf` 的规则算（`mcp__插件__服务器__工具`，非法字符换 `_`，超过 64 个字符截断加 6 位哈希）。两边共用 `tool_naming_golden.json`（Kotlin 侧 `ToolNamingGoldenTest`）。同一目录里撞名的消解（`ToolNaming.assign`）这边不做；三个示例 App 不撞名。
+- 占位符（只在 `arguments` 和 `final` 里；结果是本轮工具结果的 JSON 文本）：整个字符串是 `$result[N]<路径>` 时换成原值（保持类型；`N` 可为负，-1 是最近一个；路径是 `.键` 和 `[下标]` 的任意组合）；字符串里嵌 `${result[N]<路径>}` 时换成文字（字符串原样，其他是紧凑 JSON）；以 `$$` 开头的字符串是字面量（去掉一个 `$`，不替换）。
+- 某一步的占位符解不出来（引用的结果是错误、不是 JSON、没有这个键或下标）时，**不发**半成品的工具调用：这一轮输出 `script-error: step N: …` 并结束，驱动据此判断哪一步出的错。结果是错误但脚本没引用它时照常往下走（失败路径用例就是这样让模型“传了错参数、看到错误、继续”）。
+- `GET /_log` 的每条记录多了 `plan`（这一轮发了什么：kind、工具名、解析后的参数）和 `toolResults`（本轮已经回来的结果，每条最多 4,000 字符）。
+- 原有脚本（chunks、`tool` 等）不变；`unit/` 里有不需要设备的单元测试（`python3 -m unittest discover -s unit -p 'test_*.py'`，CI 的 `device-test-scripts` 任务也跑）。

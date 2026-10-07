@@ -102,10 +102,10 @@ open class FakeToolPort : ToolPort {
 }
 
 /** 内存里的 Skill：测试注册 Skill（id → 内容和附属文件），读取时路径不在里面就抛 NoSuchElementException。 */
-class FakeSkillPort : SkillPort {
+open class FakeSkillPort : SkillPort {
     private val flow = MutableStateFlow(SkillCatalog.EMPTY)
     private val files = mutableMapOf<String, Map<String, String>>()
-    override val catalog: StateFlow<SkillCatalog> = flow
+    override val catalog: StateFlow<SkillCatalog> get() = flow
 
     /** 读这些 Skill 时报告“已截断”。 */
     val truncated: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())

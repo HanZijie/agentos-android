@@ -33,6 +33,7 @@ class SettingsActivity : Activity() {
         val supervisor: String?,
         val diagnostics: String?,
         val desktop: Desktop.Access?,
+        val jev: Jev.Source?,
         val error: String?,
     )
 
@@ -75,11 +76,12 @@ class SettingsActivity : Activity() {
                     supervisor = c.supervisorStatus,
                     diagnostics = c.diagnostics,
                     desktop = if (v >= AgentControlClient.DESKTOP_VERSION) Desktop.parseAccess(c.desktopAccess) else null,
+                    jev = if (v >= AgentControlClient.JEV_VERSION) Jev.parse(c.jevSource) else null,
                     error = null,
                 )
             }
         } catch (e: Exception) {
-            Snapshot(0, null, null, null, null, null, "连不上 AgentOS 运行时（${e.javaClass.simpleName}）")
+            Snapshot(0, null, null, null, null, null, null, "连不上 AgentOS 运行时（${e.javaClass.simpleName}）")
         }
         render(snap)
         // Desktop access is on but the runtime's foreground start was refused (started in the background without
@@ -129,6 +131,27 @@ class SettingsActivity : Activity() {
                 if (src?.configured == true) actions += ("清除" as CharSequence) to { confirmClear() }
                 addView(Ui.buttons(context, *actions.toTypedArray()))
             }
+        })
+
+        // ---- auto-select session (Jev, IAgentControl v4)
+        column.addView(Ui.sectionTitle(this, "自动选择会话（Jev）"))
+        column.addView(Ui.card(this).apply {
+            val j = s.jev
+            if (j == null) {
+                addView(Ui.line(context, "Jev", if (s.version in 1 until AgentControlClient.JEV_VERSION) "运行时版本过旧，不支持" else "读取中…"))
+                return@apply
+            }
+            addView(Ui.line(context, "状态", Jev.statusText(j), warn = j.problems.isNotEmpty()))
+            if (j.configured) {
+                addView(Ui.line(context, "服务地址", if (j.customEndpoint) j.endpoint else "默认（${j.endpoint}）"))
+                addView(Ui.line(context, "Jev key", if (j.keySet) j.keyMasked ?: "已设置" else "未设置", warn = !j.keySet))
+            }
+            j.problems.forEach { addView(Ui.line(context, "注意", Jev.problemText(it), warn = true)) }
+            val actions = mutableListOf<Pair<CharSequence, () -> Unit>>(
+                (if (j.configured) "更换" else "去设置") to { startActivity(Intent(context, JevSourceActivity::class.java)) },
+            )
+            if (j.configured) actions += ("清除" as CharSequence) to { confirmClearJev() }
+            addView(Ui.buttons(context, *actions.toTypedArray()))
         })
 
         // ---- security level (principle 6): "rooted" only when the root supervisor reported this boot
@@ -227,6 +250,24 @@ class SettingsActivity : Activity() {
             val pi = packageManager.getPackageInfo(packageName, 0)
             addView(Ui.line(context, "版本", "AgentOS ${pi.versionName}（${pi.longVersionCode}）；运行时接口 v${s.version}"))
         })
+    }
+
+    private fun confirmClearJev() {
+        confirm(
+            "清除 Jev key？",
+            "清除后立即作废：删除保存的 key 和它的加密密钥，正在进行的自动选择也会中止。之后每次都新建会话，直到重新设置。",
+            "清除",
+        ) {
+            scope?.launch {
+                try {
+                    control.use { it.clearJevSource() }
+                    Toast.makeText(this@SettingsActivity, "已清除", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this@SettingsActivity, Jev.errorText(e.message), Toast.LENGTH_LONG).show()
+                }
+                reload()
+            }
+        }
     }
 
     private fun confirmClear() {
