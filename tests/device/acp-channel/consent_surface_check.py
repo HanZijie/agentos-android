@@ -49,6 +49,25 @@ def decision(rid):
 bc(op="mode", mode="off")
 drain()
 
+# Cold start: "always allow" is written back through :ext (extensions.approvalWriter). Until :ext is connected and has sent its first
+# policy the write-back is unavailable and the dialog fails closed (no "always allow"). Real requests come from :ext tools, so :ext is
+# up by then; this synthetic request does not go through :ext, so wake it and wait for the button before asserting the full option list.
+subprocess.run(["adb", "-s", S, "shell", "am", "broadcast", "-n", "org.agentos.app/.ext.ExtensionDebugReceiver", "--es", "op", "list"],
+               capture_output=True, text=True)
+first_opts = None
+waited = 0.0
+while waited < 25:
+    rid0 = inject(risk="write", timeoutMs=60000)
+    first_opts, _ = options(rid0)
+    bc(op="respond", id=rid0, choice="DENY")
+    if first_opts and "ALWAYS_ALLOW" in first_opts:
+        break
+    time.sleep(1)
+    waited += 1
+print("  note :ext write-back ready after ~%d s (until then the dialog fails closed: no always-allow button)" % int(waited))
+check("fail closed while the write-back is unavailable, full list once :ext is up",
+      bool(first_opts) and ("ALWAYS_ALLOW" in first_opts or waited >= 25) and "ALWAYS_ALLOW" in first_opts, first_opts)
+
 # WRITE: four options, always only when write-back is possible
 rid = inject(risk="write", timeoutMs=60000)
 opts, card = options(rid)

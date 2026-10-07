@@ -69,8 +69,8 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 | 单测 | 日历 99 项（含 `dump` 5 项），`core:extensions` 168 项，合入 main 后重跑 0 失败 |
 | key 泄漏扫描 | `--live` 的 14358 行 logcat 与结果文件命中 0 次 |
 | main 全量回归（`e4b98fc`：`clean test lint assembleDebug assembleRelease :app:assembleReleaseTest`） | 1575 项测试，0 失败、0 错误、跳过 1 项；lint 通过；release 包的 dex 里没有 `ConsentDebugReceiver`、`ExtensionDebugReceiver`、`DesktopGatewayDebugReceiver`、`JevDebugReceiver`；仓库里两把 key 命中 0 次 |
-| D5.2 合入后 main 全量回归（`b336789`） | 1614 项测试，0 失败、0 错误、跳过 1 项；release 包的 dex 里没有任何 debug 接收器；release 合并清单里确认服务、通知动作接收器、确认 Activity、`ExtensionHostService` 全部 `exported=false`；仓库里两把 key 命中 0 次 |
-| 真机确认协调器与界面（`consent_surface_check.py`，debug 接收器 `inject` / `pending` / `respond` / `decision`，不碰屏幕） | **15/15**：WRITE 的选项是允许一次 / 本次对话内不再询问 / 始终允许 / 拒绝；不能记住的请求没有“本次对话内不再询问”；**HIGH 只有允许一次和拒绝**；答复了没有提供的选项（HIGH 回“始终允许”或“本次对话内”、WRITE 回没提供的选项）一律判拒绝；4 秒无人答复→`deny:timeout` 且请求离开队列；两个请求按到达顺序排队 |
+| D5.2 合入后 main 全量回归（`b336789`；之后合入 D 的通知补发修复 `2d36807`，`:app` 单测 393 项 0 失败） | 1614 项测试，0 失败、0 错误、跳过 1 项；release 包的 dex 里没有任何 debug 接收器；release 合并清单里确认服务、通知动作接收器、确认 Activity、`ExtensionHostService` 全部 `exported=false`；仓库里两把 key 命中 0 次 |
+| 真机确认协调器与界面（`consent_surface_check.py`，debug 接收器 `inject` / `pending` / `respond` / `decision`，不碰屏幕） | **16/16**（含 D5.2 终版 `2d36807` 重装后冷启动、热启动各一遍）：WRITE 的选项是允许一次 / 本次对话内不再询问 / 始终允许 / 拒绝；不能记住的请求没有“本次对话内不再询问”；**HIGH 只有允许一次和拒绝**；答复了没有提供的选项（HIGH 回“始终允许”或“本次对话内”、WRITE 回没提供的选项）一律判拒绝；4 秒无人答复→`deny:timeout` 且请求离开队列；两个请求按到达顺序排队；**冷启动后约 1–2 秒内“始终允许”不出现**（`:ext` 还没连上、没收到第一份策略，写回不可用，对话框 fail closed），之后一直在；真实请求来自 `:ext` 的工具，这时它必然已连上 |
 | 真机后台通知（App 在后台，`dumpsys notification`） | WRITE 变成 `consent` 通道的通知，按钮是“拒绝”和“允许一次”，没有“始终允许”和“本次对话内”；HIGH 变成 `consent_high` 通道，只有“拒绝”（高风险不能在通知上直接放行，要回到应用里点）；答复后队列和通知栏都清空 |
 
 **没做 / 限制**：
