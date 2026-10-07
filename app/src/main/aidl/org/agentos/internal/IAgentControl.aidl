@@ -126,4 +126,27 @@ interface IAgentControl {
 
     /** 撤销一个已配对的电脑并断开它的连接；pairingId 为 null 或 "" 时撤销全部。返回 getDesktopAccess()。 */
     String revokeDesktopPairing(String pairingId);
+
+    // ---------------------------------------------------------------- v4：自动选择会话（Jev，D5.1）
+    //
+    // 设置页的“自动选择会话（Jev）”。key 只存 Android Keystore（自己的主密钥），按 endpoint 绑定；任何返回值里只有首尾各 4 位。
+    // 错误：IllegalArgumentException("agentos.jev.<code>: …")（invalid_endpoint、invalid_key、key_required），
+    //       IllegalStateException("agentos.jev.storage_failed: …")。说明里不回显传入的值。
+
+    /**
+     * Jev 的状态：{"configured":bool, "endpoint", "defaultEndpoint", "customEndpoint":bool, "keySet":bool,
+     * "keyMasked":null|"abcd…wxyz", "usable":bool, "problems":["key_unreadable"|"file_unreadable"], "updatedAt"}。
+     * 没有配置时 session/new 带 autoSelect 且有候选会话，一律新建，fallbackReason=jev_unconfigured。
+     */
+    String getJevSource();
+
+    /**
+     * 保存 Jev 的 endpoint 和 key，返回 getJevSource()。endpoint 为 null 或空 = 默认（https://api.typesafe.ai/v1/systemone）；
+     * 规则同模型端点：https，只有 127.0.0.1 / localhost / ::1 可以用 http。apiKey 为 null 或空 = 沿用已保存的 key（endpoint 不变时才允许）。
+     * 立即生效（热加载）。
+     */
+    String setJevSource(String endpoint, String apiKey);
+
+    /** 清除 Jev 的 endpoint 和 key：立即作废（在途的 Jev 请求被中止，路由回退新建会话），并删除 Keystore 主密钥。 */
+    void clearJevSource();
 }

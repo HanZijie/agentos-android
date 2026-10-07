@@ -169,8 +169,8 @@ data class RouterConfig(
     val maxQueryChars: Int = 8_000,
     /** 每个候选 brief 的上限（首轮问题、首轮回答、最近回答各约 1,600 字符）。 */
     val maxBriefChars: Int = 4_800,
-    /** 等 Jev 的时间；超时回退。 */
-    val timeoutMillis: Long = 2_000,
+    /** 等 Jev 的时间；超时回退。比 JevConfig.timeoutMillis（3 秒）多留 0.5 秒给建立连接之外的开销。 */
+    val timeoutMillis: Long = 3_500,
 ) {
     init {
         require(maxActiveSessions in 1..254) { "maxActiveSessions must be 1..254 (255 choices including new_session)" }
