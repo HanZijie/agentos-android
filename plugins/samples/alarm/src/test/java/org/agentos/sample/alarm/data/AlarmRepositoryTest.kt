@@ -259,4 +259,20 @@ class AlarmRepositoryTest {
         assertEquals(EVERY_DAY, a.days)
         assertEquals(60, a.snoozeMinutes)
     }
+
+    @Test
+    fun clearAllRemovesEverythingAndCancelsSystemAlarms() {
+        val a = repo.create(AlarmDraft(9, 0))
+        val b = repo.create(AlarmDraft(10, 0, days = setOf(DayOfWeek.FRIDAY)))
+        repo.create(AlarmDraft(11, 0, enabled = false))
+        assertEquals(2, env.scheduler.scheduled.size)
+
+        assertEquals(3, repo.clearAll())
+        assertTrue(repo.alarms.value.isEmpty())
+        assertTrue(env.store.loadAll().isEmpty())
+        assertTrue(env.scheduler.scheduled.isEmpty())
+        assertTrue(a.id in env.scheduler.cancelled && b.id in env.scheduler.cancelled)
+        assertNull(repo.nextAlarm())
+        assertEquals(0, repo.clearAll()) // 再清一次：什么都没有，不报错
+    }
 }

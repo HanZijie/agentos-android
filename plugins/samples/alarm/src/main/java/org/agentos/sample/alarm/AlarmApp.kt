@@ -14,9 +14,10 @@ import org.agentos.sample.alarm.tools.AlarmTools
  * 所以 MCP 改了数据，前台界面立即刷新，并且系统闹钟同步重排。
  */
 class AlarmGraph private constructor(context: Context) {
+    val scheduler: SystemAlarmScheduler = SystemAlarmScheduler(context)
     val repository: AlarmRepository = AlarmRepository(
         store = SqliteAlarmStore(context),
-        scheduler = SystemAlarmScheduler(context),
+        scheduler = scheduler,
     )
     val ring: RingController = RingController
     val tools: AlarmTools = AlarmTools(repository, ring)

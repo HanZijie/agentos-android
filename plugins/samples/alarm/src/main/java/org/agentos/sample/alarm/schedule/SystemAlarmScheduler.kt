@@ -41,14 +41,29 @@ class SystemAlarmScheduler(context: Context) : AlarmScheduler {
         Log.i(TAG, "cancelled alarm $alarmId")
     }
 
+    /**
+     * 系统里是否真的登记了这个闹钟：用 FLAG_NO_CREATE 取同一个 PendingIntent，取不到说明没有登记（或已被取消）。
+     * 只读，不会创建任何东西。给 debug 自测入口证明“通过 MCP 设的闹钟确实排进了系统”。
+     */
+    fun isRegistered(alarmId: String): Boolean = PendingIntent.getBroadcast(
+        context,
+        0,
+        fireIntent(alarmId),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE,
+    ) != null
+
+    /** 系统眼里“下一个闹钟”（状态栏闹钟图标显示的那个）的触发时刻；没有为 null。包含其他 App 的闹钟，所以只当旁证。 */
+    fun nextAlarmClockMillis(): Long? = alarmManager.nextAlarmClock?.triggerTime
+
+    private fun fireIntent(alarmId: String): Intent = Intent(context, AlarmReceiver::class.java)
+        .setAction(ACTION_FIRE)
+        .setData("$SCHEME://alarm/$alarmId".toUri())
+
     private fun firePendingIntent(alarmId: String): PendingIntent {
-        val intent = Intent(context, AlarmReceiver::class.java)
-            .setAction(ACTION_FIRE)
-            .setData("$SCHEME://alarm/$alarmId".toUri())
         return PendingIntent.getBroadcast(
             context,
             0,
-            intent,
+            fireIntent(alarmId),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
     }

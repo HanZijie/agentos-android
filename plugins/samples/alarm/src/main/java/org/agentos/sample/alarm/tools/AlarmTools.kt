@@ -48,6 +48,9 @@ class AlarmTools(
 
     fun find(name: String): ToolDef? = tools.firstOrNull { it.name == name }
 
+    /** 一个闹钟在工具结果里的 JSON 形态（字段 snake_case）。debug 的读状态命令复用它，保证与 MCP 返回一致。 */
+    fun describe(alarm: Alarm): JsonObject = alarm.toJson()
+
     // ---- 工具定义 ----
 
     private fun alarmList() = tool(

@@ -131,6 +131,18 @@ class AlarmRepository(
         saved
     }
 
+    /** 清空全部闹钟并取消它们的系统闹钟；返回删掉的条数。给 debug 的 reset 命令用（测试环境复位），界面和 MCP 工具不暴露。 */
+    fun clearAll(): Int = synchronized(lock) {
+        val all = rows.values.toList()
+        for (alarm in all) {
+            store.delete(alarm.id)
+            scheduler.cancel(alarm.id)
+        }
+        rows.clear()
+        publish()
+        all.size
+    }
+
     /**
      * 系统闹钟到点时调用：返回响铃用的闹钟快照，并推进状态——
      * 只响一次的关掉开关，重复的排下一次，结束贪睡。找不到或已被关闭（过期的触发）返回 null。
