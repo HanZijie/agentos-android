@@ -18,6 +18,29 @@ from sample_apps_lib import Call, Check, DriverError, Step, eq, truth
 NOT_OFFERED = "not found|tool_not_in_catalog"
 
 
+def deny_pre(c):
+    """mode=allow answers WRITE with 'allow for this session': the tool is then remembered in the ACP session and a later deny would not even be
+    asked. Refusal paths therefore run in a NEW session (integration finding, Pixel 8)."""
+    c.session.new_session()
+    c.consent.set_mode("deny")
+
+
+def deny_post(c):
+    c.consent.set_mode("allow")
+
+
+def declined(sample, tool, verify_state):
+    """verify for a declined step: the request was recorded as answered DENY (what the user would have chosen), and the data did not change."""
+    name = L.model_name(sample, tool)
+
+    def verify(b, a, t, c):
+        asked = c.asked(name)
+        last = asked[-1] if asked else {}
+        return [truth("the confirmation for %s was recorded and declined" % tool, "answeredWith DENY, end ANSWERED",
+                      last.get("answeredWith") == "DENY" and last.get("end") == "ANSWERED", {k: last.get(k) for k in ("answeredWith", "end", "options")})] + verify_state(b, a, t, c)
+    return verify
+
+
 def var(v, name):
     if name not in v:
         raise DriverError("needs %r from an earlier step that did not produce it" % name)
@@ -115,6 +138,7 @@ def setup_catalog(ctx):
 
 
 def setup_consent_allow(ctx):
+    ctx.mark_consent_baseline()
     ctx.consent.set_mode("allow")
     return [truth("auto-consent is on (mode=allow)", "ConsentDebugReceiver accepted mode=allow", True, "ok")]
 
@@ -159,7 +183,9 @@ def alarm_steps(ctx):
 
     S.append(Step("alarm.switch_on", "alarm", "alarm_set_enabled true",
                   lambda v: [Call("alarm", "alarm_set_enabled", {"id": var(v, "alarm_id"), "enabled": True})],
-                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=True)))
+                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=True)
+                  + [eq("alarm_set_enabled was asked once in this session: 'allow for the session' made the second call go through unasked", 1,
+                        len(c.asked(L.model_name("alarm", "alarm_set_enabled"))))]))
 
     def v_get(b, a, t, c):
         r = t.tools[0].json() or {}
@@ -189,18 +215,20 @@ def alarm_steps(ctx):
                   [Call("alarm", "alarm_create", {"time": "25:99", "label": mark}, ok=False)], verify=unchanged("alarms", "alarm")))
     S.append(Step("alarm.err.unknown_id", "alarm", "alarm_get with an id that does not exist: error",
                   [Call("alarm", "alarm_get", {"id": "999999999"}, ok=False)], verify=unchanged("alarms", "alarm")))
-    S.append(Step("alarm.denied", "alarm", "confirmation declined: tool_denied reaches the model, nothing written",
+    S.append(Step("alarm.denied", "alarm", "confirmation declined (new session, mode=deny): tool_denied reaches the model, nothing written",
                   [Call("alarm", "alarm_create", {"time": "06:00", "label": mark}, ok=False, error_has="tool_denied")],
-                  pre=lambda c: c.consent.set_mode("deny"), post=lambda c: c.consent.set_mode("allow"), verify=unchanged("alarms", "alarm")))
+                  pre=deny_pre, post=deny_post, verify=declined("alarm", "alarm_create", unchanged("alarms", "alarm"))))
     S += plugin_off_steps(ctx, "alarm", pkg, Call("alarm", "alarm_list"), "alarms", "alarm")
     return S
 
 
 def plugin_off_steps(ctx, sample, pkg, probe_call, state_key, label):
     s = L.SAMPLES[sample]
+    probe = L.model_name(sample, probe_call.tool)
 
     def pre(c):
         c.ext.disable(pkg)
+        c.ext.wait_tool(probe, absent=True)
         c.vars["_off_catalog"] = wait_catalog(c, lambda cat: not any(L.model_name(sample, t) in cat for t in s.tools))
 
     def verify(b, a, t, c):
@@ -215,6 +243,7 @@ def plugin_off_steps(ctx, sample, pkg, probe_call, state_key, label):
 
     def pre_on(c):
         c.ext.enable(pkg)
+        c.ext.wait_tool(probe)
         c.vars["_on_catalog"] = wait_catalog(c, lambda cat: all(L.model_name(sample, t) in cat for t in s.tools))
 
     def verify_on(b, a, t, c):
@@ -223,6 +252,12 @@ def plugin_off_steps(ctx, sample, pkg, probe_call, state_key, label):
 
     on = Step("%s.plugin_on" % sample, sample, "plugin enabled again: tools are back and work", [probe_call], pre=pre_on, verify=verify_on)
     return [off, on]
+
+
+def consent_audit_step(sample):
+    """A check step (no prompt): what ConsentDebugReceiver recorded for this app is what the design says (source line, risk, options, answers)."""
+    return ("audit.%s" % sample, "confirmation requests of %s: source line, risk, options, answers" % sample,
+            lambda ctx: L.audit_consent(ctx.consent_recent(), sample))
 
 
 # ---------------------------------------------------------------------- calendar
@@ -305,7 +340,7 @@ def calendar_steps(ctx):
                   [Call("calendar", "event_get", {"id": "no-such-event"}, ok=False)], verify=unchanged("events", "calendar")))
     S.append(Step("calendar.denied", "calendar", "confirmation declined: tool_denied, nothing written",
                   [Call("calendar", "event_create", {"title": mark + " denied", "start": ctx.local(d, "12:00")}, ok=False, error_has="tool_denied")],
-                  pre=lambda c: c.consent.set_mode("deny"), post=lambda c: c.consent.set_mode("allow"), verify=unchanged("events", "calendar")))
+                  pre=deny_pre, post=deny_post, verify=declined("calendar", "event_create", unchanged("events", "calendar"))))
     S += plugin_off_steps(ctx, "calendar", pkg, Call("calendar", "calendar_list"), "calendars", "calendar")
     return S
 
@@ -372,13 +407,15 @@ def notes_steps(ctx):
                   [Call("notes", "note_get", {"id": "no-such-note"}, ok=False)], verify=unchanged("notes", "notes")))
     S.append(Step("notes.denied", "notes", "confirmation declined: tool_denied, nothing written",
                   [Call("notes", "note_create", {"content": mark + " denied"}, ok=False, error_has="tool_denied")],
-                  pre=lambda c: c.consent.set_mode("deny"), post=lambda c: c.consent.set_mode("allow"), verify=unchanged("notes", "notes")))
+                  pre=deny_pre, post=deny_post, verify=declined("notes", "note_create", unchanged("notes", "notes"))))
     S += plugin_off_steps(ctx, "notes", pkg, Call("notes", "tag_list"), "notes", "notes")
     return S
 
 
 def scripted_steps(ctx):
-    return alarm_steps(ctx) + calendar_steps(ctx) + notes_steps(ctx)
+    """Steps (`Step`) and check steps (a `(id, title, fn)` tuple, no prompt) in order; the audit of an app comes right after its steps
+    (ConsentDebugReceiver keeps the latest 50 requests only)."""
+    return alarm_steps(ctx) + [consent_audit_step("alarm")] + calendar_steps(ctx) + [consent_audit_step("calendar")] + notes_steps(ctx) + [consent_audit_step("notes")]
 
 
 # ---------------------------------------------------------------------- leftovers
