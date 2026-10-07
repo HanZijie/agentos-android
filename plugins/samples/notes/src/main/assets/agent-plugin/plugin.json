@@ -1,0 +1,16 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "notes",
+  "version": "1.0.0",
+  "description": "读写手机上「备忘录」App 里的笔记：搜索、新建、追加、打标签、归档、放进回收站。",
+  "extensions": {
+    "com.openai": {
+      "interface": { "displayName": "备忘录" }
+    },
+    "org.agentos": {
+      "mcpServers": {
+        "notes": { "service": "org.agentos.sample.notes.agent.NotesMcpService" }
+      }
+    }
+  }
+}
