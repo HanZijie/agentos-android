@@ -70,12 +70,13 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 | key 泄漏扫描 | `--live` 的 14358 行 logcat 与结果文件命中 0 次 |
 | main 全量回归（`e4b98fc`：`clean test lint assembleDebug assembleRelease :app:assembleReleaseTest`） | 1575 项测试，0 失败、0 错误、跳过 1 项；lint 通过；release 包的 dex 里没有 `ConsentDebugReceiver`、`ExtensionDebugReceiver`、`DesktopGatewayDebugReceiver`、`JevDebugReceiver`；仓库里两把 key 命中 0 次 |
 | D5.2 合入后 main 全量回归（`b336789`；之后合入 D 的通知补发修复 `2d36807`，`:app` 单测 393 项 0 失败） | 1614 项测试，0 失败、0 错误、跳过 1 项；release 包的 dex 里没有任何 debug 接收器；release 合并清单里确认服务、通知动作接收器、确认 Activity、`ExtensionHostService` 全部 `exported=false`；仓库里两把 key 命中 0 次 |
+| D5.3 合入后 main 全量回归（`65bd9d1`） | 1683 项测试，0 失败、0 错误、跳过 1 项；release 包的 dex 里没有 debug 接收器；`PluginsActivity`、`PluginDetailActivity`、确认服务 / 接收器 / Activity、`ExtensionHostService` 在 release 清单里全部 `exported=false`；仓库里两把 key 命中 0 次 |
 | 真机确认协调器与界面（`consent_surface_check.py`，debug 接收器 `inject` / `pending` / `respond` / `decision`，不碰屏幕） | **16/16**（含 D5.2 终版 `2d36807` 重装后冷启动、热启动各一遍）：WRITE 的选项是允许一次 / 本次对话内不再询问 / 始终允许 / 拒绝；不能记住的请求没有“本次对话内不再询问”；**HIGH 只有允许一次和拒绝**；答复了没有提供的选项（HIGH 回“始终允许”或“本次对话内”、WRITE 回没提供的选项）一律判拒绝；4 秒无人答复→`deny:timeout` 且请求离开队列；两个请求按到达顺序排队；**冷启动后约 1–2 秒内“始终允许”不出现**（`:ext` 还没连上、没收到第一份策略，写回不可用，对话框 fail closed），之后一直在；真实请求来自 `:ext` 的工具，这时它必然已连上 |
 | 真机后台通知（App 在后台，`dumpsys notification`） | WRITE 变成 `consent` 通道的通知，按钮是“拒绝”和“允许一次”，没有“始终允许”和“本次对话内”；HIGH 变成 `consent_high` 通道，只有“拒绝”（高风险不能在通知上直接放行，要回到应用里点）；答复后队列和通知栏都清空 |
 
 **没做 / 限制**：
 - **release 构建的确认走真实界面（D5.2，`b336789`）**：前台是 AgentOS 里的对话框，后台是通知，经 `IConsentService` 回到 `:agent`；release 和 debug 用同一套界面和协调器，区别只是 debug 外面包了 `AutoConsentResponder`（`mode=off` 时等同 release）。上面“脚本模式”和 `--live` 的写操作是 debug 构建的 `ConsentDebugReceiver` 自动放行的；**真机上还没有人用手点过真实的确认对话框**（有人在用，只用 adb），对话框的真实触摸由 D 在模拟器（API 35）上按 `uiautomator` 的坐标点过：WRITE 的拒绝 / 允许一次 / 本次对话内不再询问 / 始终允许、HIGH 的允许一次 / 拒绝、READ、4 秒无人答复→`deny:timeout` 且对话框自动撤下。
-- 插件管理页（D5.3）未合入，启用 / 关闭目前靠 `ExtensionDebugReceiver`；没有这一页，真实用户没法启用三个 App 的插件（第三方插件默认关闭）。
+- **插件管理页（D5.3，`65bd9d1`）已合入**：设置页入口 → 列表（名称、版本、来源 App、签名摘要前 12 位、启用开关、状态、工具数、问题）→ 详情（每个工具的风险、审批方式、工具开关；WRITE 工具可设“始终允许”，HIGH 没有这个按钮）；第三方插件启用对话框写明风险，签名变了的在同一个对话框里“确认新签名并启用”；策略文件损坏时顶部显示原因、开关置灰、“重置策略”需确认。D 在模拟器（API 35）上用真实的三个示例 App 点过这些路径；真机上我只验证了页面已注册、可解析、不导出，三个插件在 `:ext` 里是 `ready` 且默认关闭；**没有在真机上点开过这个页面**（有人在前台用别的 App，不拉起界面）。已知缺口：签名变化的对话框只写“与现在不同”，看不到上次确认的签名（已请 C 在插件 JSON 里加 `trustedSigningDigest`）；API 37 的界面没跑。
 - 三个 App 的界面没有在这台真机上点过（有人在用）；界面与截图见各自 README，是模拟器上做的。
 - `--live` 只覆盖三条典型指令；没有测多轮纠错、同时操作两个 App、模型选错工具之后的恢复。
 - **自然语言验收的已知偶发**：提示词不带内容时模型会反问而不动手（2026-10-08 凌晨备忘录那条“记一条新品发布的备忘，打上工作标签”一次没建笔记，属正常模型行为）；驱动的提示词已改成带上标题、内容、时间和地点，之后连跑 3 次全过。另有一次驱动在启用三个插件后 149 ms 就读目录、备忘录工具还没出齐，已改成先等目录完整（最多 30 秒，超时点名缺哪些工具）；那次的现象像“目录先有后掉”，若再出现，要抓 `ExtensionDebugReceiver diag` 看 Extension Host。
@@ -90,7 +91,7 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 - 只有 debug 签名的 zip；发布证书要维护者生成。
 - 没有电池优化豁免时，`:agent` 在后台被拉起会进不了前台：电脑端的长对话会被冻结，首次引导和设置页都会提示授予。
 - 监督进程只在有任务时拉起 `:agent`；电脑端接入开着但没有任务时被杀，要等开机、打开界面或有人绑定才回来。W11 在心跳加 `hold=desktop`。
-- 插件管理页（D5.3）未完成：用户目前没有界面启用第三方插件；真实确认界面（D5.2）已合入，真机上用 adb 验过选项与判决（见三之三），手点验证和主进程被杀、后台通知上点按钮这几项还没在真机上做。Jev 已接入，详见三之二。
+- 真机上还没有人手点过确认对话框和插件页：只用 adb 验证了协调器、通知内容和页面注册；真实触摸、通知上点按钮、主进程被杀的场景是 D 在模拟器上验证的。要补，需要你在手机上点一遍，或允许我点界面。Jev 已接入，详见三之二。
 - 本机用 Clash TUN 时，模拟器访问模型端点会 TLS 失败。
 
 ## 六、需要人来做的事
