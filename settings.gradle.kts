@@ -47,4 +47,6 @@ include(
     ":tests:device:acp-channel:agent",
     ":tests:device:acp-channel:client",
     ":tests:device:acp-channel:inapp",
+    // C7：测试用的插件 App（MCP over Binder，Extension Host 的设备回归），不进 zip
+    ":tests:device:mcp-plugin:plugin",
 )

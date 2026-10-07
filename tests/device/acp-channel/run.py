@@ -103,6 +103,8 @@ def app_cases():
         ("pi-tool-round", a, "pi-tool-round", {}, 120, "check"),
         ("pi-context", a, "pi-context", {}, 120, "check"),
         ("recovery-context", a, "recovery-context", {}, 180, "check"),
+        # C7：Extension Host（:ext）的 IExtensionHost：跨进程调用、错误码原样传回
+        ("ext-host", a, "ext-host", {}, 60, "check"),
         # C6：电脑端接入打开期间 :agent 留在前台、不被 cached-apps freezer 冻结（desktop_idle.py；releaseTest 不走 acp-bridge）
         ("desktop-access", a, "desktop", {"idle": 60}, 900, "desktop"),
         ("live-minimax", a, "live-minimax", {"keyFile": "test/live_key"}, 240, "live"),
