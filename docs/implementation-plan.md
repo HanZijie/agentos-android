@@ -499,7 +499,8 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] `UserMcpConfig` 与设置页：填写地址和请求头、试连一次
 
 #### W20 Skills
-- [ ] `SkillCatalog`、`SkillPrompt`（系统提示里的目录、`read_skill` 工具）
+- [x] `ExtensionSkillPort`、`SkillPrompt`（系统提示里的目录、`read_skill` 工具、路径检查、frontmatter 容错）：纯 JVM 部分由 A10 完成，含注入用例；`ToolPort.prepare` 任务开始前钩子
+- [ ] Android 接缝：`SkillFileSource`（读 App 内嵌插件的 assets，C7b）、`HostPortImpl.skills` 接线、设置页显示 Skill 问题
 
 #### W21 Runner
 - [ ] Runner APK：`RunnerService`、`CommandExecutor`、`PluginMirror`
