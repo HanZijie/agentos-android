@@ -12,6 +12,17 @@ Agent 运行时是 AgentOS App 里的一个独立进程 `:agent`：外层是 Kot
 
 ![AgentOS 架构图](docs/assets/architecture.svg)
 
+## 演示
+
+| 对话与确认（约 2 分钟） | 执行结果（10 秒） |
+|:---:|:---:|
+| <video src="docs/assets/demo.mp4" controls muted playsinline width="300"></video> | <video src="docs/assets/demo2.mp4" controls muted playsinline width="300"></video> |
+
+两段都是真机录屏，无声。浏览器不能内嵌播放时，直接打开 [demo.mp4](docs/assets/demo.mp4) 和 [demo2.mp4](docs/assets/demo2.mp4)。
+
+- **左：对话与确认。** 在 AgentOS 里用一句话让 Agent 同时操作三个示例 App：写备忘录、查日历并创建日程、提前半小时设闹钟（调用 `note_create`、`calendar_list`、`event_create`、`alarm_create`）。需要确认的写操作先弹确认框，列出工具名、来源插件和参数；后半段是设置页（模型与 key、安全等级）和插件管理（已发现的插件）。
+- **右：执行结果。** 回到桌面依次打开三个示例 App 核对：日历里下周四 15:00 的「需求评审会」、闹钟 14:30 的「需求评审会提醒」、备忘录「下周工作备忘」（写三个 PRD、周四下午 3 点开评审会、评审会前半小时闹钟提醒）。
+
 ## 用户怎么用
 
 1. 手机已解锁并装好 Magisk 或 KernelSU，系统是 Android 15–17。
