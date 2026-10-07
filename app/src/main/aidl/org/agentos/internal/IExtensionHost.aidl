@@ -43,7 +43,7 @@ import org.agentos.internal.IExtensionCallback;
  * 审批方式参数 mode：ask | always | ""（清除这一层，沿用上一层）。
  */
 interface IExtensionHost {
-    /** 本接口的版本：2（v2 加了 refreshTools、readSkill、setToolApprovalBySource，getCatalog 带 skills）。 */
+    /** 本接口的版本：2（v2 加了 refreshTools、readSkill、setToolApprovalBySource、getPolicyStatus、resetPolicy，getCatalog 带 skills）。 */
     int getVersion();
 
     // ---------------------------------------------------------------- 插件管理（设置页，D）
@@ -141,4 +141,14 @@ interface IExtensionHost {
      * 错误 code：not_found（工具不在 :ext 已知的工具里）、bad_mode、high_risk（按 :ext 算的风险等级）、unavailable（策略文件 fail closed）。
      */
     String setToolApprovalBySource(String plugin, String server, String tool, String mode);
+
+    /**
+     * 用户策略文件的状态（插件页显示，ApprovalStore.health）：
+     * {"health":"ok"|"corrupt", "using":"previous"|"backup"|"fail_closed"|null, "reason", "failClosed": bool, "lastBackupError"}。
+     * corrupt + fail_closed：文件读不出来又没有可用的副本，第三方插件一律当作禁用，插件页的写入报 unavailable，要用户确认 resetPolicy。
+     */
+    String getPolicyStatus();
+
+    /** 用户确认重置策略（ApprovalStore.resetToDefault）：全部默认，现有第三方插件写成停用。返回 getPolicyStatus 的结果。 */
+    String resetPolicy();
 }

@@ -26,6 +26,7 @@ acp-channel 的 in-app 执行器（ext-e2e 场景）让真实运行时调用插�
   e2e-ask         端到端：echo 需要确认（确认协调器未接入，一律拒绝）→ 工具没执行
   e2e-high        端到端：高风险工具即使插件级 always 也要确认 → 拒绝
   e2e-disabled    端到端：工具级禁用 → 模型拿到“不可用”，工具没执行
+  policy-corrupt  策略文件与备份都坏 → :ext 重建后 fail closed（:agent 镜像同步）、写入被拒；用户重置后恢复（插件仍停用）
   signature       签名轮换（apksigner lineage）→ signature_changed、停用、目录清空；启用报 not_ready；确认后恢复
   uninstall       卸载 → 插件与工具消失；重装 → 重新按第三方默认关闭
 
@@ -554,6 +555,63 @@ def rotated_apk(src):
     return out, work
 
 
+def wait_ext_restart(c, pid0, timeout=30):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        pid1 = c.pidof(f"{APP_PKG}:ext")
+        if pid1 and pid1 != pid0:
+            return pid1, int((time.time() - t0) * 1000)
+        time.sleep(0.5)
+    return None, int((time.time() - t0) * 1000)
+
+
+def wait_agent(c, pred, timeout=15):
+    """等 :agent 的代理计数满足 pred（镜像经 onCatalogChanged → getCatalog 异步更新）。"""
+    t0 = time.time()
+    ext = {}
+    while time.time() - t0 < timeout:
+        ext = c.dbg("agent").get("extensions") or {}
+        if pred(ext):
+            return ext, True
+        time.sleep(0.5)
+    return ext, False
+
+
+def case_policy_corrupt(c):
+    """策略文件和备份都读不出来 → :ext 重建后 fail closed（第三方插件当作禁用，:agent 的镜像同步）；写入被拒；用户重置后恢复，插件仍停用。"""
+    c.ensure_enabled()
+    for f in ("approval-policy.json", "approval-policy.backup.json"):
+        c.adb.sh(f"run-as {APP_PKG} sh -c 'echo broken > files/ext/{f}'", check=False)
+    pid0 = c.pidof(f"{APP_PKG}:ext")
+    c.adb.sh(f"run-as {APP_PKG} kill -9 {pid0}", check=False)
+    pid1, _ = wait_ext_restart(c, pid0)
+    gone = c.wait_tool("echo", absent=True, timeout_ms=20_000)
+    status = c.dbg("policy").get("policy") or {}
+    cat = c.catalog()
+    mirror, mirror_closed = wait_agent(c, lambda e: e.get("policyFailClosed") is True and e.get("tools") == 0)
+    refused = c.dbg("enable", id=PLUGIN_ID)
+    p_closed = c.plugin() or {}
+    reset = c.dbg("policy_reset").get("policy") or {}
+    p_after = c.plugin() or {}
+    c.dbg("enable", id=PLUGIN_ID)
+    back = c.wait_tool("echo")
+    mirror2, mirror_open = wait_agent(c, lambda e: e.get("policyFailClosed") is False and e.get("tools") == 7)
+    checks = {
+        "extRestarted": pid1 is not None,
+        "failClosed": status.get("health") == "corrupt" and status.get("using") == "fail_closed" and status.get("failClosed") is True,
+        "catalogFailClosed": cat.get("policyFailClosed") is True and bool(gone.get("met")),
+        "agentMirrorFailClosed": mirror_closed,
+        "pluginShownOff": p_closed.get("enabled") is False and p_closed.get("status") == "ready",
+        "writeRefused": "unavailable" in str(refused.get("error")),
+        "resetHealthy": reset.get("health") == "ok" and reset.get("failClosed") is False,
+        "stillOffAfterReset": p_after.get("enabled") is False,
+        "reEnabled": bool(back.get("met")),
+        "agentMirrorRecovered": mirror_open,
+    }
+    return verdict(checks, f"status={status.get('health')}/{status.get('using')} reset={reset.get('health')}",
+                   policyStatus=status, mirrorClosed=mirror, mirrorOpen=mirror2)
+
+
 def case_signature(c):
     if c.args.skip_rotation:
         return {"ok": True, "skipped": True, "summary": "skipped (--skip-rotation)"}
@@ -609,7 +667,7 @@ CASES = [
     ("disable-inflight", case_disable_inflight), ("tool-disable", case_tool_disable), ("idle", case_idle),
     ("background", case_background), ("ext-death", case_ext_death),
     ("e2e-always", case_e2e_always), ("e2e-ask", case_e2e_ask), ("e2e-high", case_e2e_high), ("e2e-disabled", case_e2e_disabled),
-    ("signature", case_signature), ("uninstall", case_uninstall),
+    ("policy-corrupt", case_policy_corrupt), ("signature", case_signature), ("uninstall", case_uninstall),
 ]
 
 

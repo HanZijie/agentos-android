@@ -191,6 +191,10 @@ class ExtensionHostService : Service() {
             host.setToolApprovalBySource(plugin, server, tool, mode)
         }
 
+        override fun getPolicyStatus(): String = managed { host.registry.policyStatus().toString() }
+
+        override fun resetPolicy(): String = managed { host.registry.resetPolicy().toString() }
+
         /** 插件管理：先等启动后的第一次扫描。 */
         private inline fun <T> managed(block: () -> T): T = guarded {
             host.awaitFirstScan()

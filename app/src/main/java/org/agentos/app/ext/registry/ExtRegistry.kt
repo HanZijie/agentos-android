@@ -233,10 +233,34 @@ class ExtRegistry(
         .put("scans", scans)
         .put("lastScanError", lastScanError ?: JSONObject.NULL)
         .put("memoryLost", memoryLost)
+        .put("policy", policyStatus())
         .put("policyHealth", when (val h = approvals.health.value) {
             is PolicyHealth.Ok -> "ok"
             is PolicyHealth.Corrupt -> "corrupt(${h.using.name.lowercase()})"
         })
+
+    /** 用户策略文件的状态（IExtensionHost.getPolicyStatus，插件页显示）。 */
+    fun policyStatus(): JSONObject {
+        val h = approvals.health.value as? PolicyHealth.Corrupt
+        return JSONObject()
+            .put("health", if (h == null) "ok" else "corrupt")
+            .put("using", h?.using?.name?.lowercase() ?: JSONObject.NULL)
+            .put("reason", h?.reason ?: JSONObject.NULL)
+            .put("failClosed", policyFailClosed())
+            .put("lastBackupError", approvals.lastBackupError ?: JSONObject.NULL)
+    }
+
+    /**
+     * 用户确认“重置策略”（IExtensionHost.resetPolicy）：[ApprovalStore.resetToDefault]，现有的第三方插件都写成停用，
+     * 重置不会把它们重新启用。任何状态下都可以调用。
+     */
+    @Synchronized
+    fun resetPolicy(): JSONObject {
+        val thirdParty = registry.value.plugins.filter { !it.builtin }.mapNotNull { it.name }
+        approvals.resetToDefault(thirdParty)
+        Log.i(TAG, "approval policy reset; ${thirdParty.size} third-party plugin(s) left disabled")
+        return policyStatus()
+    }
 
     companion object {
         private const val TAG = "ExtRegistry"

@@ -33,7 +33,7 @@ import kotlin.concurrent.thread
  * op：`list`、`rescan`、`enable`、`disable`、`confirm`、`approval`（插件级）、`tools`、`tool_enable`、`tool_disable`、
  * `tool_approval`、`catalog`、`refresh`、`diag`、`call`（callTool 并等 onToolResult；cancelAfterMs > 0 时到点 cancelTool）、
  * `wait_catalog`（等目录里出现 / 不再有 name，最多 timeoutMs）、`skill`（readSkill：name = Skill 标识，path 可选）、
- * `approval_by_source`（--es plugin / server / tool + mode）、`agent`（:agent 诊断里的 extensions 计数）。结果在广播的 result data 里（JSON，含 ok）。
+ * `approval_by_source`（--es plugin / server / tool + mode）、`policy`、`policy_reset`、`agent`（:agent 诊断里的 extensions 计数）。结果在广播的 result data 里（JSON，含 ok）。
  * Manifest 要求发送方持有 DUMP（adb shell 有，普通 App 没有）；不可调试的包一律返回 not_debuggable。
  */
 class ExtensionDebugReceiver : BroadcastReceiver() {
@@ -80,6 +80,8 @@ class ExtensionDebugReceiver : BroadcastReceiver() {
                 intent.getLongExtra("disableAfterMs", 0L), intent.getStringExtra("id"))
             "wait_catalog" -> waitCatalog(h, name, intent.getBooleanExtra("absent", false), timeoutMs)
             "skill" -> ok().put("skill", JSONObject(h.readSkill(name, intent.getStringExtra("path") ?: "")))
+            "policy" -> ok().put("policy", JSONObject(h.policyStatus))
+            "policy_reset" -> ok().put("policy", JSONObject(h.resetPolicy()))
             "approval_by_source" -> ok().put("tool", JSONObject(h.setToolApprovalBySource(
                 intent.getStringExtra("plugin"), intent.getStringExtra("server"), intent.getStringExtra("tool"), mode,
             )))

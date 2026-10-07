@@ -221,10 +221,15 @@ class ExtensionHost(
         return ExtWire.toolJson(t, policy).toString()
     }
 
-    fun setToolApproval(toolName: String?, mode: String?): String = setApproval(findTool(toolName), mode)
+    /** 先校验审批方式（bad_mode），再找工具（not_found）：与插件级 setPluginApproval 的顺序相同。 */
+    fun setToolApproval(toolName: String?, mode: String?): String {
+        ExtError.checkMode(mode)
+        return setApproval(findTool(toolName), mode)
+    }
 
     /** 按来源（确认框的“始终允许”写回，A11 ApprovalWriter）。 */
     fun setToolApprovalBySource(plugin: String?, server: String?, tool: String?, mode: String?): String {
+        ExtError.checkMode(mode)
         val src = ToolSource(plugin ?: "", server ?: "", tool ?: "")
         val t = tools.catalog.value.tools.firstOrNull { it.source == src }
             ?: synchronized(known) { known[src] }
