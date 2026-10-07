@@ -76,8 +76,8 @@ class ExtensionToolHostEndToEndTest {
         return runBlocking {
             rt.start()
             try {
-                withTimeout(15_000) {
-                    while (extHost.catalog.value.tools.isEmpty()) delay(10)
+                withTimeout(E2e.TEST_MILLIS) {
+                    E2e.awaitUntil("the tool catalog to list the notes tools", { "serverStates=${extHost.serverStates.value}" }) { extHost.catalog.value.tools.isNotEmpty() }
                     block(rt)
                 }
             } finally {
@@ -156,7 +156,8 @@ class ExtensionToolHostEndToEndTest {
     fun `a tool the user switched off is not offered and a call to it is rejected like an unknown tool`() {
         policy.update { it.withEnabled(PolicyScope.Tool("notes", "notes", "note_trash"), false) }
         run("mcp__notes__notes__note_trash") { rt ->
-            delay(50)
+            // the policy change reaches the host asynchronously: wait until the tool has left the catalog, then assert what the model is offered
+            E2e.awaitUntil("note_trash to leave the catalog", { "catalog=${extHost.catalog.value.tools.map { it.name }}" }) { extHost.catalog.value.tools.none { it.name == "mcp__notes__notes__note_trash" } }
             assertTrue("mcp__notes__notes__note_trash" !in rt.engine.broker.declarations().map { it.name })
             val (state, events) = rt.turn()
             assertEquals(TaskState.COMPLETED, state)
