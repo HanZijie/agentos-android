@@ -1,0 +1,189 @@
+package org.agentos.app.agent.consent
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.graphics.drawable.Icon
+import android.os.IBinder
+import android.os.RemoteCallbackList
+import android.util.Log
+import org.agentos.app.ui.consent.ConsentActivity
+import org.agentos.internal.IConsentListener
+import org.agentos.internal.IConsentService
+import org.agentos.runtime.consent.ConsentChoice
+import org.agentos.runtime.consent.ConsentCoordinator
+import org.agentos.runtime.consent.ConsentResolution
+import org.agentos.runtime.consent.ConsentSurface
+import org.agentos.runtime.consent.ConsentView
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * `:agent` 里的确认界面接缝（D5.2）：把 [ConsentCoordinator] 的待确认交给主进程的界面，没有界面时自己发通知。
+ *
+ * - **事实在这里**：待确认的请求和各自的 60 秒超时都在协调器（`:agent`）里。主进程只显示它、回传选择；主进程被杀时请求照常超时后拒绝，
+ *   不会挂住任务。
+ * - 前台：主进程的 [ConsentActivity] bind [Service]、登记 [IConsentListener]；新请求推给它，**不发通知**（对话框已经在眼前）。
+ * - 后台（没有登记的监听者）：为每条待确认发一条通知，“允许一次 / 拒绝”两个按钮 + 点通知打开 [ConsentActivity]
+ *   （在那里看全文、可选“始终允许”）。登记监听者时、请求结案时，撤回通知。
+ * - 通知文字都是协调器已清理过的纯文本，用 setContentTitle / setContentText 传（不当格式化字符串、不用 Html）。
+ *
+ * 回调由协调器在单独的协程里按顺序调用（不阻塞任务），这里不做耗时操作。
+ */
+class ConsentBridge(private val context: Context, private val log: (String) -> Unit = { Log.w(TAG, it) }) : ConsentSurface {
+    @Volatile private var coordinator: ConsentCoordinator? = null
+    private val listeners = RemoteCallbackList<IConsentListener>()
+    private val notified = ConcurrentHashMap<String, Int>()
+
+    /** 协调器要先有界面才能构造，所以晚一步接上。 */
+    fun attach(coordinator: ConsentCoordinator) {
+        this.coordinator = coordinator
+    }
+
+    /** 给 [ConsentCoordinator.pending] 的当前值用（登记监听者、点通知时）。 */
+    private fun pending(): List<ConsentView> = coordinator?.pending?.value.orEmpty()
+
+    // ---------------------------------------------------------------- ConsentSurface
+
+    override fun requested(view: ConsentView) {
+        if (hasListener()) {
+            broadcast { it.onRequested(ConsentWire.encodeViewString(view)) }
+        } else {
+            notify(view)
+        }
+    }
+
+    override fun resolved(requestId: String, resolution: ConsentResolution) {
+        broadcast { it.onResolved(requestId, ConsentWire.encodeResolution(resolution)) }
+        cancelNotification(requestId)
+    }
+
+    // ---------------------------------------------------------------- IConsentService（主进程调用）
+
+    val service: IConsentService.Stub = object : IConsentService.Stub() {
+        override fun registerListener(listener: IConsentListener?) {
+            enforceSelf()
+            if (listener == null) return
+            listeners.register(listener)
+            // 界面接手：之前发的通知全部撤回，当前全部待确认以快照交给它
+            notified.keys.toList().forEach { cancelNotification(it) }
+            runCatching { listener.onSnapshot(ConsentWire.encodeViews(pending())) }
+        }
+
+        override fun unregisterListener(listener: IConsentListener?) {
+            enforceSelf()
+            if (listener == null) return
+            listeners.unregister(listener)
+            // 界面走了：还没答复的转成通知
+            if (!hasListener()) pending().forEach { notify(it) }
+        }
+
+        override fun respond(requestId: String?, choice: String?): Boolean {
+            enforceSelf()
+            val c = ConsentWire.parseChoice(choice) ?: return false
+            val ok = requestId != null && coordinator?.respond(requestId, c) == true
+            return ok
+        }
+    }
+
+    fun binder(): IBinder = service
+
+    private fun hasListener(): Boolean = synchronized(listeners) {
+        val n = listeners.beginBroadcast()
+        listeners.finishBroadcast()
+        n > 0
+    }
+
+    private inline fun broadcast(call: (IConsentListener) -> Unit) = synchronized(listeners) {
+        val n = listeners.beginBroadcast()
+        try {
+            for (i in 0 until n) runCatching { call(listeners.getBroadcastItem(i)) }
+        } finally {
+            listeners.finishBroadcast()
+        }
+    }
+
+    private fun enforceSelf() {
+        val uid = android.os.Binder.getCallingUid()
+        if (uid != android.os.Process.myUid()) throw SecurityException("IConsentService only accepts the AgentOS app itself (uid $uid)")
+    }
+
+    // ---------------------------------------------------------------- 通知
+
+    private fun nm() = context.getSystemService(NotificationManager::class.java)
+
+    private fun notify(view: ConsentView) {
+        val card = ConsentWire.parseCard(ConsentWire.encodeViewString(view)) ?: return
+        val id = notified.computeIfAbsent(view.requestId) { NEXT_ID + (nextSeq.getAndIncrement() and 0xffff) }
+        try {
+            val channel = if (card.severity == org.agentos.runtime.consent.ConsentSeverity.CRITICAL) CHANNEL_HIGH else CHANNEL
+            ensureChannels()
+            val open = PendingIntent.getActivity(
+                context, id, ConsentActivity.intent(context, view.requestId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val deny = action(id, view.requestId, ConsentChoice.DENY)
+            val b = Notification.Builder(context, channel)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(card.title)
+                .setContentText(listOfNotNull(card.initiatorLine, card.sourceLine).joinToString(" · "))
+                .setStyle(Notification.BigTextStyle().bigText(listOfNotNull(card.initiatorLine, card.sourceLine, card.riskDescription.ifEmpty { null }, card.argumentsPreview.ifEmpty { null }).joinToString("\n")))
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setContentIntent(open)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setShowWhen(true)
+                .setWhen(card.deadlineMillis - card.timeoutMillis)
+                .setTimeoutAfter((card.deadlineMillis - System.currentTimeMillis()).coerceAtLeast(1_000)) // 到点系统也撤回
+            // 拒绝放第一个（默认动作更安全）；“允许一次”只在这条请求允许时给，高风险的也给，但要打开界面确认（见下）
+            b.addAction(deny)
+            if (card.allowsOnce() && card.severity != org.agentos.runtime.consent.ConsentSeverity.CRITICAL) {
+                b.addAction(action(id, view.requestId, ConsentChoice.ALLOW_ONCE))
+            }
+            nm().notify(TAG, id, b.build())
+        } catch (e: Exception) {
+            log("notification failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun action(id: Int, requestId: String, choice: ConsentChoice): Notification.Action {
+        val intent = Intent(context, ConsentActionReceiver::class.java)
+            .putExtra(ConsentActionReceiver.EXTRA_REQUEST, requestId)
+            .putExtra(ConsentActionReceiver.EXTRA_CHOICE, choice.name)
+            .setPackage(context.packageName)
+        val pi = PendingIntent.getBroadcast(
+            context, id * 4 + choice.ordinal, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val label = if (choice == ConsentChoice.DENY) "拒绝" else "允许一次"
+        return Notification.Action.Builder(null as Icon?, label, pi).build()
+    }
+
+    private fun cancelNotification(requestId: String) {
+        val id = notified.remove(requestId) ?: return
+        runCatching { nm().cancel(TAG, id) }
+    }
+
+    private fun ensureChannels() {
+        val m = nm()
+        if (m.getNotificationChannel(CHANNEL) == null) {
+            m.createNotificationChannel(NotificationChannel(CHANNEL, "工具确认", NotificationManager.IMPORTANCE_HIGH))
+        }
+        if (m.getNotificationChannel(CHANNEL_HIGH) == null) {
+            m.createNotificationChannel(NotificationChannel(CHANNEL_HIGH, "高风险工具确认", NotificationManager.IMPORTANCE_HIGH))
+        }
+    }
+
+    /** 通知上的按钮：回答 :agent 里的协调器（不导出的 receiver，运行在 :agent）。 */
+    fun respondFromNotification(requestId: String, choice: ConsentChoice): Boolean =
+        coordinator?.respond(requestId, choice) == true
+
+    companion object {
+        private const val TAG = "AgentOS.Consent"
+        private const val CHANNEL = "consent"
+        private const val CHANNEL_HIGH = "consent_high"
+        private const val NEXT_ID = 0x4000
+        private val nextSeq = java.util.concurrent.atomic.AtomicInteger()
+    }
+}
