@@ -252,15 +252,27 @@ class ExtensionHost(
         return synchronized(known) { known.values.firstOrNull { it.name == name } } ?: throw ExtError.notFound(name)
     }
 
-    private fun knownFor(pluginId: String): List<CatalogTool> = synchronized(known) { known.values.filter { it.provider == pluginId } }.sortedBy { it.name }
+    /**
+     * 一个插件的工具（listTools）：现在在目录里的，加上按**当前**策略被禁用的（插件页要能把它们重新启用）。
+     * 记录里既不在目录、按当前策略又是启用的（服务器不再提供、还没连上）不列出。
+     */
+    private fun knownFor(pluginId: String): List<CatalogTool> {
+        val catalog = tools.catalog.value
+        val policy = registry.approvals.policy.value
+        return synchronized(known) { known.values.filter { it.provider == pluginId } }
+            .filter { t -> catalog[t.name]?.source == t.source || t.source?.let { !policy.resolve(it).enabled } == true }
+            .sortedBy { it.name }
+    }
 
-    /** 目录变了：记下新出现的工具；不在目录里、但按策略是启用的（服务器不再提供、插件不可用）就忘掉。 */
-    private fun remember(catalog: ToolCatalog, policy: ApprovalPolicy) {
+    /**
+     * 目录变了：记下（更新）其中的工具。**只在插件不再可用时删**，不按策略删：目录和策略是两个流，combine 可能先看到新目录、
+     * 后看到新策略，那一瞬间“不在目录、旧策略说启用”会把刚被禁用的工具误删（负载高的设备上复现过）。
+     */
+    private fun remember(catalog: ToolCatalog, @Suppress("UNUSED_PARAMETER") policy: ApprovalPolicy) {
         val ready = registry.registry.value.plugins.filter { it.status == PluginStatus.READY }.map { it.id }.toSet()
         synchronized(known) {
             for (t in catalog.tools) t.source?.let { known[it] = t }
-            val inCatalog = catalog.tools.mapNotNull { it.source }.toSet()
-            known.entries.removeAll { (src, t) -> t.provider !in ready || (src !in inCatalog && policy.resolve(src).enabled) }
+            known.entries.removeAll { (_, t) -> t.provider !in ready }
         }
     }
 

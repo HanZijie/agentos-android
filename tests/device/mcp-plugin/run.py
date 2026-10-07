@@ -22,9 +22,10 @@ acp-channel 的 in-app 执行器（ext-e2e 场景）让真实运行时调用插�
   idle            空闲 30 秒后断开（插件服务被销毁），下次调用重连
   background      应用界面不在前台、:agent 只有前台服务时，:ext 仍能 bind 插件并完成调用
   ext-death       杀掉 :ext → 系统按 :agent 的绑定重建；目录重新推送；:agent 代理计数
-  e2e-always      端到端：echo 设为 always，模型调用 → 插件执行 → 结果交回模型
-  e2e-ask         端到端：echo 需要确认（确认协调器未接入，一律拒绝）→ 工具没执行
-  e2e-high        端到端：高风险工具即使插件级 always 也要确认 → 拒绝
+  e2e-always      端到端：echo 设为 always，模型调用 → 插件执行 → 结果交回模型；确认协调器没有被问到（自动应答设成拒绝也能执行）
+  e2e-ask         端到端：echo 需要确认，自动应答拒绝 → tool_denied，工具没执行
+  e2e-consent     端到端：echo 需要确认，自动应答允许一次 → 经确认后执行，结果交回模型（authorize → 确认 → dispatch → settled）
+  e2e-high        端到端：高风险工具即使插件级 always 也要确认（HIGH，不提供“本会话 / 始终允许”）→ 拒绝
   e2e-disabled    端到端：工具级禁用 → 模型拿到“不可用”，工具没执行
   policy-corrupt  策略文件与备份都坏 → :ext 重建后 fail closed（:agent 镜像同步）、写入被拒；用户重置后恢复（插件仍停用）
   signature       签名轮换（apksigner lineage）→ signature_changed、停用、目录清空；启用报 not_ready；确认后恢复
@@ -63,6 +64,7 @@ PLUGIN_ID = PLUGIN_PKG + "/agent-plugin"
 PLUGIN_SERVICE = PLUGIN_PKG + ".TestMcpService"
 DEBUG_RECEIVER = APP_PKG + "/.ext.ExtensionDebugReceiver"
 DESKTOP_RECEIVER = APP_PKG + "/.agent.DesktopGatewayDebugReceiver"
+CONSENT_RECEIVER = APP_PKG + "/.agent.ConsentDebugReceiver"
 CLIENT_ACTIVITY = acp.CLIENT_ACTIVITY
 INAPP_ACTIVITY = acp.INAPP_ACTIVITY
 HIGH_RISK_TOOL = "w" + "ipe"  # 名字拼出来：权限检查会把命令行里的这个词当成擦盘命令
@@ -482,18 +484,48 @@ def ensure_fake_model(c):
         c.fm = acp.start_fake_model(c.adb, {"agtest-fake-model-key": "test"})
 
 
-def run_e2e(c, name, args):
+def consent(c, op, mode=None):
+    """debug 构建的确认协调器（ConsentDebugReceiver，在 :agent）：mode = allow / allowOnce / deny / off；recent = 最近的确认请求。"""
+    cmd = f"am broadcast -n {CONSENT_RECEIVER} --es op {op}" + (f" --es mode {mode}" if mode else "")
+    out = c.adb.sh(cmd, check=False, timeout=60)
+    m = re.search(r'data="(.*)"\s*$', out, re.S)
+    return json.loads(m.group(1)) if m else {"ok": False, "raw": out[-300:]}
+
+
+def consent_entries(c, tool):
+    return [e for e in consent(c, "recent").get("recent", []) if e.get("tool") == T(tool)]
+
+
+def run_e2e(c, name, args, mode, tool, expect_prompt, expect_answer=None):
+    """
+    设好自动应答模式再跑 ext-e2e；核对确认协调器有没有为这个工具发起确认（expect_prompt），以及自动应答选了什么。
+    这样同时验证：always 策略跳过确认、需要确认时经过协调器、高风险即使插件级 always 也要确认且不提供“始终允许”。
+    """
     ensure_fake_model(c)
-    r = acp.run_one(c.adb, name, INAPP_ACTIVITY, "ext-e2e", args, 120)
-    return r or {"ok": False, "error": "ext-e2e timed out"}
+    set_mode = consent(c, "mode", mode)
+    before = len(consent_entries(c, tool))
+    r = acp.run_one(c.adb, name, INAPP_ACTIVITY, "ext-e2e", args, 120) or {"ok": False, "error": "ext-e2e timed out"}
+    entries = consent_entries(c, tool)
+    new = entries[before:]
+    prompted = bool(new)
+    answer_ok = expect_answer is None or (prompted and new[-1].get("answeredWith") == expect_answer)
+    no_always = all("ALWAYS_ALLOW" not in e.get("options", []) for e in new)
+    r.setdefault("checks", {})
+    r["checks"].update({"consentModeSet": set_mode.get("ok") is True, "consentAsExpected": prompted == expect_prompt,
+                        "consentAnswer": answer_ok, "noAlwaysAllowOffered": no_always})
+    r["consent"] = new[-3:]
+    r["ok"] = bool(r.get("ok")) and all(r["checks"].values())
+    r["summary"] = f"{r.get('summary', '')} consent={[(e.get('risk'), e.get('answeredWith'), e.get('options')) for e in new]}"
+    return r
 
 
 def case_e2e_always(c):
     c.ensure_enabled()
     c.dbg("approval_by_source", plugin="mcptest", server="test", tool="echo", mode="always")
     time.sleep(0.5)
+    # 自动应答设成拒绝：如果还问了确认，这一轮就会失败
     return run_e2e(c, "e2e-always", {"tool": T("echo"), "toolInput": {"text": "e2e-marker-41"}, "expect": "completed",
-                                     "resultContains": "e2e-marker-41"})
+                                     "resultContains": "e2e-marker-41"}, "deny", "echo", expect_prompt=False)
 
 
 def case_e2e_ask(c):
@@ -501,7 +533,17 @@ def case_e2e_ask(c):
     c.dbg("approval_by_source", plugin="mcptest", server="test", tool="echo", mode="")
     time.sleep(0.5)
     return run_e2e(c, "e2e-ask", {"tool": T("echo"), "toolInput": {"text": "x"}, "expect": "failed",
-                                  "resultContains": "tool_denied"})
+                                  "resultContains": "tool_denied"}, "deny", "echo", expect_prompt=True, expect_answer="DENY")
+
+
+def case_e2e_consent(c):
+    """authorize → 确认（自动应答允许一次）→ :agent 代理 → :ext → 插件执行 → 结果交回模型。"""
+    c.ensure_enabled()
+    c.dbg("approval_by_source", plugin="mcptest", server="test", tool="echo", mode="")
+    time.sleep(0.5)
+    return run_e2e(c, "e2e-consent", {"tool": T("echo"), "toolInput": {"text": "consented-77"}, "expect": "completed",
+                                      "resultContains": "consented-77"}, "allowOnce", "echo", expect_prompt=True,
+                   expect_answer="ALLOW_ONCE")
 
 
 def case_e2e_high(c):
@@ -509,7 +551,12 @@ def case_e2e_high(c):
     c.dbg("approval", id=PLUGIN_ID, mode="always")
     time.sleep(0.5)
     try:
-        return run_e2e(c, "e2e-high", {"tool": T(HIGH_RISK_TOOL), "expect": "failed", "resultContains": "tool_denied"})
+        r = run_e2e(c, "e2e-high", {"tool": T(HIGH_RISK_TOOL), "expect": "failed", "resultContains": "tool_denied"},
+                    "deny", HIGH_RISK_TOOL, expect_prompt=True, expect_answer="DENY")
+        last = (r.get("consent") or [{}])[-1]
+        r["checks"]["highRiskPrompt"] = last.get("risk") == "HIGH" and "ALLOW_FOR_SESSION" not in last.get("options", [])
+        r["ok"] = bool(r.get("ok")) and r["checks"]["highRiskPrompt"]
+        return r
     finally:
         c.dbg("approval", id=PLUGIN_ID, mode="")
 
@@ -520,7 +567,8 @@ def case_e2e_disabled(c):
     c.wait_tool("echo", absent=True, timeout_ms=5_000)
     time.sleep(0.5)
     try:
-        return run_e2e(c, "e2e-disabled", {"tool": T("echo"), "toolInput": {"text": "x"}, "expect": "failed"})
+        return run_e2e(c, "e2e-disabled", {"tool": T("echo"), "toolInput": {"text": "x"}, "expect": "failed"},
+                       "deny", "echo", expect_prompt=False)
     finally:
         c.dbg("tool_enable", name=T("echo"))
 
@@ -666,7 +714,8 @@ CASES = [
     ("list-changed", case_list_changed), ("plugin-death", case_plugin_death), ("force-stop", case_force_stop),
     ("disable-inflight", case_disable_inflight), ("tool-disable", case_tool_disable), ("idle", case_idle),
     ("background", case_background), ("ext-death", case_ext_death),
-    ("e2e-always", case_e2e_always), ("e2e-ask", case_e2e_ask), ("e2e-high", case_e2e_high), ("e2e-disabled", case_e2e_disabled),
+    ("e2e-always", case_e2e_always), ("e2e-ask", case_e2e_ask), ("e2e-consent", case_e2e_consent), ("e2e-high", case_e2e_high),
+    ("e2e-disabled", case_e2e_disabled),
     ("policy-corrupt", case_policy_corrupt), ("signature", case_signature), ("uninstall", case_uninstall),
 ]
 
@@ -727,6 +776,7 @@ def main():
             print(f"{name:18s} ok={r.get('ok')} {r.get('summary', '')}" + (f" FAILED={bad}" if bad else "")
                   + (f" error={r.get('error')}" if r.get("error") else ""), flush=True)
     finally:
+        consent(c, "mode", "off")
         c.release_agent()
         if c.fm is not None:
             adb.run("reverse", "--remove", f"tcp:{fake_model.DEVICE_PORT}", check=False)
