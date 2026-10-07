@@ -22,6 +22,8 @@ acp-channel 的 in-app 执行器（ext-e2e 场景）让真实运行时调用插�
   idle            空闲 30 秒后断开（插件服务被销毁），下次调用重连
   background      应用界面不在前台、:agent 只有前台服务时，:ext 仍能 bind 插件并完成调用
   ext-death       杀掉 :ext → 系统按 :agent 的绑定重建；目录重新推送；:agent 代理计数
+  known-tools     已知工具：工具级禁用后杀 :ext，listTools 仍列出它（enabled=false、名字不变、键与 KnownTool 一一对应）；
+                  停用插件后杀 :ext，启用一次之前 listTools 为 []；启用后恢复
   e2e-always      端到端：echo 设为 always，模型调用 → 插件执行 → 结果交回模型；确认协调器没有被问到（自动应答设成拒绝也能执行）
   e2e-ask         端到端：echo 需要确认，自动应答拒绝 → tool_denied，工具没执行
   e2e-consent     端到端：echo 需要确认，自动应答允许一次 → 经确认后执行，结果交回模型（authorize → 确认 → dispatch → settled）
@@ -78,6 +80,8 @@ HIGH_RISK_TOOL = "w" + "ipe"  # 名字拼出来：权限检查会把命令行里
 
 T = lambda tool: f"mcp__mcptest__test__{tool}"  # noqa: E731
 ALL_TOOLS = sorted(T(x) for x in ("add_tool", "die", "echo", "remove_tool", "slow", "stats", HIGH_RISK_TOOL))
+# IExtensionHost.listTools 每一项的键（与 core:extensions 的 KnownTool 一一对应，按输出顺序）
+KNOWN_TOOL_KEYS = ["name", "pluginId", "source", "title", "description", "inputSchema", "risk", "enabled", "approval", "mayAlwaysAllow"]
 
 
 class Ctx:
@@ -248,7 +252,9 @@ def case_enable(c):
         "enabled": (r.get("plugin") or {}).get("enabled") is True,
         "toolsAppeared": bool(w.get("met")) and names == ALL_TOOLS,
         "highRisk": hi.get("risk") == "high" and hi.get("mayAlwaysAllow") is False,
-        "echoWriteAsk": echo.get("risk") == "write" and echo.get("approval") == "ask" and echo.get("provider") == PLUGIN_ID,
+        "echoWriteAsk": echo.get("risk") == "write" and echo.get("approval") == "ask" and echo.get("pluginId") == PLUGIN_ID,
+        # listTools 的每一项与 KnownTool 字段一一对应（D5.3 插件页依赖这个形状）
+        "knownToolShape": bool(tools) and all(list(t.keys()) == KNOWN_TOOL_KEYS for t in tools.values()),
         "serverConnected": (p.get("servers") or [{}])[0].get("state") in ("connected", "idle") and p.get("toolCount") == 7,
         "skills": set(skills) == {"greet", "broken"} and p.get("skillCount") == 2,
         "skillProblem": any("broken" in x.get("message", "") for x in p.get("skillProblems", [])),
@@ -649,6 +655,55 @@ def wait_agent(c, pred, timeout=15):
     return ext, False
 
 
+def kill_ext(c):
+    pid0 = c.pidof(f"{APP_PKG}:ext")
+    c.adb.sh(f"run-as {APP_PKG} kill -9 {pid0}", check=False)
+    return wait_ext_restart(c, pid0)
+
+
+def case_known_tools(c):
+    """
+    已知工具（A9 的 ExtensionToolHost.knownTools，IExtensionHost.listTools）：
+    1. 工具级禁用 echo 后杀掉 :ext：插件已启用，重建后连一次，listTools 仍列出全部 7 个，echo enabled=false、名字不变、不在目录里；
+    2. 插件停用后再杀 :ext：这个 :ext 进程里从没连上过它，listTools 返回 []（插件页显示“启用后可查看工具”）；启用一次后列表回来。
+    """
+    c.ensure_enabled()
+    before = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID).get("tools", [])}
+    c.dbg("tool_disable", name=T("echo"))
+    c.wait_tool("echo", absent=True, timeout_ms=5_000)
+    pid1, restart_ms = kill_ext(c)
+    t0 = time.time()
+    listed = c.dbg("tools", id=PLUGIN_ID, timeout=60)
+    list_ms = int((time.time() - t0) * 1000)
+    after = {t["name"]: t for t in listed.get("tools", [])}
+    echo = after.get(T("echo"), {})
+    keys_ok = bool(after) and all(list(t.keys()) == KNOWN_TOOL_KEYS for t in after.values())
+    echo_not_in_catalog = T("echo") not in c.own_tool_names()
+    # 2：停用的插件
+    c.dbg("disable", id=PLUGIN_ID)
+    pid2, _ = kill_ext(c)
+    listed2 = c.dbg("tools", id=PLUGIN_ID, timeout=60)
+    p = c.plugin() or {}
+    c.dbg("enable", id=PLUGIN_ID)
+    w = c.wait_tool("stats", timeout_ms=15_000)
+    listed3 = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID, timeout=60).get("tools", [])}
+    c.dbg("tool_enable", name=T("echo"))
+    back = c.wait_tool("echo", timeout_ms=10_000)
+    checks = {
+        "extRestarted": pid1 is not None and pid2 is not None,
+        "stillListedAfterRebuild": listed.get("ok") is True and sorted(after) == sorted(before) == ALL_TOOLS,
+        "disabledToolKeptSameName": echo.get("enabled") is False and (echo.get("source") or {}).get("tool") == "echo",
+        "disabledToolNotInCatalog": echo_not_in_catalog,
+        "exactKeys": keys_ok,
+        "disabledPluginHasNoList": listed2.get("ok") is True and listed2.get("tools") == [] and p.get("enabled") is False,
+        "enableOnceRestoresList": bool(w.get("met")) and sorted(listed3) == ALL_TOOLS
+                                  and (listed3.get(T("echo")) or {}).get("enabled") is False,
+        "toolReEnabled": bool(back.get("met")),
+    }
+    return verdict(checks, f"extRestartMs={restart_ms} listAfterRebuildMs={list_ms} known={len(after)} "
+                           f"disabledPluginList={listed2.get('tools')}", echoAfterRebuild=echo)
+
+
 def case_policy_corrupt(c):
     """策略文件和备份都读不出来 → :ext 重建后 fail closed（第三方插件当作禁用，:agent 的镜像同步）；写入被拒；用户重置后恢复，插件仍停用。"""
     c.ensure_enabled()
@@ -742,7 +797,7 @@ CASES = [
     ("approvals", case_approvals), ("call", case_call), ("uid-check", case_uid_check), ("timeout", case_timeout), ("cancel", case_cancel),
     ("list-changed", case_list_changed), ("plugin-death", case_plugin_death), ("force-stop", case_force_stop),
     ("disable-inflight", case_disable_inflight), ("tool-disable", case_tool_disable), ("idle", case_idle),
-    ("background", case_background), ("ext-death", case_ext_death),
+    ("background", case_background), ("ext-death", case_ext_death), ("known-tools", case_known_tools),
     ("e2e-always", case_e2e_always), ("e2e-ask", case_e2e_ask), ("e2e-consent", case_e2e_consent), ("e2e-high", case_e2e_high),
     ("e2e-disabled", case_e2e_disabled),
     ("policy-corrupt", case_policy_corrupt), ("signature", case_signature), ("uninstall", case_uninstall),

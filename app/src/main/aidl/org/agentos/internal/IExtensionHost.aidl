@@ -32,13 +32,18 @@ import org.agentos.internal.IExtensionCallback;
  *    "skillProblems":[{"code","message"}]（ExtensionSkillPort.problems：frontmatter 缺失 / 非法、SKILL.md 读不到等，A10）}
  *   签名变化（signature_changed）或记忆丢失（signature_unconfirmed）时已停用，要用户先 confirmSignature 再启用。
  *
- * 工具（listTools 的一项；getCatalog 的 tools 也是这个形状；目录本身由 core:extensions 的 ExtensionToolHost 生成，A9）：
- *   {"name"（交给模型的名字，ToolNaming：mcp__<插件名>__<服务器>__<工具>，见 extensions.md 5.3）, "pluginId",
- *    "source":{"plugin"（插件名）, "server", "tool"（服务器报告的原始工具名）}, "provider"（插件 ID，与 pluginId 相同）,
- *    "title"（可无）, "description"（截到 1,024 字符）, "inputSchema":{…},
+ * 已知工具（listTools 的一项；setToolEnabled / setToolApproval / setToolApprovalBySource 的返回值）：与 core:extensions 的
+ * ExtensionToolHost.knownTools 的 KnownTool **字段一一对应**，键固定、不省略（插件页 D5.3 依赖这个形状）：
+ *   {"name"（交给模型的名字，ToolNaming：mcp__<插件名>__<服务器>__<工具>，见 extensions.md 5.3；禁用、断开、:ext 重建后都不变）,
+ *    "pluginId"（PluginRecord.id）, "source":{"plugin"（插件名）, "server", "tool"（服务器报告的原始工具名）},
+ *    "title"（字符串或 null，截到 128 字符）, "description"（截到 1,024 字符，可为空串）, "inputSchema":{…},
  *    "risk":"read"|"write"|"high"（RiskPolicy.effectiveRisk：默认 write，destructiveHint=true 升 high；只有自带插件的 readOnlyHint 降为 read）,
- *    "enabled": bool, "approval":"ask"|"always"（ApprovalPolicy.resolve 的结果）, "mayAlwaysAllow": bool（RiskPolicy.mayAlwaysAllow）}
- *   描述、schema 都来自第三方，是不可信输入。
+ *    "enabled": bool（插件、服务器、工具三层策略都启用；为 true 的才在目录里）, "approval":"ask"|"always"（ApprovalPolicy.resolve）,
+ *    "mayAlwaysAllow": bool（RiskPolicy.mayAlwaysAllow：高风险为 false，设 always 会报 high_risk）}
+ *
+ * 目录里的工具（getCatalog 的 tools，只给运行时 :agent 用）：上面的字段去掉 enabled=false 的工具，另加 "provider"（插件 ID，与 pluginId 相同），
+ * title 没有时省略。
+ * 描述、title、schema 都来自第三方，是不可信输入。
  *
  * 审批方式参数 mode：ask | always | ""（清除这一层，沿用上一层）。
  */
@@ -68,16 +73,23 @@ interface IExtensionHost {
     String setPluginApproval(String pluginId, String mode);
 
     /**
-     * 一个插件的全部工具（含被禁用的），JSON 数组。插件已启用但还没有工具时先等一次刷新（最多 10 秒）。错误 code：not_found、unavailable。
-     * 被工具级禁用的工具只在 :ext 进程内记得：:ext 重建后，要等它的服务器再连上一次才重新列出。
+     * 一个插件的全部已知工具（含被策略禁用的），JSON 数组，每项是上面的“已知工具”，按 name 排序。错误 code：not_found、unavailable（插件不是 ready）。
+     * 规则（ExtensionToolHost.knownTools，docs/extensions.md“已知工具”）：
+     * - 被策略禁用的工具（工具、服务器或插件级）、连接断开（空闲回收、插件进程被杀）后都保留，名字不变；
+     * - 插件被移除、签名变化或未确认、升级或服务声明变了、撤销授权时丢弃；
+     * - :ext 重建后缓存是空的（不落盘）。已启用的插件启动时连一次，取到后被工具级禁用的工具也在里面；
+     *   **被禁用、且在这个 :ext 进程里从没连上过的插件，在启用一次之前没有工具列表**（返回 []，插件页显示“启用后可查看工具”，
+     *   不显示“0 个工具”；不为显示去连接被禁用的插件）；
+     * - 插件已启用但还没有已知工具（刚启用、:ext 刚重建）时，先等一次刷新（最多 10 秒），然后照常返回。
+     * 只读，不改目录版本；插件页每次打开时重新调用即可。
      */
     String listTools(String pluginId);
 
-    /** 启用或禁用一个工具（toolName 为目录里的名字），返回更新后的工具 JSON。错误 code：not_found。 */
+    /** 启用或禁用一个工具（toolName 为 listTools 里的 name），返回更新后的已知工具 JSON。错误 code：not_found、unavailable。 */
     String setToolEnabled(String toolName, boolean enabled);
 
     /**
-     * 设置一个工具的审批方式，返回更新后的工具 JSON。
+     * 设置一个工具的审批方式，返回更新后的已知工具 JSON。
      * 错误 code：not_found、bad_mode、high_risk（risk=high 的工具不能设为 always）。
      */
     String setToolApproval(String toolName, String mode);
@@ -137,7 +149,7 @@ interface IExtensionHost {
 
     /**
      * 按来源设置一个工具的审批方式（确认框里的“始终允许”写回用，A11 的 ApprovalWriter）：plugin / server / tool 是 ToolSource
-     * （插件名、服务器名、原始工具名），不受 ToolNaming 改名影响。返回更新后的工具 JSON。
+     * （插件名、服务器名、原始工具名），不受 ToolNaming 改名影响。返回更新后的已知工具 JSON。
      * 错误 code：not_found（工具不在 :ext 已知的工具里）、bad_mode、high_risk（按 :ext 算的风险等级）、unavailable（策略文件 fail closed）。
      */
     String setToolApprovalBySource(String plugin, String server, String tool, String mode);
