@@ -155,7 +155,13 @@ sealed interface ToolInvocationResult {
 interface SkillPort {
     val catalog: StateFlow<SkillCatalog>
 
-    /** 读取 Skill 的 SKILL.md（[path] 为 null）或其中的附属文件。内容是不可信输入。 */
+    /**
+     * 读取 Skill 的 SKILL.md（[path] 为 null）或同一 Skill 目录里的附属文件（[path] 相对 Skill 目录）。内容是**不可信输入**。
+     *
+     * @param skillId [SkillSummary.id]
+     * @throws NoSuchElementException 没有这个 Skill（包括插件被禁用、不再可用），或这个 Skill 里没有这个文件
+     * @throws IllegalArgumentException [path] 不合法（路径穿越、绝对路径、控制字符…）或文件不是文本
+     */
     suspend fun read(skillId: String, path: String? = null): SkillContent
 
     companion object {
@@ -174,8 +180,16 @@ data class SkillCatalog(val version: Long, val skills: List<SkillSummary>) {
     }
 }
 
+/**
+ * 目录里的一个 Skill。[name]、[description] 来自插件（**第三方文本，不可信**）。
+ *
+ * @property id 唯一的标识，`read_skill` 用它：名字不冲突时就是 [name]，冲突时是 `<插件名>:<Skill 名>`
+ * @property name Skill 自己的名字（SKILL.md 的 frontmatter）
+ * @property provider 来源插件的名字
+ */
 data class SkillSummary(val id: String, val name: String, val description: String, val provider: String)
 
+/** [truncated] 为 true 表示内容超过单次读取上限，已经截断。 */
 data class SkillContent(val text: String, val truncated: Boolean = false)
 
 // ---------------------------------------------------------------- Hook

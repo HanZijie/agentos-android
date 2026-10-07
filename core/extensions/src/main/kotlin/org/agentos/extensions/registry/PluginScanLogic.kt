@@ -241,6 +241,7 @@ object PluginScanLogic {
                 servers = usable,
                 rejectedServers = rejected,
                 problems = problems,
+                skillFiles = assets.skillFiles,
             ),
             ownsName = true,
         )
