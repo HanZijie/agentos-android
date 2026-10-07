@@ -54,6 +54,27 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 
 **Jev**：用户给的 Jev key 对原默认端点 `omnilabs.vibeadmin.cn` 返回 401，对 `https://api.typesafe.ai/v1/systemone` 返回 200；默认端点已改为后者（可配置），HTTP 超时 3 秒，路由等待 3.5 秒。**2026-10-07 真机实测通过**（Pixel 8，WLAN 直连，Jev key 经 stdin 写入、只显示首尾 4 位，真实 minimax-cn / MiniMax-M3）：三个互不相关的会话（东京三日游、Kotlin 协程取消、红烧肉），带问题的 `autoSelect` 全部选回对应会话，不相关的问题得到新会话；每次选择约 1.0–1.6 秒；两把 key 在日志和结果里 0 命中。已知现象：`session_info_update` 里的 `selection` 通知比请求晚一拍到达（SDK 0.30.1），客户端要以返回的 sessionId 为准。脚本 `tests/device/acp-channel/jev_real_autoselect.py`。
 
+## 三之三、示例 App 与 MCP（闹钟、日历、备忘录，Pixel 8，API 35，2026-10-07）
+
+三个独立 App 在 `plugins/samples/{alarm,calendar,notes}/`：Compose 界面（亮暗主题、中英文）、各自带 `McpBinderService`（`BIND_MCP_SERVICE`，signature 级权限，不开 HTTP 端口）、`plugin.json` 和 `SKILL.md`。工具数 9 / 12 / 10，共 31 个，增删改查齐全，名字与必填参数见 [sample-apps.md](sample-apps.md)。每个 App 的 debug 构建带 `dump` / `reset` 接收器，验收驱动靠它读状态、复位（真机没有 `sqlite3`）；日历的 `dump` / `reset` 还没提交，驱动暂时把 `calendar.db` 拷到电脑上读。
+
+| 项目 | 结果 |
+|---|---|
+| 三个 App 被发现、默认关闭、启用后目录 31 个工具 | 通过（delete 为 HIGH，其余 WRITE） |
+| 脚本模式 `sample_apps_e2e.py`（假模型按脚本调工具，经 Broker 与确认） | **55/55**：增删改查、闹钟启停、错误参数（缺字段、非法时间、未知 id）、拒绝后不执行、插件关 / 开后目录变化、每个 App 的审计；闹钟用 `AlarmManager` 的登记状态（dump 里的 `registered`）核对，不只看数据库 |
+| `--live`，真实 `minimax-cn` / `MiniMax-M3`，手机直连 `https://api.minimaxi.com/anthropic` | **13/13**：“明早 7 点叫我起床”→ `alarm_create` 07:00、已登记到系统；“下周三下午 3 点和王总开会，提前 15 分钟提醒”→ `event_create` 2026-10-14 15:00 +08:00、提醒 15 分钟；“记一条关于新品发布的备忘，打上工作标签”→ 先 `tag_list` 再 `note_create`、标签“工作” |
+| 自然语言多步（`sample_apps_live_nl.py`，同样真实 M3 直连） | 21/21：闹钟建 → 改 → 删，备忘录先搜再建并追加，日历先查再建（3 号会议室、提醒） |
+| 直接经 `ExtensionDebugReceiver` 的 MCP 增删改查（`sample_apps_mcp_crud.py`） | 36/36 |
+| 假模型 + 确认协调器全链路（`sample_apps_consent_e2e.py`） | 15/15：HIGH 只有“允许一次 / 拒绝”，拒绝在新会话里仍然生效 |
+| 单测 | 日历 93 项，合入 main 后重跑 0 失败 |
+| key 泄漏扫描 | `--live` 的 14358 行 logcat 与结果文件命中 0 次 |
+
+**没做 / 限制**：
+- **release 构建里需要确认的调用仍一律拒绝**（D5.2 真实确认界面未合入）。上面所有写操作都是 debug 构建的 `ConsentDebugReceiver` 放行的；这一步完成前，真实用户还不能用这三个 App。
+- 插件管理页（D5.3）未合入，启用 / 关闭目前靠 `ExtensionDebugReceiver`。
+- 三个 App 的界面没有在这台真机上点过（有人在用）；界面与截图见各自 README，是模拟器上做的。
+- `--live` 只覆盖三条典型指令；没有测多轮纠错、同时操作两个 App、模型选错工具之后的恢复。
+
 ## 四、已验证的用户流程（Pixel_8a，用 MiniMax 国内平台真实 key）
 
 首次引导 → 设置页选 MiniMax CN 并填 key（防截屏页面）→ 对话流式输出 → 点“停止”（显示“已取消”）→ 马上再发一条能正常回答 → 设置页清除 key。清除后 logcat 和 App 私有数据里都搜不到 key。截图在工作区 `demo/2026-09-29-pixel8a-ui/`。
@@ -63,7 +84,7 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 - 只有 debug 签名的 zip；发布证书要维护者生成。
 - 没有电池优化豁免时，`:agent` 在后台被拉起会进不了前台：电脑端的长对话会被冻结，首次引导和设置页都会提示授予。
 - 监督进程只在有任务时拉起 `:agent`；电脑端接入开着但没有任务时被杀，要等开机、打开界面或有人绑定才回来。W11 在心跳加 `hold=desktop`。
-- 手机上没有工具、确认策略和 Jev：W14 / W15 / W16。
+- 插件页和真实确认界面（W14 / W15 / W16 的界面部分，D5.2 / D5.3）未完成：release 构建里需要确认的工具调用一律拒绝，只有 debug 构建能放行；Jev 已接入，详见三之二。
 - 本机用 Clash TUN 时，模拟器访问模型端点会 TLS 失败。
 
 ## 六、需要人来做的事
