@@ -12,6 +12,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.kotlin.test.junit)
+    // 记忆丢失的测试用真实的 CapabilityBroker + FakeHostPort 看“模型能看到哪些工具”
+    testImplementation(testFixtures(project(":core:runtime")))
     testImplementation(libs.junit4)
 }
 
