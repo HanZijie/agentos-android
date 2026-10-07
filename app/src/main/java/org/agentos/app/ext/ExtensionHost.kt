@@ -32,6 +32,7 @@ import org.agentos.app.ext.registry.toApprovalMode
 import org.agentos.extensions.host.DisabledReason
 import org.agentos.extensions.host.ExtensionHostConfig
 import org.agentos.extensions.host.ExtensionToolHost
+import org.agentos.extensions.host.KnownTool
 import org.agentos.extensions.host.McpServerConnector
 import org.agentos.extensions.host.ServerKey
 import org.agentos.extensions.host.ServerState
@@ -96,12 +97,6 @@ class ExtensionHost(
     private val snapshotFlow = MutableStateFlow(Snapshot(0, ToolCatalog.EMPTY, registry.approvals.policy.value))
     val snapshot: StateFlow<Snapshot> = snapshotFlow.asStateFlow()
 
-    /**
-     * 见过的工具（按来源），给插件页列出**被禁用的**工具（ExtensionToolHost 的目录只含启用的）。
-     * 只在本进程内记得：:ext 重建后，被工具级禁用的工具要等它的服务器再连上一次才重新出现（报告里请 A 提供已知工具的接口）。
-     */
-    private val known = LinkedHashMap<ToolSource, CatalogTool>()
-
     private class Call(val job: Job, val owner: IBinder?)
     private val calls = ConcurrentHashMap<String, Call>()
 
@@ -114,14 +109,10 @@ class ExtensionHost(
 
     fun start() {
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            registry.events.collect { e ->
-                tools.onRegistryEvent(e)
-                if (e is RegistryEvent.Revoke) forget(e.pluginId)
-            }
+            registry.events.collect { e -> tools.onRegistryEvent(e) }
         }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             combine(tools.catalog, registry.approvals.policy, skills.catalog) { c, p, k -> Triple(c, p, k) }.collect { (c, p, k) ->
-                remember(c, p)
                 snapshotFlow.update { Snapshot(it.version + 1, c, p, k) }
             }
         }
@@ -199,26 +190,26 @@ class ExtensionHost(
     }
 
     /**
-     * 一个插件的全部工具（含被禁用的）。插件可用、已启用但还没有任何工具时，先等一次刷新（最多 [LIST_REFRESH_TIMEOUT_MS]）。
+     * 一个插件的全部工具（含被策略禁用的）：A9 的 [ExtensionToolHost.knownTools]，JSON 与 [KnownTool] 字段一一对应（[ExtWire.knownToolJson]）。
+     * 插件可用、插件级已启用但还没有已知工具（刚启用、`:ext` 刚重建还没连上）时，先等一次刷新（最多 [LIST_REFRESH_TIMEOUT_MS]）。
+     * 插件被禁用时不为了显示去连接：`:ext` 重建后、启用一次之前它没有工具列表（返回空数组，插件页显示“启用后可查看工具”）。
      */
     fun listTools(pluginId: String?): String {
         val p = registry.plugin(pluginId)
         if (p.status != PluginStatus.READY) throw ExtError.unavailable("plugin $pluginId is ${p.status.name.lowercase()}")
         val name = p.name
-        if (name != null && registry.approvals.policy.value.pluginEnabled(name) && knownFor(p.id).isEmpty()) {
+        if (name != null && registry.approvals.policy.value.pluginEnabled(name) && tools.knownTools(p.id).isEmpty()) {
             runBlocking { tools.refreshNow(LIST_REFRESH_TIMEOUT_MS) }
         }
-        val policy = registry.approvals.policy.value
-        remember(tools.catalog.value, policy)
-        return JsonArray(knownFor(p.id).map { ExtWire.toolJson(it, policy) }).toString()
+        return JsonArray(tools.knownTools(p.id).map { ExtWire.knownToolJson(it) }).toString()
     }
 
     fun setToolEnabled(toolName: String?, enabled: Boolean): String {
         val t = findTool(toolName)
-        val s = t.source ?: throw ExtError.notFound(toolName)
+        val s = t.source
         // 启用写 null（清掉工具级的禁用，沿用服务器 / 插件级）；禁用写 false
-        val policy = registry.updatePolicy { it.withEnabled(PolicyScope.Tool(s.plugin, s.server, s.tool), if (enabled) null else false) }
-        return ExtWire.toolJson(t, policy).toString()
+        registry.updatePolicy { it.withEnabled(PolicyScope.Tool(s.plugin, s.server, s.tool), if (enabled) null else false) }
+        return updated(t)
     }
 
     /** 先校验审批方式（bad_mode），再找工具（not_found）：与插件级 setPluginApproval 的顺序相同。 */
@@ -231,53 +222,27 @@ class ExtensionHost(
     fun setToolApprovalBySource(plugin: String?, server: String?, tool: String?, mode: String?): String {
         ExtError.checkMode(mode)
         val src = ToolSource(plugin ?: "", server ?: "", tool ?: "")
-        val t = tools.catalog.value.tools.firstOrNull { it.source == src }
-            ?: synchronized(known) { known[src] }
-            ?: throw ExtError.notFound("$plugin/$server/$tool")
+        val t = tools.knownTools().firstOrNull { it.source == src } ?: throw ExtError.notFound("$plugin/$server/$tool")
         return setApproval(t, mode)
     }
 
-    private fun setApproval(t: CatalogTool, mode: String?): String {
+    private fun setApproval(t: KnownTool, mode: String?): String {
         ExtError.checkMode(mode)
-        val s = t.source ?: throw ExtError.notFound(t.name)
+        val s = t.source
         val approval = mode.toApprovalMode()
         if (approval == ApprovalMode.ALWAYS && !RiskPolicy.mayAlwaysAllow(t.risk)) throw ExtError.highRisk(t.name)
-        val policy = registry.updatePolicy { it.withApproval(PolicyScope.Tool(s.plugin, s.server, s.tool), approval, t.risk) }
-        return ExtWire.toolJson(t, policy).toString()
+        registry.updatePolicy { it.withApproval(PolicyScope.Tool(s.plugin, s.server, s.tool), approval, t.risk) }
+        return updated(t)
     }
 
-    private fun findTool(name: String?): CatalogTool {
+    /** 改完策略后的工具 JSON：knownTools 按当前策略算 enabled / approval，改动立即反映出来。 */
+    private fun updated(t: KnownTool): String =
+        ExtWire.knownToolJson(tools.knownTools(t.pluginId).firstOrNull { it.source == t.source } ?: t).toString()
+
+    /** 按目录里的名字找（含被禁用的已知工具）。 */
+    private fun findTool(name: String?): KnownTool {
         if (name.isNullOrEmpty()) throw ExtError.notFound(name)
-        tools.catalog.value[name]?.let { return it }
-        return synchronized(known) { known.values.firstOrNull { it.name == name } } ?: throw ExtError.notFound(name)
-    }
-
-    /**
-     * 一个插件的工具（listTools）：现在在目录里的，加上按**当前**策略被禁用的（插件页要能把它们重新启用）。
-     * 记录里既不在目录、按当前策略又是启用的（服务器不再提供、还没连上）不列出。
-     */
-    private fun knownFor(pluginId: String): List<CatalogTool> {
-        val catalog = tools.catalog.value
-        val policy = registry.approvals.policy.value
-        return synchronized(known) { known.values.filter { it.provider == pluginId } }
-            .filter { t -> catalog[t.name]?.source == t.source || t.source?.let { !policy.resolve(it).enabled } == true }
-            .sortedBy { it.name }
-    }
-
-    /**
-     * 目录变了：记下（更新）其中的工具。**只在插件不再可用时删**，不按策略删：目录和策略是两个流，combine 可能先看到新目录、
-     * 后看到新策略，那一瞬间“不在目录、旧策略说启用”会把刚被禁用的工具误删（负载高的设备上复现过）。
-     */
-    private fun remember(catalog: ToolCatalog, @Suppress("UNUSED_PARAMETER") policy: ApprovalPolicy) {
-        val ready = registry.registry.value.plugins.filter { it.status == PluginStatus.READY }.map { it.id }.toSet()
-        synchronized(known) {
-            for (t in catalog.tools) t.source?.let { known[it] = t }
-            known.entries.removeAll { (_, t) -> t.provider !in ready }
-        }
-    }
-
-    private fun forget(pluginId: String) {
-        synchronized(known) { known.entries.removeAll { it.value.provider == pluginId } }
+        return tools.knownTools().firstOrNull { it.name == name } ?: throw ExtError.notFound(name)
     }
 
     // ------------------------------------------------------------------ 运行时

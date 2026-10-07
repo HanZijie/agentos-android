@@ -482,7 +482,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 #### W17 自带插件与示例 App
 - [ ] AgentOS 自带插件：`assets/agent-plugin/` + `BuiltinMcpService`，工具组包括 Intent / 分享、通知、日历与联系人
-- [ ] `plugins/samples/`：把 agenriod 的 notes、alarm、calendar、meeting-records 改写为内嵌插件的示例 App
+- [x] `plugins/samples/`：闹钟、日历、备忘录三个示例 App（Compose 界面 + `McpBinderService`，31 个工具，见 [sample-apps.md](sample-apps.md)；Pixel 8 真机脚本模式 55/55、真实 MiniMax-M3 直连 13/13，见 m1-acceptance 三之三）；meeting-records 未做
 
 **出口条件**：
 - 不装任何第三方插件，也能完成“读通知 → 建日程 → 分享”；

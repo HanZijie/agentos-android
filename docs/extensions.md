@@ -252,6 +252,14 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 - 目录内重名的工具**全部**加后缀（不偏袒任何一个），结果只取决于目录的内容、与顺序无关；仍然重名时哈希从 6 位加长到 8 / 12 / 16 / 24 位。规则见 `ToolNaming.assign`，要拿整个目录一起算。目录里新增一个会撞名的工具，会让原来不带后缀的那个改名：用户策略按（插件、服务器、原始工具名）记，不受影响，只有按工具名写的 Hook `matcher` 会受影响；
 - Hook 的 `matcher` 按处理后的最终名字匹配。
 
+已知工具（`ExtensionToolHost.knownTools(pluginId?)`，A9）：插件页要列出一个插件的全部工具，包括被用户策略禁用的。目录（`catalog`）只含当前可用的工具，`knownTools` 是目录加上“记得但不可用”的那部分，两者共用同一次 `ToolNaming.assign`，所以名字和风险永远一致。每个条目含最终工具名、来源（插件、服务器、原始工具名）、title、截断后的描述、输入 schema、风险、`enabled`（插件、服务器、工具三层策略都启用才为 true）、审批方式和 `mayAlwaysAllow`。只读，不连接、不等待；不触发目录版本变化，插件页每次打开时重新调用即可。
+
+- **保留**：工具被禁用；服务器或插件被禁用（缓存标记过期，重新启用后再取一次）；连接断开（空闲 30 秒回收、App 进程被杀、连不上）。这些情况下工具名都不变；
+- **丢弃**：插件被移除、签名变化或还没确认（不再是 READY）、升级或服务声明变了、撤销授权；
+- **`:ext` 重建**：缓存不落盘（第三方数据，可能过期），重建后是空的。已启用的服务器启动时连一次，取到列表后，被工具级禁用的工具也在里面，名字不变。**被禁用的插件或服务器按策略不连接，在启用一次之前 `knownTools` 没有它们的工具**，插件页对这样的插件显示“启用后可查看工具”，不显示 0 个工具（整合人 2026-10-07 确认：不落盘缓存、不为显示而连接被禁用的插件；以后要改是产品决定）；
+- 刚启用、还没取到列表时，调用方用 `refreshNow(timeoutMillis)` 等一次。
+
+
 工具的风险等级与结果规则（`ExtensionToolHost`）：
 
 - 风险等级用 `RiskPolicy.effectiveRisk`：`destructiveHint` → 高风险；**自带插件**的 `readOnlyHint=true` 声明为“读”（自带插件由 AgentOS 自己签名，信任它的注解；整合人 2026-10-07 确认），其余来源的 `readOnlyHint` 不降低等级；
@@ -373,6 +381,7 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 | `callTool` / `cancelTool` / `onToolResult` | 双向 | 工具调用、取消（转成 MCP 的取消通知）、结果。每个受理的调用恰好回调一次，结局是 completed / not_dispatched / unknown；失败时 `error` 是 core:runtime 的 `ErrorInfo`（code 用 `ErrorCode.wire`） |
 | `readSkill(skillId, path)` | 请求 / 响应 | 读取 Skill 正文或附带文件（由 `ExtensionSkillPort` 提供，路径规则见第 6 节） |
 | `refreshTools` | 请求 / 响应 | 给 `ToolPort.prepare` 用 |
+| `listTools(pluginId)`、`setToolEnabled`、`setToolApproval` | 请求 / 响应 | 给插件页：一个插件的全部已知工具（含被策略禁用的）和单个工具的开关、审批方式。返回值（含 `setToolApprovalBySource`）是 `ExtensionToolHost.knownTools` 的 JSON，键固定、顺序固定、不省略：`name`、`pluginId`、`source{plugin,server,tool}`、`title`（没有为 null，截到 128 字符）、`description`（截到 1,024 字符，可能为空串）、`inputSchema`、`risk`（read / write / high）、`enabled`、`approval`（ask / always）、`mayAlwaysAllow`（高风险为 false，设 always 报 `high_risk`）。插件已启用但还没有已知工具时先等一次 `refreshNow`（最多 10 秒）；插件已停用时不为显示而连接，返回已知的部分，`:ext` 重建后启用一次之前返回 `[]`，插件页显示“启用后可查看工具”，不显示“0 个工具”。`getCatalog` 的工具形状不变，只给 `:agent` 用 |
 | `setToolApprovalBySource` | 请求 / 响应 | 给 `ApprovalWriter` 用（确认框里的“始终允许”写回 `:ext` 的 `ApprovalStore`） |
 | `getPolicyStatus` / `resetPolicy` | 请求 / 响应 | 给插件页：策略文件损坏时的提示（正在用上一份、备份还是 fail closed）和重置 |
 | `ToolPort.prepare(timeoutMillis)` | 运行时内部 | 每个任务开始时、构造工具声明之前调一次，等工具目录刷新（默认最多 2 秒，超时或失败只记日志、任务照常开始）；`ExtensionToolHost.prepare` 就是 `refreshNow` |

@@ -22,6 +22,8 @@ acp-channel 的 in-app 执行器（ext-e2e 场景）让真实运行时调用插�
   idle            空闲 30 秒后断开（插件服务被销毁），下次调用重连
   background      应用界面不在前台、:agent 只有前台服务时，:ext 仍能 bind 插件并完成调用
   ext-death       杀掉 :ext → 系统按 :agent 的绑定重建；目录重新推送；:agent 代理计数
+  known-tools     已知工具：工具级禁用后杀 :ext，listTools 仍列出它（enabled=false、名字不变、键与 KnownTool 一一对应）；
+                  停用插件后杀 :ext，启用一次之前 listTools 为 []；启用后恢复
   e2e-always      端到端：echo 设为 always，模型调用 → 插件执行 → 结果交回模型；确认协调器没有被问到（自动应答设成拒绝也能执行）
   e2e-ask         端到端：echo 需要确认，自动应答拒绝 → tool_denied，工具没执行
   e2e-consent     端到端：echo 需要确认，自动应答允许一次 → 经确认后执行，结果交回模型（authorize → 确认 → dispatch → settled）
@@ -35,7 +37,14 @@ acp-channel 的 in-app 执行器（ext-e2e 场景）让真实运行时调用插�
   ./gradlew --max-workers=2 :app:assembleDebug :tests:device:mcp-plugin:plugin:assembleDebug \\
       :tests:device:acp-channel:client:assembleDebug -Pagentos.skipPiBundle=true
   ANDROID_SERIAL=emulator-5572 python3 tests/device/mcp-plugin/run.py --serial emulator-5572 [--only a,b] [--label x]
-      [--no-install] [--no-clear] [--skip-rotation] [--idle-wait 40]
+      [--no-install] [--no-clear | --clear] [--skip-rotation] [--idle-wait 40]
+
+  pm clear：模拟器上默认清（从首次发现开始）；**真机默认不清**（会抹掉模型源和配对），要清必须显式 --clear。
+  主机上找不到 apksigner / keytool 时 signature 用例自动跳过。
+  不清数据时 discover 的“默认关闭”等检查取决于设备上原有的状态。
+  断言都按测试插件限定（工具按 provider = 插件 ID、Skill 按 provider = 插件名过滤），设备上同时装着别的插件（示例 App）不影响结果。
+  会改设备状态的用例：policy-corrupt（重置策略会把所有第三方插件写成停用，示例 App 的插件要重新启用）、
+  signature 与 uninstall（重装测试插件）。真机上按需用 --only 挑选。
 """
 import argparse
 import json
@@ -71,6 +80,8 @@ HIGH_RISK_TOOL = "w" + "ipe"  # 名字拼出来：权限检查会把命令行里
 
 T = lambda tool: f"mcp__mcptest__test__{tool}"  # noqa: E731
 ALL_TOOLS = sorted(T(x) for x in ("add_tool", "die", "echo", "remove_tool", "slow", "stats", HIGH_RISK_TOOL))
+# IExtensionHost.listTools 每一项的键（与 core:extensions 的 KnownTool 一一对应，按输出顺序）
+KNOWN_TOOL_KEYS = ["name", "pluginId", "source", "title", "description", "inputSchema", "risk", "enabled", "approval", "mayAlwaysAllow"]
 
 
 class Ctx:
@@ -109,6 +120,11 @@ class Ctx:
 
     def catalog_names(self):
         return sorted(t["name"] for t in self.catalog().get("tools", []))
+
+    def own_tool_names(self, catalog=None):
+        """目录里**测试插件自己的**工具（按 provider = 插件 ID 过滤）：设备上同时装着别的插件（示例 App）时不受影响。"""
+        cat = catalog if catalog is not None else self.catalog()
+        return sorted(t["name"] for t in cat.get("tools", []) if t.get("provider") == PLUGIN_ID)
 
     def call(self, tool, args=None, timeout_ms=10_000, cancel_after_ms=0, disable_after_ms=0):
         return self.dbg("call", timeout=timeout_ms // 1000 + 60, name=T(tool), args=args or {}, timeoutMs=timeout_ms,
@@ -221,27 +237,32 @@ def case_enable(c):
     r = c.dbg("enable", id=PLUGIN_ID)
     w = c.wait_tool("echo")
     ms = int((time.time() - t0) * 1000)
-    names = c.catalog_names()
+    names = c.own_tool_names()
     tools = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID).get("tools", [])}
     cat = c.catalog()
-    skills = {s["id"]: s for s in cat.get("skills", [])}
+    # 只看测试插件自己的 Skill（SkillSummary.provider 是插件名）；与别的插件重名时 id 会变成 "mcptest:<名字>"，所以按名字找
+    skills = {s["name"]: s for s in cat.get("skills", []) if s.get("provider") == "mcptest"}
+    greet_id = (skills.get("greet") or {}).get("id", "greet")
     p = c.plugin() or {}
     hi = tools.get(T(HIGH_RISK_TOOL), {})
     echo = tools.get(T("echo"), {})
-    skill = c.dbg("skill", name="greet", path="reference/details.md")
-    bad = c.dbg("skill", name="greet", path="../broken/SKILL.md")
+    skill = c.dbg("skill", name=greet_id, path="reference/details.md")
+    bad = c.dbg("skill", name=greet_id, path="../broken/SKILL.md")
     checks = {
         "enabled": (r.get("plugin") or {}).get("enabled") is True,
         "toolsAppeared": bool(w.get("met")) and names == ALL_TOOLS,
         "highRisk": hi.get("risk") == "high" and hi.get("mayAlwaysAllow") is False,
-        "echoWriteAsk": echo.get("risk") == "write" and echo.get("approval") == "ask" and echo.get("provider") == PLUGIN_ID,
+        "echoWriteAsk": echo.get("risk") == "write" and echo.get("approval") == "ask" and echo.get("pluginId") == PLUGIN_ID,
+        # listTools 的每一项与 KnownTool 字段一一对应（D5.3 插件页依赖这个形状）
+        "knownToolShape": bool(tools) and all(list(t.keys()) == KNOWN_TOOL_KEYS for t in tools.values()),
         "serverConnected": (p.get("servers") or [{}])[0].get("state") in ("connected", "idle") and p.get("toolCount") == 7,
         "skills": set(skills) == {"greet", "broken"} and p.get("skillCount") == 2,
         "skillProblem": any("broken" in x.get("message", "") for x in p.get("skillProblems", [])),
         "skillFileRead": "marker 7f3a" in (skill.get("skill") or {}).get("text", ""),
         "skillPathRejected": "bad_path" in str(bad.get("error")),
     }
-    return verdict(checks, f"enableToCatalogMs={ms} tools={len(names)} skills={sorted(skills)}", enableToCatalogMs=ms)
+    return verdict(checks, f"enableToCatalogMs={ms} ownTools={len(names)} ownSkills={sorted(skills)} "
+                           f"catalogTotal={len(cat.get('tools', []))}", enableToCatalogMs=ms)
 
 
 def case_approvals(c):
@@ -406,7 +427,7 @@ def case_tool_disable(c):
     gone = c.wait_tool("echo", absent=True, timeout_ms=5_000)
     listed = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID).get("tools", [])}
     refused = c.call("echo", {"text": "x"})
-    others = c.catalog_names()
+    others = c.own_tool_names()
     c.dbg("tool_enable", name=T("echo"))
     back = c.wait_tool("echo", timeout_ms=5_000)
     checks = {
@@ -473,7 +494,9 @@ def case_ext_death(c):
         "catalogBack": bool(w.get("met")),
         "agentSawDisconnect": after.get("disconnects", 0) >= before.get("disconnects", 0) + 1,
         "agentReconnected": after.get("connects", 0) >= before.get("connects", 0) + 1 and after.get("connected") is True,
-        "agentCatalog": after.get("tools") == 7 and after.get("policyReceived") is True and after.get("policyFailClosed") is False,
+        # 与 :ext 重建前一样多（设备上可能还有别的插件，不写死个数）
+        "agentCatalog": after.get("tools") == before.get("tools") and len(c.own_tool_names()) == 7
+                        and after.get("policyReceived") is True and after.get("policyFailClosed") is False,
         "callWorks": outcome_of(r)[0] == "completed",
     }
     return verdict(checks, f"extPid {pid0}->{pid1} restartMs={restart_ms} agentTools={after.get('tools')}", agentBefore=before, agentAfter=after)
@@ -509,10 +532,12 @@ def run_e2e(c, name, args, mode, tool, expect_prompt, expect_answer=None):
     new = entries[before:]
     prompted = bool(new)
     answer_ok = expect_answer is None or (prompted and new[-1].get("answeredWith") == expect_answer)
-    no_always = all("ALWAYS_ALLOW" not in e.get("options", []) for e in new)
+    # “始终允许”（ApprovalWriter 经 IExtensionHost 写回，C7b）：写级工具提供、高风险不提供；自动应答从不选它（测试不改用户策略）
+    always_rule = all(("ALWAYS_ALLOW" in e.get("options", [])) == (e.get("risk") == "WRITE") for e in new)
+    never_picked = all(e.get("answeredWith") != "ALWAYS_ALLOW" for e in new)
     r.setdefault("checks", {})
     r["checks"].update({"consentModeSet": set_mode.get("ok") is True, "consentAsExpected": prompted == expect_prompt,
-                        "consentAnswer": answer_ok, "noAlwaysAllowOffered": no_always})
+                        "consentAnswer": answer_ok, "alwaysAllowOnlyForWrite": always_rule, "alwaysAllowNeverPicked": never_picked})
     r["consent"] = new[-3:]
     r["ok"] = bool(r.get("ok")) and all(r["checks"].values())
     r["summary"] = f"{r.get('summary', '')} consent={[(e.get('risk'), e.get('answeredWith'), e.get('options')) for e in new]}"
@@ -574,11 +599,16 @@ def case_e2e_disabled(c):
 
 
 def build_tools():
+    """apksigner（最新的 build-tools）与 JDK 21 的 keytool；找不到返回 (None, None)。"""
     root = os.path.expanduser("~/Library/Android/sdk/build-tools")
+    if not os.path.isdir(root):
+        return None, None
     versions = sorted(os.listdir(root), key=lambda v: [int(x) if x.isdigit() else 0 for x in re.split(r"[.-]", v)])
-    apksigner = os.path.join(root, versions[-1], "apksigner")
+    apksigner = os.path.join(root, versions[-1], "apksigner") if versions else None
     java_home = subprocess.run(["/usr/libexec/java_home", "-v", "21"], capture_output=True, text=True).stdout.strip()
-    return apksigner, os.path.join(java_home, "bin", "keytool")
+    keytool = os.path.join(java_home, "bin", "keytool") if java_home else None
+    ok = apksigner and os.path.exists(apksigner) and keytool and os.path.exists(keytool)
+    return (apksigner, keytool) if ok else (None, None)
 
 
 def rotated_apk(src):
@@ -625,6 +655,55 @@ def wait_agent(c, pred, timeout=15):
     return ext, False
 
 
+def kill_ext(c):
+    pid0 = c.pidof(f"{APP_PKG}:ext")
+    c.adb.sh(f"run-as {APP_PKG} kill -9 {pid0}", check=False)
+    return wait_ext_restart(c, pid0)
+
+
+def case_known_tools(c):
+    """
+    已知工具（A9 的 ExtensionToolHost.knownTools，IExtensionHost.listTools）：
+    1. 工具级禁用 echo 后杀掉 :ext：插件已启用，重建后连一次，listTools 仍列出全部 7 个，echo enabled=false、名字不变、不在目录里；
+    2. 插件停用后再杀 :ext：这个 :ext 进程里从没连上过它，listTools 返回 []（插件页显示“启用后可查看工具”）；启用一次后列表回来。
+    """
+    c.ensure_enabled()
+    before = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID).get("tools", [])}
+    c.dbg("tool_disable", name=T("echo"))
+    c.wait_tool("echo", absent=True, timeout_ms=5_000)
+    pid1, restart_ms = kill_ext(c)
+    t0 = time.time()
+    listed = c.dbg("tools", id=PLUGIN_ID, timeout=60)
+    list_ms = int((time.time() - t0) * 1000)
+    after = {t["name"]: t for t in listed.get("tools", [])}
+    echo = after.get(T("echo"), {})
+    keys_ok = bool(after) and all(list(t.keys()) == KNOWN_TOOL_KEYS for t in after.values())
+    echo_not_in_catalog = T("echo") not in c.own_tool_names()
+    # 2：停用的插件
+    c.dbg("disable", id=PLUGIN_ID)
+    pid2, _ = kill_ext(c)
+    listed2 = c.dbg("tools", id=PLUGIN_ID, timeout=60)
+    p = c.plugin() or {}
+    c.dbg("enable", id=PLUGIN_ID)
+    w = c.wait_tool("stats", timeout_ms=15_000)
+    listed3 = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID, timeout=60).get("tools", [])}
+    c.dbg("tool_enable", name=T("echo"))
+    back = c.wait_tool("echo", timeout_ms=10_000)
+    checks = {
+        "extRestarted": pid1 is not None and pid2 is not None,
+        "stillListedAfterRebuild": listed.get("ok") is True and sorted(after) == sorted(before) == ALL_TOOLS,
+        "disabledToolKeptSameName": echo.get("enabled") is False and (echo.get("source") or {}).get("tool") == "echo",
+        "disabledToolNotInCatalog": echo_not_in_catalog,
+        "exactKeys": keys_ok,
+        "disabledPluginHasNoList": listed2.get("ok") is True and listed2.get("tools") == [] and p.get("enabled") is False,
+        "enableOnceRestoresList": bool(w.get("met")) and sorted(listed3) == ALL_TOOLS
+                                  and (listed3.get(T("echo")) or {}).get("enabled") is False,
+        "toolReEnabled": bool(back.get("met")),
+    }
+    return verdict(checks, f"extRestartMs={restart_ms} listAfterRebuildMs={list_ms} known={len(after)} "
+                           f"disabledPluginList={listed2.get('tools')}", echoAfterRebuild=echo)
+
+
 def case_policy_corrupt(c):
     """策略文件和备份都读不出来 → :ext 重建后 fail closed（第三方插件当作禁用，:agent 的镜像同步）；写入被拒；用户重置后恢复，插件仍停用。"""
     c.ensure_enabled()
@@ -636,14 +715,17 @@ def case_policy_corrupt(c):
     gone = c.wait_tool("echo", absent=True, timeout_ms=20_000)
     status = c.dbg("policy").get("policy") or {}
     cat = c.catalog()
-    mirror, mirror_closed = wait_agent(c, lambda e: e.get("policyFailClosed") is True and e.get("tools") == 0)
+    # :agent 的镜像与 :ext 的目录一致（fail closed 时第三方插件全部当作禁用；不写死个数，设备上可能有别的插件）
+    closed_n = len(cat.get("tools", []))
+    mirror, mirror_closed = wait_agent(c, lambda e: e.get("policyFailClosed") is True and e.get("tools") == closed_n)
     refused = c.dbg("enable", id=PLUGIN_ID)
     p_closed = c.plugin() or {}
     reset = c.dbg("policy_reset").get("policy") or {}
     p_after = c.plugin() or {}
     c.dbg("enable", id=PLUGIN_ID)
     back = c.wait_tool("echo")
-    mirror2, mirror_open = wait_agent(c, lambda e: e.get("policyFailClosed") is False and e.get("tools") == 7)
+    open_n = len(c.catalog().get("tools", []))
+    mirror2, mirror_open = wait_agent(c, lambda e: e.get("policyFailClosed") is False and e.get("tools") == open_n and open_n >= 7)
     checks = {
         "extRestarted": pid1 is not None,
         "failClosed": status.get("health") == "corrupt" and status.get("using") == "fail_closed" and status.get("failClosed") is True,
@@ -663,6 +745,8 @@ def case_policy_corrupt(c):
 def case_signature(c):
     if c.args.skip_rotation:
         return {"ok": True, "skipped": True, "summary": "skipped (--skip-rotation)"}
+    if build_tools()[0] is None:
+        return {"ok": True, "skipped": True, "summary": "skipped (apksigner / keytool not found on this host)"}
     c.ensure_enabled()
     digest0 = (c.plugin() or {}).get("signingDigest")
     apk, work = rotated_apk(plugin_apk())
@@ -713,7 +797,7 @@ CASES = [
     ("approvals", case_approvals), ("call", case_call), ("uid-check", case_uid_check), ("timeout", case_timeout), ("cancel", case_cancel),
     ("list-changed", case_list_changed), ("plugin-death", case_plugin_death), ("force-stop", case_force_stop),
     ("disable-inflight", case_disable_inflight), ("tool-disable", case_tool_disable), ("idle", case_idle),
-    ("background", case_background), ("ext-death", case_ext_death),
+    ("background", case_background), ("ext-death", case_ext_death), ("known-tools", case_known_tools),
     ("e2e-always", case_e2e_always), ("e2e-ask", case_e2e_ask), ("e2e-consent", case_e2e_consent), ("e2e-high", case_e2e_high),
     ("e2e-disabled", case_e2e_disabled),
     ("policy-corrupt", case_policy_corrupt), ("signature", case_signature), ("uninstall", case_uninstall),
@@ -734,7 +818,9 @@ def main():
     ap.add_argument("--only", help="逗号分隔的用例名")
     ap.add_argument("--label", default="")
     ap.add_argument("--no-install", action="store_true")
-    ap.add_argument("--no-clear", action="store_true", help="不清 AgentOS 的数据（默认 pm clear，从首次发现开始）")
+    ap.add_argument("--no-clear", action="store_true", help="不清 AgentOS 的数据")
+    ap.add_argument("--clear", action="store_true",
+                    help="清 AgentOS 的数据（pm clear，从首次发现开始）。模拟器上默认清；真机默认不清（会抹掉模型源和配对），要清必须显式给这个参数")
     ap.add_argument("--skip-rotation", action="store_true")
     ap.add_argument("--idle-wait", type=int, default=40, help="空闲回收用例等待的秒数（Extension Host 是 30 秒）")
     a = ap.parse_args()
@@ -746,8 +832,12 @@ def main():
         acp.install(adb, os.path.join(ACP, "client", "build", "outputs", "apk", "debug", "client-debug.apk"))
         adb.run("uninstall", PLUGIN_PKG, check=False, timeout=120)
         install_plugin(adb)
-    if not a.no_clear:
+    emulator = adb.prop("ro.kernel.qemu") == "1" or adb.prop("ro.boot.qemu") == "1"
+    clear = a.clear or (emulator and not a.no_clear)
+    if clear:
         adb.sh(f"pm clear {APP_PKG}", check=False)
+    else:
+        print(f"keeping AgentOS data ({'--no-clear' if a.no_clear else 'real device: pass --clear to wipe'})", flush=True)
     adb.sh("input keyevent KEYCODE_WAKEUP", check=False)
     adb.sh("wm dismiss-keyguard", check=False)
     device = {"serial": a.serial, "model": adb.prop("ro.product.model"), "sdk": adb.prop("ro.build.version.sdk"),
