@@ -140,5 +140,14 @@ class McpToolResult {
 
 1. **JVM 单元测试**：数据层 + 工具层，`./gradlew :plugins:samples:<name>:testDebugUnitTest`。
 2. **设备（模拟器）**：装 debug 包，界面逐页走一遍，截图；SDK 合入后加“自测入口”（debug 构建的导出 `BroadcastReceiver` 或 `adb shell am start` 的 Activity，经 `McpBinderClient` 绑自己的 Service，依次 `tools/list`、增删改查全部工具，结果写 logcat 一行 JSON 摘要），确认 MCP 路径通。
-3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），读各 App 的状态确认结果。**读状态用各 App 的 debug `dump`（`--es cmd dump [--ei offset N --ei limit M]`，结果在广播 result data，按 `next_offset` 翻页），复位用 `reset`；不要在真机上跑 `run-as sqlite3`（user 构建的真机没有 sqlite3）。**闹钟的 dump 带 `scheduled[].registered`，是 `AlarmManager` 里真的登记了的实测。日历的 `dump` / `reset` 还没提交，驱动暂时用 `run-as cat` 把 `calendar.db` 拷到电脑上读（真机已验证可用），`reset` 用 `--es cmd clear`。驱动是 `tests/device/acp-channel/sample_apps_e2e.py`（脚本模式；`--live` 用真实模型，要先开电脑端接入、最后配真实模型并核对 `modelBaseUrl`）。
+3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），读各 App 的状态确认结果。**读状态用各 App 的 debug `dump`（`--es cmd dump [--ei offset N --ei limit M]`，结果在广播 result data，按 `next_offset` 翻页），复位用 `reset`；不要在真机上跑 `run-as sqlite3`（user 构建的真机没有 sqlite3）。**闹钟的 dump 带 `scheduled[].registered`，是 `AlarmManager` 里真的登记了的实测。日历的 `dump` 一样（分页、`events` 每个系列一行、时间是带偏移的 ISO 字符串、提醒是 `reminder_minutes`），`reset` 返回 `{cleared, calendars_remaining, remaining_scheduled}`，同步完成，不用轮询；`clear` 只写 logcat。
+   驱动是 `tests/device/acp-channel/sample_apps_e2e.py`（脚本模式；`--live` 用真实模型，要先开电脑端接入、最后配真实模型并核对 `modelBaseUrl`）。
 4. 提交前：`./gradlew :plugins:samples:<name>:assembleDebug :plugins:samples:<name>:assembleRelease :plugins:samples:<name>:lintDebug` 通过；`git diff | grep -c` 自查没有任何 key。
+
+### 5.1 读状态的几个口径（真机联调时踩过）
+
+- **日历的 `reminders_scheduled` 最多一项**：App 同一时间只给 `AlarmManager` 挂一个精确闹钟，指向最早的未触发提醒，所以它不是“所有未来提醒各一项”。要核对某个日程的提醒，看它的 `reminder_minutes` 加 `start`，或者让它成为最早的那一个。验收用的日程放在 9–10 天之后，避免跑测试时“已经过去”。
+- **判断某 App 有没有待触发闹钟**：看 `dumpsys alarm` 里匹配 `Alarm{… <包名>}` 的待触发表，不要匹配 `tag=*walarm*:<action>`，后者也出现在已取消闹钟的历史里，会误判成没取消。更好的办法是直接读各 App 的 `dump`（闹钟的 `scheduled[].registered`、日历的 `reminders_scheduled[].registered` 都是用 `FLAG_NO_CREATE` 实测）。
+- **dump 只能由 adb shell 触发**：接收器要求 `android.permission.DUMP`；release 的合并 manifest 和 dex 里没有这些接收器。
+- **`AGENTOS_SAMPLES_ROOT` 指向自己的工作区时**，`SamplePluginsConformanceTest` 的 Gradle 会报 `Multiple input file properties`（同一目录登记两次）。默认根目录不受影响；已知问题，尚未修。
+- **自然语言验收的提示词要带内容**：“记一条备忘，打上工作标签”不给内容时，模型会反问而不建笔记（正常行为）；驱动的提示词要把标题或正文写进句子，判定只看 App 状态。
