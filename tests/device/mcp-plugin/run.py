@@ -40,6 +40,9 @@ acp-channel 的 in-app 执行器（ext-e2e 场景）让真实运行时调用插�
   pm clear：模拟器上默认清（从首次发现开始）；**真机默认不清**（会抹掉模型源和配对），要清必须显式 --clear。
   主机上找不到 apksigner / keytool 时 signature 用例自动跳过。
   不清数据时 discover 的“默认关闭”等检查取决于设备上原有的状态。
+  断言都按测试插件限定（工具按 provider = 插件 ID、Skill 按 provider = 插件名过滤），设备上同时装着别的插件（示例 App）不影响结果。
+  会改设备状态的用例：policy-corrupt（重置策略会把所有第三方插件写成停用，示例 App 的插件要重新启用）、
+  signature 与 uninstall（重装测试插件）。真机上按需用 --only 挑选。
 """
 import argparse
 import json
@@ -113,6 +116,11 @@ class Ctx:
 
     def catalog_names(self):
         return sorted(t["name"] for t in self.catalog().get("tools", []))
+
+    def own_tool_names(self, catalog=None):
+        """目录里**测试插件自己的**工具（按 provider = 插件 ID 过滤）：设备上同时装着别的插件（示例 App）时不受影响。"""
+        cat = catalog if catalog is not None else self.catalog()
+        return sorted(t["name"] for t in cat.get("tools", []) if t.get("provider") == PLUGIN_ID)
 
     def call(self, tool, args=None, timeout_ms=10_000, cancel_after_ms=0, disable_after_ms=0):
         return self.dbg("call", timeout=timeout_ms // 1000 + 60, name=T(tool), args=args or {}, timeoutMs=timeout_ms,
@@ -225,15 +233,17 @@ def case_enable(c):
     r = c.dbg("enable", id=PLUGIN_ID)
     w = c.wait_tool("echo")
     ms = int((time.time() - t0) * 1000)
-    names = c.catalog_names()
+    names = c.own_tool_names()
     tools = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID).get("tools", [])}
     cat = c.catalog()
-    skills = {s["id"]: s for s in cat.get("skills", [])}
+    # 只看测试插件自己的 Skill（SkillSummary.provider 是插件名）；与别的插件重名时 id 会变成 "mcptest:<名字>"，所以按名字找
+    skills = {s["name"]: s for s in cat.get("skills", []) if s.get("provider") == "mcptest"}
+    greet_id = (skills.get("greet") or {}).get("id", "greet")
     p = c.plugin() or {}
     hi = tools.get(T(HIGH_RISK_TOOL), {})
     echo = tools.get(T("echo"), {})
-    skill = c.dbg("skill", name="greet", path="reference/details.md")
-    bad = c.dbg("skill", name="greet", path="../broken/SKILL.md")
+    skill = c.dbg("skill", name=greet_id, path="reference/details.md")
+    bad = c.dbg("skill", name=greet_id, path="../broken/SKILL.md")
     checks = {
         "enabled": (r.get("plugin") or {}).get("enabled") is True,
         "toolsAppeared": bool(w.get("met")) and names == ALL_TOOLS,
@@ -245,7 +255,8 @@ def case_enable(c):
         "skillFileRead": "marker 7f3a" in (skill.get("skill") or {}).get("text", ""),
         "skillPathRejected": "bad_path" in str(bad.get("error")),
     }
-    return verdict(checks, f"enableToCatalogMs={ms} tools={len(names)} skills={sorted(skills)}", enableToCatalogMs=ms)
+    return verdict(checks, f"enableToCatalogMs={ms} ownTools={len(names)} ownSkills={sorted(skills)} "
+                           f"catalogTotal={len(cat.get('tools', []))}", enableToCatalogMs=ms)
 
 
 def case_approvals(c):
@@ -410,7 +421,7 @@ def case_tool_disable(c):
     gone = c.wait_tool("echo", absent=True, timeout_ms=5_000)
     listed = {t["name"]: t for t in c.dbg("tools", id=PLUGIN_ID).get("tools", [])}
     refused = c.call("echo", {"text": "x"})
-    others = c.catalog_names()
+    others = c.own_tool_names()
     c.dbg("tool_enable", name=T("echo"))
     back = c.wait_tool("echo", timeout_ms=5_000)
     checks = {
@@ -477,7 +488,9 @@ def case_ext_death(c):
         "catalogBack": bool(w.get("met")),
         "agentSawDisconnect": after.get("disconnects", 0) >= before.get("disconnects", 0) + 1,
         "agentReconnected": after.get("connects", 0) >= before.get("connects", 0) + 1 and after.get("connected") is True,
-        "agentCatalog": after.get("tools") == 7 and after.get("policyReceived") is True and after.get("policyFailClosed") is False,
+        # 与 :ext 重建前一样多（设备上可能还有别的插件，不写死个数）
+        "agentCatalog": after.get("tools") == before.get("tools") and len(c.own_tool_names()) == 7
+                        and after.get("policyReceived") is True and after.get("policyFailClosed") is False,
         "callWorks": outcome_of(r)[0] == "completed",
     }
     return verdict(checks, f"extPid {pid0}->{pid1} restartMs={restart_ms} agentTools={after.get('tools')}", agentBefore=before, agentAfter=after)
@@ -647,14 +660,17 @@ def case_policy_corrupt(c):
     gone = c.wait_tool("echo", absent=True, timeout_ms=20_000)
     status = c.dbg("policy").get("policy") or {}
     cat = c.catalog()
-    mirror, mirror_closed = wait_agent(c, lambda e: e.get("policyFailClosed") is True and e.get("tools") == 0)
+    # :agent 的镜像与 :ext 的目录一致（fail closed 时第三方插件全部当作禁用；不写死个数，设备上可能有别的插件）
+    closed_n = len(cat.get("tools", []))
+    mirror, mirror_closed = wait_agent(c, lambda e: e.get("policyFailClosed") is True and e.get("tools") == closed_n)
     refused = c.dbg("enable", id=PLUGIN_ID)
     p_closed = c.plugin() or {}
     reset = c.dbg("policy_reset").get("policy") or {}
     p_after = c.plugin() or {}
     c.dbg("enable", id=PLUGIN_ID)
     back = c.wait_tool("echo")
-    mirror2, mirror_open = wait_agent(c, lambda e: e.get("policyFailClosed") is False and e.get("tools") == 7)
+    open_n = len(c.catalog().get("tools", []))
+    mirror2, mirror_open = wait_agent(c, lambda e: e.get("policyFailClosed") is False and e.get("tools") == open_n and open_n >= 7)
     checks = {
         "extRestarted": pid1 is not None,
         "failClosed": status.get("health") == "corrupt" and status.get("using") == "fail_closed" and status.get("failClosed") is True,
