@@ -3,7 +3,9 @@
 #
 # 待定，出结论后再追加：
 #   - quickjs-kt（io.github.dokar3:quickjs-kt）：S8 固定
-#   - MCP Kotlin SDK（io.modelcontextprotocol:kotlin-sdk-client / kotlin-sdk-server）、Ktor 及其 OkHttp 引擎：S5 固定
+#   - MCP Kotlin SDK：S5 结论是不引入（每个还在维护的版本都要求 kotlinx-serialization ≥ 1.9.0、kotlinx-io ≥ 0.8，
+#     与 ACP 0.30.1 共用的 1.7.3 / 0.5.4 冲突）；sdk:plugin-sdk 自己实现 MCP 的 tools 子集，见 docs/spikes/S5.md。
+#     远端 Streamable HTTP（W19）到时用下面的 okhttp 实现，Ktor 不引入。
 #   - SQLite 驱动：W2 已选定 androidx.sqlite（见下方 androidx-sqlite）
 
 [versions]
