@@ -149,14 +149,60 @@ def unchanged(sample_key, name):
 WAIT_SCALE = 1.0  # unit tests shrink the catalog waits
 
 
-def wait_catalog(ctx, pred, timeout=10):
-    import time
-    end = time.time() + timeout * WAIT_SCALE
-    cat = ctx.ext.catalog()
-    while not pred(cat) and time.time() < end:
-        time.sleep(0.5 * WAIT_SCALE)
+CATALOG_WAIT_SECONDS = 30.0
+
+
+def documented(samples=None):
+    """{model-facing name: (plugin, tool)} of every tool docs/sample-apps.md section 4 requires, for the given sample apps (default: all three)."""
+    return {L.model_name(name, t): (name, t) for name, smp in L.SAMPLES.items() if samples is None or name in samples for t in smp.tools}
+
+
+class CatalogWait:
+    """What [await_catalog] saw last: the catalog, what was still missing / still there, how long it waited."""
+
+    def __init__(self, catalog, missing, still_there, waited_ms):
+        self.catalog, self.missing, self.still_there, self.waited_ms = catalog, missing, still_there, waited_ms
+
+    @property
+    def ok(self):
+        return not self.missing and not self.still_there
+
+    def detail(self):
+        """For a check's `actual`: which tools are still missing / still there, per plugin and by their own names, and how long was waited."""
+        def by_plugin(names):
+            out = {}
+            for n in names:
+                plugin, tool = documented().get(n, (n.split("__")[1] if n.count("__") >= 3 else "?", n))
+                out.setdefault(plugin, []).append(tool)
+            return out
+        d = {"waitedMs": self.waited_ms}
+        if self.missing:
+            d["missing"] = by_plugin(self.missing)
+        if self.still_there:
+            d["stillOffered"] = by_plugin(self.still_there)
+        return d
+
+
+def await_catalog(ctx, present=(), absent=(), timeout=CATALOG_WAIT_SECONDS):
+    """Wait until every name in `present` is in the catalog and none of `absent` is, at most `timeout` seconds.
+
+    The three plugins' tools do not appear together (after `enable` each plugin is connected and listed on its own, one after the other), so a
+    catalog read right after enable / disable is not evidence of anything. Each round reads the whole catalog (the final read is a complete one,
+    not a probe of one tool) and, when something is still missing, waits inside the app for the next catalog change (ExtensionDebugReceiver
+    `wait_catalog` for one pending tool, at most 5 s per round) instead of hammering it. On timeout it does not raise: it returns what it last
+    saw, so the check that follows can name the tools that are still missing."""
+    t0 = time.time()
+    deadline = t0 + timeout * WAIT_SCALE
+    while True:
         cat = ctx.ext.catalog()
-    return cat
+        missing = [n for n in present if n not in cat]
+        still = [n for n in absent if n in cat]
+        if (not missing and not still) or time.time() >= deadline:
+            return CatalogWait(cat, missing, still, round((time.time() - t0) * 1000))
+        pending, gone = (missing[0], False) if missing else (still[0], True)
+        left_ms = max(1, int((deadline - time.time()) * 1000))
+        ctx.ext.wait_tool(pending, absent=gone, timeout_ms=min(left_ms, 5000))
+        time.sleep(0.1 * WAIT_SCALE)
 
 
 def run_check_step(id, title, fn, ctx):
@@ -226,28 +272,31 @@ def setup_discover(allow_enabled):
 
 
 def setup_enable(ctx):
-    for s in L.SAMPLES.values():
-        ctx.ext.enable(s.package)
-    cat = wait_catalog(ctx, lambda c: all(L.model_name(s.name, t) in c for s in L.SAMPLES.values() for t in s.tools), timeout=20)
+    for smp in L.SAMPLES.values():
+        ctx.ext.enable(smp.package)
+    w = await_catalog(ctx, present=list(documented()))
     plugins = ctx.ext.plugins()
     out = []
-    for name, s in L.SAMPLES.items():
-        p = next((x for x in plugins if x["package"] == s.package), None)
+    for name, smp in L.SAMPLES.items():
+        p = next((x for x in plugins if x["package"] == smp.package), None)
         out.append(eq("plugin %s is on after enable" % name, True, bool(p and p["enabled"])))
-    out.append(truth("the catalog is not empty after enable", "tools of all three plugins", bool(cat), len(cat)))
+    out.append(truth("every documented tool of the three plugins is in the catalog (they appear one plugin after the other: waited up to %d s)" % CATALOG_WAIT_SECONDS,
+                     "all %d tools present" % len(documented()), w.ok, w.detail()))
     return out
 
 
 def setup_catalog(ctx):
-    cat = ctx.ext.catalog()
-    out = []
+    # not a single read: the plugins' tools show up one after another (see await_catalog)
+    w = await_catalog(ctx, present=list(documented()))
+    cat = w.catalog
+    out = [truth("every documented tool was offered within %d s" % CATALOG_WAIT_SECONDS, "all %d tools present" % len(documented()), w.ok, w.detail())]
     extras = {}
-    for name, s in L.SAMPLES.items():
-        for t in s.tools:
+    for name, smp in L.SAMPLES.items():
+        for t in smp.tools:
             n = L.model_name(name, t)
             out.append(eq("%s is offered as %s with risk" % (t, n), L.expected_risk(t), cat.get(n)))
         prefix = "mcp__%s__%s__" % (name, name)
-        extras[name] = sorted(n[len(prefix):] for n in cat if n.startswith(prefix) and n[len(prefix):] not in s.tools)
+        extras[name] = sorted(n[len(prefix):] for n in cat if n.startswith(prefix) and n[len(prefix):] not in smp.tools)
     ctx.vars["_extra_tools"] = extras
     return out
 
@@ -340,18 +389,16 @@ def alarm_steps(ctx):
 
 
 def plugin_off_steps(ctx, sample, pkg, probe_call, state_key, label):
-    s = L.SAMPLES[sample]
-    probe = L.model_name(sample, probe_call.tool)
+    smp = L.SAMPLES[sample]
+    names = list(documented({sample}))
 
     def pre(c):
         c.ext.disable(pkg)
-        c.ext.wait_tool(probe, absent=True)
-        c.vars["_off_catalog"] = wait_catalog(c, lambda cat: not any(L.model_name(sample, t) in cat for t in s.tools))
+        c.vars["_off_wait"] = await_catalog(c, absent=names)
 
     def verify(b, a, t, c):
-        cat = c.vars.pop("_off_catalog", {})
-        left = [n for n in cat if n.startswith("mcp__%s__%s__" % (sample, sample))]
-        return [truth("no %s tool is offered while the plugin is off" % label, "none of mcp__%s__*" % sample, not left, left),
+        w = c.vars.pop("_off_wait")
+        return [truth("no %s tool is offered while the plugin is off (waited for the catalog to drop them)" % label, "none of mcp__%s__*" % sample, not w.still_there, w.detail()),
                 truth("a call to it is refused (Pi: not found, or the broker: tool_not_in_catalog)", "text says so", bool(t.tools) and L.not_offered(t.tools[0].text), t.tools[0].text[:200] if t.tools else None),
                 eq("%s data unchanged" % label, b[state_key], a[state_key])]
 
@@ -360,12 +407,11 @@ def plugin_off_steps(ctx, sample, pkg, probe_call, state_key, label):
 
     def pre_on(c):
         c.ext.enable(pkg)
-        c.ext.wait_tool(probe)
-        c.vars["_on_catalog"] = wait_catalog(c, lambda cat: all(L.model_name(sample, t) in cat for t in s.tools))
+        c.vars["_on_wait"] = await_catalog(c, present=names)
 
     def verify_on(b, a, t, c):
-        cat = c.vars.pop("_on_catalog", {})
-        return [truth("all documented %s tools are back after re-enabling" % label, "all %d tools" % len(s.tools), all(L.model_name(sample, t) in cat for t in s.tools), sorted(n for n in cat if n.startswith("mcp__%s__" % sample))[:20])]
+        w = c.vars.pop("_on_wait")
+        return [truth("all documented %s tools are back after re-enabling (waited up to %d s)" % (label, CATALOG_WAIT_SECONDS), "all %d tools" % len(smp.tools), w.ok, w.detail())]
 
     on = Step("%s.plugin_on" % sample, sample, "plugin enabled again: tools are back and work", [probe_call], pre=pre_on, verify=verify_on)
     return [off, on]
@@ -617,6 +663,19 @@ def next_weekday(today, weekday, next_week):
     return today + timedelta(days=delta)
 
 
+# What a person would say, with every fact the check needs in the sentence: a prompt that leaves out something the model must have (the note's
+# text, the meeting's end and place) gets a clarifying question back, which is valid model behaviour and not an app fault. The verdict stays the app
+# state; the sentences stay natural Chinese.
+LIVE_PROMPTS = {
+    # the check: a new alarm at 07:00, switched on, one-time (no repeat days), really set in the system
+    "alarm": "帮我设一个明天早上 7 点的闹钟，叫我起床，只响这一次。",
+    # the check: a new event with 王总 in it, next Wednesday 15:00, a 15 minute reminder (armed in the system)
+    "calendar": "下周三下午 3 点到 4 点和王总开会，地点在 3 号会议室，提前 15 分钟提醒我。",
+    # the check: a new note that mentions 新品发布, tagged 工作
+    "notes": "帮我记一条备忘：新品发布会要准备三件事——演示稿、嘉宾名单、物料清单。打上“工作”标签。",
+}
+
+
 def live_cases(ctx, tell_date=False):
     preface = "今天是 %s（设备时区 UTC%s）。" % (ctx.today.isoformat(), ctx.tz_offset) if tell_date else ""
 
@@ -650,9 +709,9 @@ def live_cases(ctx, tell_date=False):
         return [truth("a new note about 新品发布", "one new note mentioning it", bool(hit), [n["title"] for n in new]),
                 truth("tagged 工作", "tags contains 工作", any("工作" in n["tags"] for n in hit), [n["tags"] for n in hit])]
 
-    return [LiveCase("live.alarm", "alarm", "明早 7 点叫我起床", v_alarm, preface),
-            LiveCase("live.calendar", "calendar", "下周三下午 3 点和王总开会，提前 15 分钟提醒", v_event, preface),
-            LiveCase("live.notes", "notes", "记一条关于新品发布的备忘，打上工作标签", v_note, preface)]
+    return [LiveCase("live.alarm", "alarm", LIVE_PROMPTS["alarm"], v_alarm, preface),
+            LiveCase("live.calendar", "calendar", LIVE_PROMPTS["calendar"], v_event, preface),
+            LiveCase("live.notes", "notes", LIVE_PROMPTS["notes"], v_note, preface)]
 
 
 def run_live_case(case, ctx, timeout=240):

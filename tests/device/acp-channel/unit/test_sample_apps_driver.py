@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import time
 import unittest
 from datetime import date, datetime, timedelta, timezone
 
@@ -81,7 +82,7 @@ class ScriptedRunTest(unittest.TestCase):
         self.assertEqual("HIGH", delete["actual"])
         listing = [c for n, c in names.items() if "note_list is offered" in n][0]
         self.assertEqual("WRITE", listing["expected"], "no annotation lowers a third-party tool below WRITE")
-        self.assertEqual(29, len(cat["checks"]))
+        self.assertEqual(1 + 29, len(cat["checks"]), "one check that every documented tool was offered, then one risk check per tool")
 
 
 class ConsentBehaviourTest(unittest.TestCase):
@@ -582,9 +583,144 @@ class CalendarDumpTest(unittest.TestCase):
         step = self.step(report, "live.calendar")
         self.assertTrue(step["ok"], step["checks"])
         self.assertTrue(any("live reminder: fires at 2026-10-14T14:45:00+08:00" in c["name"] for c in step["checks"]), [c["name"] for c in step["checks"]])
-        plan["下周三下午 3 点和王总开会，提前 15 分钟提醒"] = lambda ph: [("mcp__calendar__calendar__event_create", {"title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [10]})]
+        plan[S.LIVE_PROMPTS["calendar"]] = lambda ph: [("mcp__calendar__calendar__event_create", {"title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [10]})]
         report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=plan), E.Options(live=True), log=lambda m: None)
         self.assertIn("live.calendar", failed(report))
+
+
+class CatalogRaceTest(unittest.TestCase):
+    """The three plugins' tools show up one plugin after the other after `enable` (real phone: setup.enable returned after 539 ms, setup.catalog read the
+    catalog 149 ms later and every notes tool was missing). Nothing may read the catalog once and believe it."""
+
+    ALARM, CALENDAR, NOTES = "org.agentos.sample.alarm", "org.agentos.sample.calendar", "org.agentos.sample.notes"
+
+    def staggered(self, **kw):
+        phone = FakePhone(**kw)
+        phone.list_delay = {self.ALARM: 0, self.CALENDAR: 2, self.NOTES: 4}
+        return phone
+
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def test_a_single_catalog_read_right_after_enable_misses_the_late_plugins(self):
+        phone = self.staggered()
+        ext = L.ExtensionDebug(phone)
+        for smp in L.SAMPLES.values():
+            ext.enable(smp.package)
+        first = ext.catalog()
+        self.assertTrue(any(n.startswith("mcp__alarm__") for n in first))
+        self.assertFalse(any(n.startswith("mcp__notes__") for n in first), "this is the read that failed on the real phone")
+        self.assertFalse(any(n.startswith("mcp__calendar__") for n in first))
+
+    def test_a_full_run_passes_although_the_tools_of_the_second_and_third_plugin_show_up_late(self):
+        phone = self.staggered()
+        _, env, report = run(phone)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        names = [c["name"] for c in self.step(report, "setup.catalog")["checks"]]
+        self.assertTrue(any("every documented tool was offered within 30 s" in n for n in names), names)
+        enable = self.step(report, "setup.enable")
+        self.assertTrue(enable["ok"], [c for c in enable["checks"] if not c["ok"]])
+
+    def test_enable_and_catalog_wait_for_the_last_tool_of_every_plugin(self):
+        phone = self.staggered()
+        phone.list_delay = {self.ALARM: 3, self.CALENDAR: 7, self.NOTES: 11}
+        ctx = L.Context(phone, L.ExtensionDebug(phone), L.ConsentDebug(phone), None, date(2026, 10, 7), "+08:00", "r1")
+        out = S.setup_enable(ctx)
+        self.assertTrue(all(c.ok for c in out), [c for c in out if not c.ok])
+        out = S.setup_catalog(ctx)
+        self.assertTrue(all(c.ok for c in out), [c for c in out if not c.ok])
+        self.assertEqual(1 + 29, len(out))
+
+    def test_a_tool_that_never_appears_is_named_with_its_plugin_after_the_wait(self):
+        phone = self.staggered(faults={"hide-note_trash", "hide-event_get"})
+        _, _, report = run(phone)
+        self.assertIn("setup.enable", failed(report))
+        self.assertIn("setup.catalog", failed(report))
+        bad = next(c for c in self.step(report, "setup.catalog")["checks"] if not c["ok"] and "every documented tool" in c["name"])
+        self.assertEqual({"notes": ["note_trash"], "calendar": ["event_get"]}, bad["actual"]["missing"])
+        self.assertIn("waitedMs", bad["actual"])
+        line = next(l for l in report["summary"]["failures"] if l.startswith("FAIL setup.catalog"))
+        self.assertIn("note_trash", line)
+        self.assertTrue(all(not s["sample"] for s in report["steps"]), "no app step ran on a catalog that is not complete")
+
+    def test_the_wait_is_a_complete_catalog_read_and_bounded(self):
+        phone = self.staggered(faults={"hide-note_trash"})
+        ctx = L.Context(phone, L.ExtensionDebug(phone), L.ConsentDebug(phone), None, date(2026, 10, 7), "+08:00", "r1")
+        for smp in L.SAMPLES.values():
+            ctx.ext.enable(smp.package)
+        t0 = time.time()
+        w = S.await_catalog(ctx, present=list(S.documented()))
+        self.assertLess(time.time() - t0, 5.0, "bounded by CATALOG_WAIT_SECONDS (scaled down in the unit tests)")
+        self.assertFalse(w.ok)
+        self.assertEqual(["mcp__notes__notes__note_trash"], w.missing)
+        self.assertEqual(len(S.documented()) - 1, len([n for n in S.documented() if n in w.catalog]), "everything else was in the catalog it returns")
+
+    def test_plugin_off_waits_for_the_tools_to_go_and_plugin_on_for_them_to_return(self):
+        phone = self.staggered()
+        phone.drop_delay = {self.ALARM: 3, self.CALENDAR: 3, self.NOTES: 3}
+        _, _, report = run(phone)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        for sid in ("alarm.plugin_off", "alarm.plugin_on", "calendar.plugin_off", "calendar.plugin_on", "notes.plugin_off", "notes.plugin_on"):
+            self.assertTrue(self.step(report, sid)["ok"], sid)
+        off = [c["name"] for c in self.step(report, "notes.plugin_off")["checks"]]
+        self.assertTrue(any("waited for the catalog to drop them" in n for n in off), off)
+
+    def test_tools_that_never_go_away_after_disable_are_named(self):
+        phone = FakePhone()
+        phone.drop_delay = {self.NOTES: 10 ** 6}
+        _, _, report = run(phone)
+        step = self.step(report, "notes.plugin_off")
+        self.assertFalse(step["ok"])
+        bad = next(c for c in step["checks"] if not c["ok"] and "no notes tool is offered" in c["name"])
+        self.assertIn("stillOffered", bad["actual"])
+        self.assertIn("notes", bad["actual"]["stillOffered"])
+
+    def test_re_enabling_a_plugin_whose_tools_come_back_late_passes(self):
+        phone = FakePhone()
+        _, _, report = run(phone)       # healthy baseline
+        self.assertTrue(report["ok"])
+        phone = FakePhone()
+        phone.list_delay = {self.NOTES: 6}
+        _, _, report = run(phone)
+        self.assertTrue(self.step(report, "notes.plugin_on")["ok"], [c for c in self.step(report, "notes.plugin_on")["checks"] if not c["ok"]])
+
+
+class LivePromptTest(unittest.TestCase):
+    """The prompts carry every fact the checks read: a model that has to ask first creates nothing, which is valid behaviour and not an app fault."""
+
+    def test_the_alarm_prompt_has_the_time_the_day_and_that_it_rings_once(self):
+        p = S.LIVE_PROMPTS["alarm"]
+        for fact in ("明天", "早上 7 点", "闹钟", "只响这一次"):
+            self.assertIn(fact, p)
+
+    def test_the_calendar_prompt_has_who_when_how_long_where_and_the_reminder(self):
+        p = S.LIVE_PROMPTS["calendar"]
+        for fact in ("下周三", "下午 3 点", "4 点", "王总", "3 号会议室", "提前 15 分钟"):
+            self.assertIn(fact, p)
+
+    def test_the_notes_prompt_has_the_text_and_the_tag(self):
+        p = S.LIVE_PROMPTS["notes"]
+        for fact in ("新品发布", "演示稿", "嘉宾名单", "物料清单", "“工作”标签"):
+            self.assertIn(fact, p)
+
+    def test_the_prompts_are_natural_chinese_sentences(self):
+        import re
+        for app, p in S.LIVE_PROMPTS.items():
+            self.assertRegex(p, r"[\u4e00-\u9fff]{6}", app)
+            self.assertFalse(re.search(r"[A-Za-z_]{3,}", p), "no tool names or English in %s: %r" % (app, p))
+            self.assertTrue(p.endswith(("。", "标签。")), p)
+            self.assertLess(len(p), 80)
+
+    def test_the_checks_still_read_the_app_state_and_pass_for_a_model_that_did_what_the_sentence_says(self):
+        d = {
+            S.LIVE_PROMPTS["alarm"]: lambda ph: [("mcp__alarm__alarm__alarm_create", {"time": "07:00"})],
+            S.LIVE_PROMPTS["calendar"]: lambda ph: [("mcp__calendar__calendar__event_create", {
+                "title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "end": "2026-10-14T16:00:00+08:00", "location": "3 号会议室", "reminder_minutes": [15]})],
+            S.LIVE_PROMPTS["notes"]: lambda ph: [("mcp__notes__notes__note_create", {"content": "新品发布会要准备：演示稿、嘉宾名单、物料清单", "tags": ["工作"]})],
+        }
+        report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=d), E.Options(live=True), log=lambda m: None)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertEqual([S.LIVE_PROMPTS["alarm"], S.LIVE_PROMPTS["calendar"], S.LIVE_PROMPTS["notes"]], [t for _, t in [(0, x["title"]) for x in report["steps"] if x["id"].startswith("live.")]])
 
 
 class ModelSourceTest(unittest.TestCase):
@@ -632,9 +768,9 @@ class LiveRunTest(unittest.TestCase):
     def plan(self):
         d = date(2026, 10, 14)  # next Wednesday
         return {
-            "明早 7 点叫我起床": lambda ph: [("mcp__alarm__alarm__alarm_create", {"time": "07:00"})],
-            "下周三下午 3 点和王总开会，提前 15 分钟提醒": lambda ph: [("mcp__calendar__calendar__event_create", {"title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [15]})],
-            "记一条关于新品发布的备忘，打上工作标签": lambda ph: [("mcp__notes__notes__note_search", {"query": "新品发布"}), ("mcp__notes__notes__note_create", {"content": "新品发布备忘", "tags": ["工作"]})],
+            S.LIVE_PROMPTS["alarm"]: lambda ph: [("mcp__alarm__alarm__alarm_create", {"time": "07:00"})],
+            S.LIVE_PROMPTS["calendar"]: lambda ph: [("mcp__calendar__calendar__event_create", {"title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [15]})],
+            S.LIVE_PROMPTS["notes"]: lambda ph: [("mcp__notes__notes__note_search", {"query": "新品发布"}), ("mcp__notes__notes__note_create", {"content": "新品发布备忘", "tags": ["工作"]})],
         }
 
     def test_live_cases_read_the_app_state_and_record_the_tool_sequence(self):
@@ -652,7 +788,7 @@ class LiveRunTest(unittest.TestCase):
 
     def test_a_model_that_picks_the_wrong_time_fails_with_what_it_did(self):
         plan = self.plan()
-        plan["明早 7 点叫我起床"] = lambda ph: [("mcp__alarm__alarm__alarm_create", {"time": "17:00"})]
+        plan[S.LIVE_PROMPTS["alarm"]] = lambda ph: [("mcp__alarm__alarm__alarm_create", {"time": "17:00"})]
         report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=plan), E.Options(live=True), log=lambda m: None)
         self.assertEqual({"live.alarm"}, failed(report))
         line = next(l for l in report["summary"]["failures"] if l.startswith("FAIL live.alarm"))
@@ -661,7 +797,7 @@ class LiveRunTest(unittest.TestCase):
     def test_the_verdict_is_the_app_state_not_a_fixed_tool_sequence(self):
         plan = self.plan()
         # the model looks first, hits an error, retries: different sequence, same result
-        plan["记一条关于新品发布的备忘，打上工作标签"] = lambda ph: [
+        plan[S.LIVE_PROMPTS["notes"]] = lambda ph: [
             ("mcp__notes__notes__note_list", {}), ("mcp__notes__notes__note_get", {"id": "nope"}), ("mcp__notes__notes__note_search", {"query": "新品发布"}),
             ("mcp__notes__notes__note_create", {"content": "新品发布备忘", "tags": ["工作"]})]
         report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=plan), E.Options(live=True), log=lambda m: None)
@@ -675,7 +811,7 @@ class LiveRunTest(unittest.TestCase):
         phone = FakePhone()
         env = FakeEnv(phone, live_plan=self.plan())
         E.run_acceptance(env, E.Options(live=True), log=lambda m: None)
-        self.assertEqual(["明早 7 点叫我起床", "下周三下午 3 点和王总开会，提前 15 分钟提醒", "记一条关于新品发布的备忘，打上工作标签"], [t for _, t in env.bridge.prompts])
+        self.assertEqual([S.LIVE_PROMPTS["alarm"], S.LIVE_PROMPTS["calendar"], S.LIVE_PROMPTS["notes"]], [t for _, t in env.bridge.prompts])
         env2 = FakeEnv(FakePhone(), live_plan={})
         E.run_acceptance(env2, E.Options(live=True, tell_date=True), log=lambda m: None)
         self.assertTrue(all(t.startswith("今天是 2026-10-07（设备时区 UTC+08:00）。") for _, t in env2.bridge.prompts), env2.bridge.prompts)
@@ -686,7 +822,7 @@ class LiveRunTest(unittest.TestCase):
 
     def test_a_model_that_calls_no_tool_fails(self):
         plan = self.plan()
-        plan["记一条关于新品发布的备忘，打上工作标签"] = lambda ph: []
+        plan[S.LIVE_PROMPTS["notes"]] = lambda ph: []
         report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=plan), E.Options(live=True), log=lambda m: None)
         self.assertEqual({"live.notes", "audit.notes"}, failed(report), "the audit also notices that nothing was ever confirmed for notes")
 
