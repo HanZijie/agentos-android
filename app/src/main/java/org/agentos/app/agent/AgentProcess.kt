@@ -80,9 +80,9 @@ class AgentProcess private constructor(val app: Context) {
     val autoConsent: org.agentos.runtime.consent.AutoConsentResponder? =
         if (debuggable) org.agentos.runtime.consent.AutoConsentResponder() else null
     private val consentPort: org.agentos.runtime.ports.ConsentPort = autoConsent?.let { responder ->
-        // “始终允许”的跨进程写回已经有了（extensions.approvalWriter，C7b），但 sample_apps_consent_e2e.py 还按“不提供始终允许”断言：
-        // 换上它要同时改那条断言，由整合人决定；在那之前保持不可用（安全默认）
-        org.agentos.runtime.consent.ConsentCoordinator(responder, org.agentos.runtime.consent.ApprovalWriter.UNAVAILABLE, scope, log = runtimeLog)
+        // “始终允许”经 IExtensionHost 写到 :ext 的 ApprovalStore（C7b，整合人 2026-10-07 确认）。:ext 没连上、还没收到策略、
+        // 策略 fail closed 时 available=false，确认框不提供这一项；AutoConsentResponder 从不选它，测试不会改用户策略
+        org.agentos.runtime.consent.ConsentCoordinator(responder, extensions.approvalWriter, scope, log = runtimeLog)
             .also { responder.attach(it) }
     } ?: NotOpen.CONSENT
     val hostPort = HostPortImpl(
