@@ -80,11 +80,15 @@ class AgentProcess private constructor(val app: Context) {
     val autoConsent: org.agentos.runtime.consent.AutoConsentResponder? =
         if (debuggable) org.agentos.runtime.consent.AutoConsentResponder() else null
     private val consentPort: org.agentos.runtime.ports.ConsentPort = autoConsent?.let { responder ->
-        // ApprovalWriter 在 D5.2 / C 的跨进程实现到位前不可用：不提供“始终允许”（安全默认）
+        // “始终允许”的跨进程写回已经有了（extensions.approvalWriter，C7b），但 sample_apps_consent_e2e.py 还按“不提供始终允许”断言：
+        // 换上它要同时改那条断言，由整合人决定；在那之前保持不可用（安全默认）
         org.agentos.runtime.consent.ConsentCoordinator(responder, org.agentos.runtime.consent.ApprovalWriter.UNAVAILABLE, scope, log = runtimeLog)
             .also { responder.attach(it) }
     } ?: NotOpen.CONSENT
-    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals, consent = consentPort)
+    val hostPort = HostPortImpl(
+        store, models, secrets, environment, runtimeLog,
+        tools = extensions, approvals = extensions.approvals, skills = extensions.skills, consent = consentPort,
+    )
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
     val engine: RuntimeEngine = AgentRuntimes.create(

@@ -74,8 +74,22 @@ class BinderMcpConnector(
         } catch (e: Exception) {
             throw ConnectFailed("${component.flattenToShortString()}: ${e.javaClass.simpleName}: ${e.message}", e)
         }
-        return BinderMcpLink(client)
+        val link = BinderMcpLink(client, component.flattenToShortString())
+        live.add(link)
+        connects.incrementAndGet()
+        client.closed.invokeOnCompletion { live.remove(link) }
+        return link
     }
+
+    private val live = java.util.concurrent.ConcurrentHashMap.newKeySet<BinderMcpLink>()
+    private val connects = java.util.concurrent.atomic.AtomicLong()
+
+    /** 诊断：连接次数与每条活着的链接的通道统计（peerUid、uidRejects、收发计数；不含消息内容）。 */
+    fun stats(): org.json.JSONObject = org.json.JSONObject()
+        .put("connects", connects.get())
+        .put("links", org.json.JSONArray(live.map { l ->
+            org.json.JSONObject().put("component", l.component).put("channel", l.stats() ?: org.json.JSONObject.NULL)
+        }))
 
     companion object {
         const val CONNECT_TIMEOUT_MS = 10_000L
@@ -84,7 +98,10 @@ class BinderMcpConnector(
 }
 
 /** 一条已经初始化好的 Binder MCP 连接。只抛 [McpLinkException] 的子类和 CancellationException。 */
-class BinderMcpLink(private val client: McpBinderClient) : McpServerLink {
+class BinderMcpLink(private val client: McpBinderClient, val component: String = "") : McpServerLink {
+
+    fun stats(): org.json.JSONObject? = client.stats()
+
 
     override suspend fun listTools(timeoutMillis: Long): List<McpToolInfo> = mapped {
         client.listTools(if (timeoutMillis > 0) timeoutMillis else McpBinderClient.DEFAULT_TIMEOUT_MS).map { it.toToolInfo() }
