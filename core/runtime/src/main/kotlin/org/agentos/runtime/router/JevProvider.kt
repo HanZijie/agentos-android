@@ -42,9 +42,10 @@ data class JevChoice(val id: String, val brief: String)
 class JevException(val reason: String, message: String = reason, cause: Throwable? = null) : Exception(message, cause)
 
 data class JevConfig(
-    val endpoint: String = "https://omnilabs.vibeadmin.cn/v1/systemone",
+    // 2026-09-29 整合人：默认端点改为 api.typesafe.ai（omnilabs.vibeadmin.cn 对现有 key 返回 401）；超时 1.5 → 3 秒（真机实测约 0.8 秒）
+    val endpoint: String = "https://api.typesafe.ai/v1/systemone",
     val model: String = "jev-1.13.0",
-    val timeoutMillis: Long = 1_500,
+    val timeoutMillis: Long = 3_000,
 )
 
 /**
@@ -89,7 +90,12 @@ class HttpJevProvider(
             if (!r.isSuccessful) {
                 throw JevException(if (r.code == 408 || r.code == 429 || r.code >= 500) "jev_http_retryable" else "jev_http_error")
             }
-            val text = r.body?.string().orEmpty()
+            // callTimeout 也覆盖读响应体：头到了、体迟迟不来时抛的是 InterruptedIOException，要和连接阶段一样归为 jev_timeout
+            val text = try {
+                r.body?.string().orEmpty()
+            } catch (e: IOException) {
+                throw JevException(if (e is java.io.InterruptedIOException) "jev_timeout" else "jev_network_error", cause = e)
+            }
             val json = runCatching { RuntimeJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: throw JevException("jev_invalid_response")
             val choice = ((json["answers"] as? JsonObject)?.get("session") as? JsonObject)?.get("choice")
             return (choice as? JsonPrimitive)?.contentOrNull ?: throw JevException("jev_invalid_response")

@@ -61,6 +61,13 @@ class KeystoreSecrets(
     /** 换下来、还没丢弃的 key（进行中的任务可能还在用）。 */
     @Volatile private var retired: Slot? = null
 
+    /**
+     * 第二个凭据位：Jev（自动选会话）的 key，只绑定 Jev 的 endpoint，所以 [credentialFor] 对模型端点不会交出它，
+     * 对 Jev endpoint 也不会交出模型 key。清除（[revokeJev]）同样立即作废，不留“换下来”的副本（Jev 请求只有几秒）。
+     * 持久化由 [JevSources] 负责（自己的 Keystore 主密钥，清除模型 key 时不受影响）。
+     */
+    @Volatile private var jev: Slot? = null
+
     private val served = AtomicLong()
     private val denied = AtomicLong()
     // 计数器；不能叫 revocations：那是 SecretPort 的撤销信号（Flow<Credential>，A 追加，发送由 C 实现）
@@ -125,6 +132,25 @@ class KeystoreSecrets(
         }
     }
 
+    /** 从下一个请求起用 [key] 访问 Jev 的 [endpoint]（null = 不再有 Jev key）。 */
+    @Synchronized
+    fun activateJev(key: String?, endpoint: String) {
+        jev = key?.let { Slot(it, listOf(endpoint)) }
+    }
+
+    /** 清除 Jev key：立即作废，此后 [credentialFor] 对 Jev endpoint 返回 null；发出撤销信号中止在途的 Jev 请求。 */
+    @Synchronized
+    fun revokeJev() {
+        val old = jev ?: return
+        jev = null
+        if (signal.tryEmit(old.credential)) signalsSent.incrementAndGet() else signalsDropped.incrementAndGet()
+    }
+
+    val jevIsSet: Boolean get() = jev != null
+
+    /** Jev key 的首尾各 4 位；没有时为 null。 */
+    fun jevMasked(): String? = jev?.let { Credential(it.key).masked() }
+
     /** 清除模型来源时调用：删除 Keystore 里的主密钥，旧密文从此无法解密。下次 [seal] 会新建一把。 */
     fun destroyMasterKey() = cipher.destroy()
 
@@ -144,7 +170,7 @@ class KeystoreSecrets(
     override suspend fun credentialFor(url: String): Credential? {
         val c = current
         val r = retired
-        val found = c?.match(url) ?: r?.match(url)
+        val found = c?.match(url) ?: r?.match(url) ?: jev?.match(url)
         if (found != null) served.incrementAndGet() else denied.incrementAndGet()
         return found
     }
@@ -170,13 +196,13 @@ class KeystoreSecrets(
     /** 把 [text] 里出现的 key（当前的和换下来的）换成 `****`。 */
     fun redact(text: String): String {
         var out = text
-        for (s in listOfNotNull(current, retired)) {
+        for (s in listOfNotNull(current, retired, jev)) {
             if (s.key.length >= MIN_REDACT_LENGTH && out.contains(s.key)) out = out.replace(s.key, "****")
         }
         return out
     }
 
-    override fun toString(): String = "KeystoreSecrets(set=$isSet, retired=$holdsRetiredKey)"
+    override fun toString(): String = "KeystoreSecrets(set=$isSet, retired=$holdsRetiredKey, jev=$jevIsSet)"
 
     companion object {
         /** 太短的 key（本地测试端点的 "x" 之类）替换了反而破坏日志，也没有保密意义。 */
