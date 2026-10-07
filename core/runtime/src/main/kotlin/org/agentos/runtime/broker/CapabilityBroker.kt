@@ -1,7 +1,11 @@
 package org.agentos.runtime.broker
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
@@ -65,11 +69,15 @@ interface CapabilityBroker {
 /**
  * 一次工具调用所在的任务。[commit] 把写操作排进这个任务的有序写队列（与 Pi 事件同一个队列），
  * 在一个事务里提交后才返回——保证 `tool.dispatched` 在调用工具之前已经落盘，且事件顺序与发生顺序一致。
+ *
+ * [cancelRequested]：用户取消了这个任务（ACP `session/cancel`）时完成。等待用户确认的时候取消不会打断 Agent core 里的回调，
+ * 所以 Broker 自己在这个信号上撤回确认（界面撤回对话框和通知），不让一个已经取消的任务继续占着确认框。没有信号（null）就不撤回。
  */
 class ToolContext(
     val sessionId: String,
     val taskId: String,
     val caller: CallerIdentity,
+    val cancelRequested: Deferred<Unit>? = null,
     val commit: suspend (block: (StoreTx) -> Unit) -> Unit,
 )
 
@@ -176,7 +184,7 @@ class DefaultCapabilityBroker(
                 ),
             )
         }
-        val decision = host.consent.request(
+        val request =
             ConsentRequest(
                 requestId = requestId,
                 sessionId = ctx.sessionId,
@@ -187,10 +195,16 @@ class DefaultCapabilityBroker(
                 risk = tool.risk,
                 caller = ctx.caller,
                 argumentsPreview = call.arguments.toString().take(PREVIEW_CHARS),
+                argumentsTruncated = call.arguments.toString().length > PREVIEW_CHARS,
                 rememberable = RiskPolicy.maySessionRemember(tool.risk),
                 source = tool.source,
-            ),
-        )
+            )
+        val decision = askWhileRunning(ctx, request)
+        if (decision == null) {
+            // 任务在用户答复之前被取消：确认已经撤回，这次调用按拒绝处理（事件里的 reason 是 client，events.md）
+            recordConsent(ctx, call, tool, requestId, "deny", "client", false)
+            return reject(ctx, call, ErrorCode.TOOL_DENIED, "The task was cancelled before the user answered.", ToolCallState.REJECTED)
+        }
         return when (decision) {
             is ConsentDecision.Allow -> {
                 val remember = decision.rememberForSession && RiskPolicy.maySessionRemember(tool.risk)
@@ -207,6 +221,21 @@ class DefaultCapabilityBroker(
                     "The user declined this tool call."
                 }
                 reject(ctx, call, ErrorCode.TOOL_DENIED, text, ToolCallState.REJECTED)
+            }
+        }
+    }
+
+    /** 向用户确认；任务在等待期间被取消时撤回确认并返回 null。 */
+    private suspend fun askWhileRunning(ctx: ToolContext, request: ConsentRequest): ConsentDecision? {
+        val cancelled = ctx.cancelRequested ?: return host.consent.request(request)
+        return coroutineScope {
+            val ask = async { host.consent.request(request) }
+            select<ConsentDecision?> {
+                ask.onAwait { it }
+                cancelled.onAwait {
+                    ask.cancel()
+                    null
+                }
             }
         }
     }

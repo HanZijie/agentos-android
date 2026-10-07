@@ -207,6 +207,7 @@ internal class Scheduler(
             if (r != null && r.taskId == requestedRunning) {
                 r.cancelReason = by
                 r.cancelDeadline = host.clock.nowMillis() + config.cancelGraceMillis
+                r.runner?.requestCancel()
                 if (r.runner != null) runCatching { cores.peek(sessionId)?.abort() }
             }
         }
