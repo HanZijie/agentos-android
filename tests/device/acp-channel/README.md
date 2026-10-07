@@ -137,6 +137,12 @@ python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --l
 
 结果 `results/raw/sample-apps-<serial>-api<N>-<mode>-<时间>.json`：每步 `checks[{name, ok, expected, actual}]`、`turn`（停止原因、工具调用与结果摘要）、失败摘要在 `summary.failures`（“哪一步失败、期望什么、实际什么”）；退出码 0 = 全部通过。本次运行创建的数据带标记 `e2e-<run id>`，结束（含失败）时自动清理，清理不掉的在 `notes` 里写明。
 
-调试入口的形状（AgentOS 侧 C7b / D5.2 还在做）按 `sample_apps_lib.py` 开头的约定写：`ExtensionDebugReceiver` 的 `list` 返回 `{"plugins":[{name,package,enabled}]}`，`catalog` 返回 `{"tools":[{name,risk}]}`（只含已启用的工具）；`ConsentDebugReceiver` 的 `mode`、`recent`。组件名可用 `AGENTOS_EXT_RECEIVER`、`AGENTOS_CONSENT_RECEIVER` 覆盖。
+调试入口（main 里已有，形状见 `sample_apps_lib.py` 开头）：`ExtensionDebugReceiver`（`list` 的 `plugins[{id, packageName, name, enabled, status}]`；`enable`/`disable` 用 `--es id <包名或插件 ID>`；`catalog` 的 `catalog.tools[{name, risk:"read|write|high"}]`；`wait_catalog` 在 App 里等工具出现/消失）、`ConsentDebugReceiver`（`mode`、`status`、`recent[{requestId, tool, risk, source, args, options, answeredWith, end, notice}]`）、`DesktopGatewayDebugReceiver`。组件名可用 `AGENTOS_EXT_RECEIVER`、`AGENTOS_CONSENT_RECEIVER` 覆盖。
 
-不需要设备的测试：`unit/test_sample_apps_driver.py` 用 `unit/fake_world.py`（三个 App 的 SQLite、AgentOS 的调试入口和 acp-bridge 的假实现，脚本由真正的 `scripted_tools` 规划）跑完整流程，并验证各种故障（App 没写入、目录缺工具、风险被降低、数据库读不出、模型选错时间…）会在对应步骤被指出。
+确认行为（整合在 Pixel 8 上发现，驱动按它写）：
+1. `mode=allow` 对 WRITE 工具自动选“本会话内不再询问”（`ALLOW_FOR_SESSION`），该工具在这个 ACP 会话里被记住；同一会话里再切 `mode=deny`，同一工具直接执行、不再确认。所以**拒绝路径一律先 `session/new` 再跑**（`deny_pre`），并且用 `recent` 核对这条请求确实被记成 `DENY`（`declined()`）；`alarm.switch_on` 还核对 `alarm_set_enabled` 在会话里只被问了一次。
+2. HIGH（`*_delete`）只提供 `ALLOW_ONCE` / `DENY`，`mode=allow` 选 `ALLOW_ONCE`，照样放行。
+3. 每个 App 结束后有一步 `audit.<app>`：读 `recent` 里本次运行的请求（以开始前的 requestId 为基线，不受上次运行影响），核对来源行 `来自插件「alarm」 · 服务器「alarm」`、风险（`*_delete` 为 HIGH，其余全是 WRITE）、选项、自动应答的选择（在选项内、从不是 `ALWAYS_ALLOW`、没有超时）。`--live` 结束时对每个 App 也做这一步。
+4. 第三方 App 的所有工具默认 WRITE，包括 `*_list` / `*_get`：查询也要确认；只有自带插件的 `readOnlyHint` 才降为 READ。
+
+不需要设备的测试：`unit/test_sample_apps_driver.py` 用 `unit/fake_world.py`（三个 App 的 SQLite、AgentOS 的调试入口——含“本会话内不再询问”的记忆——和 acp-bridge 的假实现，脚本由真正的 `scripted_tools` 规划）跑完整流程，并验证各种故障（App 没写入、目录缺工具、风险被降低、数据库读不出、模型选错时间…）会在对应步骤被指出。

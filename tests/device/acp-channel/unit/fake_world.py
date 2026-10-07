@@ -36,7 +36,9 @@ class FakePhone:
         self.faults = set(faults or [])
         self.enabled = {s.package: False for s in L.SAMPLES.values()}
         self.consent_mode = "off"
-        self.consent_log = []
+        self.consent_log = []       # ConsentDebugReceiver `recent` entries, oldest first (max 50)
+        self.remembered = set()     # (session id, tool) answered with "allow for this session"
+        self._req = 0
         self.desktop = False
         self.log = []          # every adb shell / run call, for assertions
         self.model_requests = []
@@ -112,8 +114,9 @@ class FakePhone:
         extras = {}
         i = 0
         while i < len(parts):
-            if parts[i] == "--es":
-                extras[parts[i + 1]] = parts[i + 2]
+            if parts[i] in ("--es", "--ez", "--el"):
+                v = parts[i + 2]
+                extras[parts[i + 1]] = (v == "true") if parts[i] == "--ez" else (int(v) if parts[i] == "--el" else v)
                 i += 3
             else:
                 i += 1
@@ -126,20 +129,31 @@ class FakePhone:
         else:
             return "Broadcast completed: result=0\n"
         code = 1 if data.get("ok") else 2
-        return 'Broadcasting: Intent { }\nBroadcast completed: result=%d, data="%s"' % (code, json.dumps(data, ensure_ascii=False))
+        return 'Broadcasting: Intent { }\nBroadcast completed: result=%d, data="%s"' % (code, json.dumps(data, ensure_ascii=False).replace("/", "\\/"))
+
+    def _plugin_json(self, s):
+        return {"id": s.package + "/agent-plugin", "packageName": s.package, "name": s.name, "enabled": self.enabled[s.package], "status": "ready",
+                "toolCount": len(s.tools)}
+
+    def _plugin_for(self, ident):
+        return next((s for s in L.SAMPLES.values() if ident in (s.package, s.package + "/agent-plugin")), None)
 
     def _ext(self, ex):
         op = ex.get("op")
         if op == "list":
-            return {"ok": True, "plugins": [{"name": s.name, "package": s.package, "enabled": self.enabled[s.package]} for s in L.SAMPLES.values()]}
+            return {"ok": True, "plugins": [self._plugin_json(s) for s in L.SAMPLES.values()]}
         if op in ("enable", "disable"):
-            if ex.get("plugin") not in self.enabled:
-                return {"ok": False, "error": "unknown plugin"}
-            self.enabled[ex["plugin"]] = op == "enable"
-            return {"ok": True}
+            s = self._plugin_for(ex.get("id"))
+            if s is None:
+                return {"ok": False, "error": "agentos.ext.not_found: unknown plugin"}
+            self.enabled[s.package] = op == "enable"
+            return {"ok": True, "plugin": self._plugin_json(s)}
         if op == "catalog":
-            return {"ok": True, "tools": [{"name": n, "risk": r} for n, r in self.catalog().items()]}
-        return {"ok": False, "error": "unknown op"}
+            return {"ok": True, "catalog": {"version": 1, "tools": [{"name": n, "risk": r.lower(), "enabled": True} for n, r in self.catalog().items()]}}
+        if op == "wait_catalog":
+            present = ex.get("name") in self.catalog()
+            return {"ok": True, "met": present != bool(ex.get("absent", False))}
+        return {"ok": False, "error": "unknown op: %s" % op}
 
     def catalog(self):
         out = {}
@@ -155,11 +169,16 @@ class FakePhone:
 
     def _consent(self, ex):
         if ex.get("op") == "mode":
-            self.consent_mode = ex["mode"]
-            return {"ok": True}
+            m = {"allow": "ALLOW", "allowonce": "ALLOW_ONCE", "deny": "DENY", "off": "OFF"}.get(str(ex.get("mode")).lower())
+            if m is None:
+                return {"ok": False, "error": "mode must be allow|allowOnce|deny|off"}
+            self.consent_mode = str(ex["mode"]).lower() if m != "ALLOW_ONCE" else "allowonce"
+            return {"ok": True, "mode": m}
+        if ex.get("op") == "status":
+            return {"ok": True, "mode": self.consent_mode.upper()}
         if ex.get("op") == "recent":
-            return {"ok": True, "recent": self.consent_log}
-        return {"ok": False}
+            return {"ok": True, "mode": self.consent_mode.upper(), "recent": list(self.consent_log[-50:])}
+        return {"ok": False, "error": "unknown op"}
 
     def _gateway(self, ex):
         op = ex.get("op")
@@ -170,20 +189,29 @@ class FakePhone:
         return {"ok": True, "code": "123456"} if op == "pair" else {"ok": True, "enabled": self.desktop}
 
     # ------------------------------------------------------------------ running a tool the way AgentOS would
-    def call_tool(self, name, args):
-        """-> (status, text) as the ACP update would carry them."""
+    def call_tool(self, name, args, session="sess-1"):
+        """-> (status, text) as the ACP update would carry them. The confirmation behaves like the real broker + AutoConsentResponder:
+        READ is not asked; WRITE offers ALLOW_ONCE / ALLOW_FOR_SESSION / DENY, HIGH only ALLOW_ONCE / DENY; mode allow answers WRITE with
+        ALLOW_FOR_SESSION (remembered for this session: later calls are not asked at all, whatever the mode is by then) and HIGH with ALLOW_ONCE."""
         catalog = self.catalog()
         if name not in catalog:
             return "failed", "Tool %s not found" % name
         risk = catalog[name]
-        if risk != "READ":
+        if risk != "READ" and (session, name) not in self.remembered:
+            options = ["ALLOW_ONCE", "DENY"] if risk == "HIGH" else ["ALLOW_ONCE", "ALLOW_FOR_SESSION", "DENY"]
             mode = self.consent_mode
-            answer = {"allow": "allow", "allowOnce": "allow", "deny": "deny"}.get(mode)
-            self.consent_log.append({"toolName": name, "risk": risk, "answeredWith": mode})
+            answer = {"allow": "ALLOW_ONCE" if risk == "HIGH" else "ALLOW_FOR_SESSION", "allowonce": "ALLOW_ONCE", "deny": "DENY"}.get(mode)
+            self._req += 1
+            plugin = name.split("__")[1]
+            self.consent_log.append({"requestId": "req_%d" % self._req, "tool": name, "risk": risk, "source": L.source_line(plugin), "args": "{}",
+                                     "options": options, "answeredWith": answer, "end": "ANSWERED" if answer else "TIMED_OUT", "notice": None})
+            del self.consent_log[:-50]
             if answer is None:
                 return "failed", "[agentos:tool_denied] The user did not respond to the confirmation in time."
-            if answer == "deny":
+            if answer == "DENY":
                 return "failed", "[agentos:tool_denied] The user declined this tool call."
+            if answer == "ALLOW_FOR_SESSION":
+                self.remembered.add((session, name))
         s, tool = next((s, name.split("__", 3)[3]) for s in L.SAMPLES.values() if name.startswith("mcp__%s__" % s.name))
         try:
             return "completed", json.dumps(getattr(self, "t_" + tool)(args), ensure_ascii=False)
@@ -445,6 +473,7 @@ class FakeBridge:
 
     def __init__(self, phone, live_plan=None):
         self.phone, self.stderr, self.closed = phone, [], False
+        self.sessions = 0
         self.live_plan = live_plan      # {prompt text: callable(phone) -> [(tool name, args)]}: what a "model" would do
         self.prompts = []
 
@@ -452,18 +481,19 @@ class FakeBridge:
         if method == "initialize":
             return {"msg": {"result": {"protocolVersion": 1}}, "ms": 1, "notes": []}
         if method == "session/new":
-            return {"msg": {"result": {"sessionId": "sess-1"}}, "ms": 1, "notes": []}
+            self.sessions += 1
+            return {"msg": {"result": {"sessionId": "sess-%d" % self.sessions}}, "ms": 1, "notes": []}
         if method == "session/prompt":
             text = params["prompt"][0]["text"]
-            self.prompts.append(text)
-            return self._prompt(text)
+            self.prompts.append((params["sessionId"], text))
+            return self._prompt(text, params["sessionId"])
         raise AssertionError("unexpected method " + method)
 
-    def _prompt(self, text):
+    def _prompt(self, text, sid="sess-1"):
         notes = []
 
         def upd(**u):
-            notes.append({"method": "session/update", "params": {"sessionId": "sess-1", "update": u}})
+            notes.append({"method": "session/update", "params": {"sessionId": sid, "update": u}})
 
         try:
             script = json.loads(text)
@@ -475,7 +505,7 @@ class FakeBridge:
             for name, args in plan(self.phone):
                 cid = "c%d" % rnd
                 upd(sessionUpdate="tool_call", toolCallId=cid, title=name, status="pending", rawInput=args)
-                st, out = self.phone.call_tool(name, args)
+                st, out = self.phone.call_tool(name, args, sid)
                 upd(sessionUpdate="tool_call_update", toolCallId=cid, status=st, content=[{"type": "content", "content": {"type": "text", "text": out}}])
                 rnd += 1
             upd(sessionUpdate="agent_message_chunk", content={"type": "text", "text": "好的，已处理。"})
@@ -485,7 +515,7 @@ class FakeBridge:
             if plan["kind"] == "tool":
                 cid = "c%d" % rnd
                 upd(sessionUpdate="tool_call", toolCallId=cid, title=plan["name"], status="pending", rawInput=plan["arguments"])
-                st, out = self.phone.call_tool(plan["name"], plan["arguments"])
+                st, out = self.phone.call_tool(plan["name"], plan["arguments"], sid)
                 upd(sessionUpdate="tool_call_update", toolCallId=cid, status="in_progress")
                 upd(sessionUpdate="tool_call_update", toolCallId=cid, status=st, content=[{"type": "content", "content": {"type": "text", "text": out}}])
                 results.append({"isError": st == "failed", "text": out})

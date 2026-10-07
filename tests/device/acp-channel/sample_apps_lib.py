@@ -12,12 +12,21 @@ Why the database and not the apps' own debug entries (checked against the three 
   independent of the code under test, no size limit. The state readers are small classes with one method (`snapshot`), so an app
   dump entry can replace them later.
 
-Assumed shapes of the AgentOS debug receivers that are still being written (C7b / D5.2); change the constants or the parsers below
-to match the real ones, the tests use fake adb answers in exactly these shapes:
-  ExtensionDebugReceiver  `--es op list|enable|disable|catalog [--es plugin <package>]`, result data JSON `{"ok":true,...}`
-      list    -> {"plugins":[{"name","package","enabled", ...}]}
-      catalog -> {"tools":[{"name": <model-facing name>, "risk": "READ|WRITE|HIGH", ...}]}  (enabled tools only: that is what the model is offered)
-  ConsentDebugReceiver    `--es op mode --es mode allow|deny|allowOnce|off`, `--es op recent` -> {"ok":true,"recent":[{requestId, toolName, risk, answeredWith, end, ...}]}
+The AgentOS debug receivers (main, app/src/debug; shapes checked against the code, A12 follow-up):
+  ExtensionDebugReceiver  `--es op ... [--es id <plugin id or package name>] [--es name <tool>] [--ez absent true] [--el timeoutMs N]`
+      list         -> {"ok":true,"plugins":[{id, packageName, name, enabled, status:"ready|unavailable|signature_changed|signature_unconfirmed", toolCount, ...}]}
+      enable/disable -> {"ok":true,"plugin":{...}}   (error when status is not ready: the signature has to be confirmed first)
+      catalog      -> {"ok":true,"catalog":{"version","tools":[{name: model-facing name, risk:"read|write|high", enabled, ...}],"policy":{...}}}
+                      (only the tools that are available right now: that is what the model is offered)
+      wait_catalog -> {"ok":true,"met":bool,"tools":[names]}  waits until `name` is in the catalog (or gone with absent=true), at most timeoutMs
+  ConsentDebugReceiver    `--es op mode --es mode allow|allowOnce|deny|off`, `--es op status`, `--es op recent`
+      recent -> {"ok":true,"mode":"ALLOW","recent":[{requestId, tool: model-facing name, risk: "READ|WRITE|HIGH", source: "来自插件「alarm」 · 服务器「alarm」",
+                 args: one-line summary, options: [ConsentChoice names], answeredWith, end: "ANSWERED|TIMED_OUT|CANCELLED|CLOSED", notice}]}  oldest first, at most 50.
+  Consent behaviour the driver relies on (integration, Pixel 8):
+    - mode=allow answers WRITE with ALLOW_FOR_SESSION: the tool is remembered *for that ACP session*, so later calls in the same session are not asked
+      (and switching to deny does not change that): the refusal paths run in a NEW session (session/new);
+    - HIGH (*_delete) only offers ALLOW_ONCE / DENY: mode=allow answers ALLOW_ONCE and the call goes through;
+    - every third-party tool is WRITE by default (also *_list / *_get), HIGH when destructiveHint (*_delete): queries are confirmed too.
 """
 import json
 import os
@@ -69,6 +78,11 @@ def model_name(sample, tool):
     return scripted_tools.tool_name(sample, sample, tool)
 
 
+def source_line(sample):
+    """The source line of a confirmation (ConsentText.sourceLine): plugin and server are both the sample's name."""
+    return "来自插件「%s」 · 服务器「%s」" % (sample, sample)
+
+
 def expected_risk(tool):
     """RiskPolicy for third-party MCP tools: WRITE by default, readOnlyHint never lowers it, destructiveHint (the *_delete tools) raises to HIGH."""
     return "HIGH" if tool.endswith("_delete") else "WRITE"
@@ -102,10 +116,19 @@ class RealAdb:
         return p.stdout if p.returncode == 0 and p.stdout else None
 
 
+def _extra(k, v):
+    """am extra with the type the receiver reads it as: bool -> --ez, int -> --el, everything else -> --es."""
+    if isinstance(v, bool):
+        return "--ez %s %s" % (k, "true" if v else "false")
+    if isinstance(v, int):
+        return "--el %s %d" % (k, v)
+    return "--es %s %s" % (k, shq(v))
+
+
 def broadcast(adb, component, extras=None, timeout=60):
     """`am broadcast` to a debug receiver of AgentOS; the result is the JSON in the broadcast's result data (never in the device log).
     Returns (resultCode, json). Raises DriverError when there is no result data (receiver missing / not exported / app not debuggable)."""
-    parts = " ".join("--es %s %s" % (k, shq(v)) for k, v in (extras or {}).items())
+    parts = " ".join(_extra(k, v) for k, v in (extras or {}).items())
     out = adb.sh("am broadcast -f 32 -n %s %s" % (component, parts), check=False, timeout=timeout)
     m = re.search(r"Broadcast completed: result=(-?\d+)", out)
     i = out.find('data="')
@@ -129,20 +152,21 @@ class ExtensionDebug:
     def __init__(self, adb):
         self.adb = adb
 
-    def _op(self, op, plugin=None):
-        extras = {"op": op}
+    def _op(self, op, plugin=None, **extras):
+        ex = {"op": op}
         if plugin:
-            extras["plugin"] = plugin
-        code, data = broadcast(self.adb, EXT_RECEIVER, extras)
+            ex["id"] = plugin          # a plugin id ("<package>/<assets dir>") or a package name
+        ex.update({k: v for k, v in extras.items() if v is not None})
+        code, data = broadcast(self.adb, EXT_RECEIVER, ex, timeout=90)
         if not data.get("ok", code == 1):
-            raise DriverError("ExtensionDebugReceiver %s %s failed: %s" % (op, plugin or "", json.dumps(data)[:300]))
+            raise DriverError("ExtensionDebugReceiver %s %s failed: %s" % (op, plugin or "", json.dumps(data, ensure_ascii=False)[:300]))
         return data
 
     def plugins(self):
         out = []
         for p in self._op("list").get("plugins") or []:
-            out.append({"name": _pick(p, "name", "plugin", "pluginName"), "package": _pick(p, "package", "packageName", "pkg"),
-                        "enabled": bool(_pick(p, "enabled", "isEnabled", default=False)), "raw": p})
+            out.append({"name": _pick(p, "name", "plugin", "pluginName"), "package": _pick(p, "packageName", "package", "pkg"),
+                        "enabled": bool(_pick(p, "enabled", "isEnabled", default=False)), "status": _pick(p, "status"), "raw": p})
         return out
 
     def enable(self, package):
@@ -152,10 +176,16 @@ class ExtensionDebug:
         return self._op("disable", package)
 
     def catalog(self):
-        """{model-facing name: risk}"""
+        """{model-facing name: RISK} (upper case: READ / WRITE / HIGH)."""
         data = self._op("catalog")
-        tools = _pick(data, "tools", "catalog", default=[])
-        return {t["name"]: str(_pick(t, "risk", default="")).upper() for t in tools}
+        cat = data.get("catalog")
+        tools = cat.get("tools") if isinstance(cat, dict) else _pick(data, "tools", default=[])
+        return {t["name"]: str(_pick(t, "risk", default="")).upper() for t in tools or []}
+
+    def wait_tool(self, name, absent=False, timeout_ms=15000):
+        """Wait (in the app, not by polling) until `name` is in the catalog / gone from it. -> bool (met)."""
+        data = self._op("wait_catalog", name=name, absent=True if absent else None, timeoutMs=int(timeout_ms))
+        return bool(data.get("met"))
 
 
 class ConsentDebug:
@@ -168,8 +198,15 @@ class ConsentDebug:
             raise DriverError("ConsentDebugReceiver mode=%s failed: %s" % (mode, json.dumps(data)[:300]))
 
     def recent(self):
+        """Newest last. Each entry: {tool, risk, source, options, answeredWith, end, notice, args, requestId} (the receiver's own names)."""
         code, data = broadcast(self.adb, CONSENT_RECEIVER, {"op": "recent"})
+        if not data.get("ok", code == 1):
+            raise DriverError("ConsentDebugReceiver recent failed: %s" % json.dumps(data)[:300])
         return _pick(data, "recent", "entries", default=[])
+
+    def asked(self, tool_name):
+        """The recent requests for one model-facing tool name."""
+        return [e for e in self.recent() if e.get("tool") == tool_name]
 
 
 class GatewayDebug:
@@ -395,6 +432,15 @@ class BridgeSession:
             raise DriverError("session/new failed: %s" % json.dumps(new.get("msg") or new)[:200])
         return cls(bridge, sid)
 
+    def new_session(self, timeout=60):
+        """A fresh ACP session on the same connection (the per-session memory of 'allow for this session' starts empty)."""
+        new = self.bridge.request("session/new", {"cwd": "/", "mcpServers": []}, timeout)
+        sid = ((new.get("msg") or {}).get("result") or {}).get("sessionId")
+        if not sid:
+            raise DriverError("session/new failed: %s" % json.dumps(new.get("msg") or new)[:200])
+        self.session_id = sid
+        return sid
+
     def prompt(self, text, timeout=60):
         r = self.bridge.request("session/prompt", {"sessionId": self.session_id, "prompt": [{"type": "text", "text": text}]}, timeout)
         return collect_turn(r["notes"], r)
@@ -433,10 +479,21 @@ class Context:
         self.adb, self.ext, self.consent, self.session = adb, ext, consent, session
         self.today, self.tz_offset, self.run_id, self.log = today, tz_offset, run_id, log
         self.vars = {}
+        self.consent_seen = set()   # requestIds already in ConsentDebugReceiver `recent` before this run asked anything
         self.states = {name: cls(adb) for name, cls in STATE_READERS.items()}
 
     def state(self, sample):
         return self.states[sample].snapshot()
+
+    def mark_consent_baseline(self):
+        self.consent_seen = {e.get("requestId") for e in self.consent.recent()}
+
+    def consent_recent(self):
+        """Confirmation requests recorded since [mark_consent_baseline] (this run's)."""
+        return [e for e in self.consent.recent() if e.get("requestId") not in self.consent_seen]
+
+    def asked(self, tool_name):
+        return [e for e in self.consent_recent() if e.get("tool") == tool_name]
 
     def day(self, plus):
         return self.today + timedelta(days=plus)
@@ -517,6 +574,37 @@ def turn_checks(step, calls, turn):
         out.append(eq("call %d %s %s" % (i, c.tool, "succeeds" if c.ok else "is refused or fails"), want, rec.status))
         if c.error_has:
             out.append(truth("call %d error text mentions %r" % (i, c.error_has), "contains %r" % c.error_has, text_has(rec.text, c.error_has), rec.text[:200]))
+    return out
+
+
+def audit_consent(entries, sample):
+    """Checks over the confirmation requests ConsentDebugReceiver `recent` recorded for one sample app (what the user would have been shown).
+
+    Expected (integration, Pixel 8): the source line names the plugin and server; every tool is WRITE (queries too) except `*_delete` which is HIGH;
+    HIGH offers exactly ALLOW_ONCE / DENY, WRITE at least ALLOW_ONCE / DENY; the auto-responder answered with an offered option, never ALWAYS_ALLOW,
+    and no request ended in a timeout."""
+    prefix = "mcp__%s__%s__" % (sample, sample)
+    mine = [e for e in entries if str(e.get("tool", "")).startswith(prefix)]
+    short = lambda e: {k: e.get(k) for k in ("tool", "risk", "options", "answeredWith", "end")}  # noqa: E731
+    out = [truth("%s: confirmation requests were recorded" % sample, ">= 1 request", bool(mine), len(mine))]
+    if not mine:
+        return out
+    out.append(truth("%s: every request names its source plugin and server" % sample, source_line(sample),
+                     all(e.get("source") == source_line(sample) for e in mine), sorted({str(e.get("source")) for e in mine})))
+    wrong = [short(e) for e in mine if str(e.get("risk", "")).upper() != expected_risk(str(e["tool"])[len(prefix):])]
+    out.append(truth("%s: risk is HIGH for *_delete and WRITE for every other tool (queries are confirmed too)" % sample, "no deviation", not wrong, wrong[:5]))
+    bad_opts = []
+    for e in mine:
+        opts = list(e.get("options") or [])
+        high = str(e.get("risk", "")).upper() == "HIGH"
+        if high and opts != ["ALLOW_ONCE", "DENY"]:
+            bad_opts.append(short(e))
+        if not high and not {"ALLOW_ONCE", "DENY"} <= set(opts):
+            bad_opts.append(short(e))
+    out.append(truth("%s: HIGH offers only ALLOW_ONCE/DENY, WRITE offers at least ALLOW_ONCE/DENY" % sample, "no deviation", not bad_opts, bad_opts[:5]))
+    bad_ans = [short(e) for e in mine if e.get("answeredWith") is None or e.get("answeredWith") == "ALWAYS_ALLOW" or e.get("answeredWith") not in (e.get("options") or [])
+               or e.get("end") != "ANSWERED"]
+    out.append(truth("%s: answered by the auto-responder with an offered option (never ALWAYS_ALLOW), none timed out" % sample, "no deviation", not bad_ans, bad_ans[:5]))
     return out
 
 

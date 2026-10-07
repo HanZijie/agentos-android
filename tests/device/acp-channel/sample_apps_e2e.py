@@ -84,10 +84,15 @@ def run_acceptance(env, opts, log=log_line):
             for item in plan:
                 if opts.only and item_sample(item) not in opts.only:
                     continue
-                if opts.live:
+                if isinstance(item, tuple):
+                    record(S.run_check_step(item[0], item[1], item[2], ctx))
+                elif opts.live:
                     record(S.run_live_case(item, ctx, opts.live_timeout))
                 else:
                     record(L.run_step(item, ctx, opts.step_timeout))
+            if opts.live:
+                for sample in sorted({i.sample for i in plan if opts.only is None or i.sample in opts.only}):
+                    record(S.run_check_step(*S.consent_audit_step(sample), ctx))
         else:
             notes.append("setup failed: the app steps were not run")
     except Exception as e:  # noqa: BLE001
@@ -109,6 +114,9 @@ def run_acceptance(env, opts, log=log_line):
 
 
 def item_sample(item):
+    """The app a plan item belongs to (check steps are tuples `(id, title, fn)` whose id is `audit.<app>`)."""
+    if isinstance(item, tuple):
+        return item[0].split(".", 1)[1]
     return getattr(item, "sample", None)
 
 
