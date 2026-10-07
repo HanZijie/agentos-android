@@ -66,7 +66,7 @@ class ScriptedRunTest(unittest.TestCase):
             self.assertTrue(any("unchanged" in c["name"] or "stays" in c["name"] or "active" in c["name"] for c in step["checks"]) or step["id"].endswith("unknown_id"), sid)
         denied = next(s for s in report["steps"] if s["id"] == "alarm.denied")
         self.assertIn("tool_denied", denied["turn"]["tools"][0]["result"])
-        self.assertEqual("allow", phone.consent_log[-1]["answeredWith"] if phone.consent_log else "allow")
+        self.assertEqual("ALLOW_ONCE", phone.consent_log[-1]["answeredWith"], "the last request of the run is the HIGH note_delete, allowed once")
 
     def test_the_catalog_check_reports_risk_per_tool(self):
         _, _, report = run()
@@ -78,6 +78,90 @@ class ScriptedRunTest(unittest.TestCase):
         listing = [c for n, c in names.items() if "note_list is offered" in n][0]
         self.assertEqual("WRITE", listing["expected"], "no annotation lowers a third-party tool below WRITE")
         self.assertEqual(29, len(cat["checks"]))
+
+
+class ConsentBehaviourTest(unittest.TestCase):
+    """The four things the integration found on the Pixel 8, as driver expectations."""
+
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def test_refusal_paths_run_in_a_new_session(self):
+        phone, env, report = run()
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        sessions = {sid for sid, text in env.bridge.prompts}
+        self.assertGreater(len(sessions), 1, "the driver opened extra sessions")
+        denied = [(sid, json.loads(text)) for sid, text in env.bridge.prompts if "alarm_create" in text and '"06:00"' in text]
+        self.assertEqual(1, len(denied))
+        first = env.bridge.prompts[0][0]
+        self.assertNotEqual(first, denied[0][0], "alarm_create was allowed-for-session in the first session, so the refusal needs a new one")
+
+    def test_without_a_new_session_a_remembered_tool_would_ignore_deny(self):
+        # the phone model itself: this is what the driver is protecting itself from
+        phone = FakePhone()
+        phone.enabled = {s.package: True for s in L.SAMPLES.values()}
+        phone.consent_mode = "allow"
+        self.assertEqual("completed", phone.call_tool("mcp__alarm__alarm__alarm_create", {"time": "06:00"}, "s1")[0])
+        phone.consent_mode = "deny"
+        self.assertEqual("completed", phone.call_tool("mcp__alarm__alarm__alarm_create", {"time": "06:01"}, "s1")[0], "same session: remembered, not asked")
+        self.assertEqual("failed", phone.call_tool("mcp__alarm__alarm__alarm_create", {"time": "06:02"}, "s2")[0], "new session: asked, declined")
+
+    def test_high_tools_offer_once_or_deny_and_are_allowed_once(self):
+        phone, env, report = run()
+        deletes = [e for e in phone.consent_log if e["tool"].endswith("_delete") and e["answeredWith"]]
+        self.assertTrue(deletes)
+        for e in deletes:
+            self.assertEqual(["ALLOW_ONCE", "DENY"], e["options"])
+        self.assertEqual({"ALLOW_ONCE"}, {e["answeredWith"] for e in deletes if e["end"] == "ANSWERED" and e["options"] == ["ALLOW_ONCE", "DENY"] and e["answeredWith"] != "DENY"})
+
+    def test_queries_of_third_party_apps_are_confirmed_too(self):
+        phone, env, report = run()
+        asked = {e["tool"] for e in phone.consent_log}
+        self.assertIn("mcp__alarm__alarm__alarm_list", asked)
+        self.assertIn("mcp__notes__notes__tag_list", asked)
+        listing = next(e for e in phone.consent_log if e["tool"].endswith("alarm_list"))
+        self.assertEqual("WRITE", listing["risk"])
+
+    def test_the_audit_reads_source_risk_and_options_of_every_recorded_request(self):
+        phone, env, report = run()
+        for app in ("alarm", "calendar", "notes"):
+            audit = next(s for s in report["steps"] if s["id"] == "audit." + app)
+            self.assertTrue(audit["ok"], (app, audit["checks"]))
+            self.assertEqual(5, len(audit["checks"]))
+        e = next(e for e in phone.consent_log if e["tool"].endswith("alarm_create"))
+        self.assertEqual("来自插件「alarm」 · 服务器「alarm」", e["source"])
+
+    def test_the_audit_catches_a_wrong_source_line_a_lowered_risk_and_an_always_allow_answer(self):
+        good = {"tool": "mcp__alarm__alarm__alarm_create", "risk": "WRITE", "source": L.source_line("alarm"), "options": ["ALLOW_ONCE", "ALLOW_FOR_SESSION", "DENY"],
+                "answeredWith": "ALLOW_FOR_SESSION", "end": "ANSWERED"}
+        self.assertTrue(all(c.ok for c in L.audit_consent([good], "alarm")))
+        for change, name in (({"source": "来自插件「evil」 · 服务器「alarm」"}, "source"), ({"risk": "READ"}, "risk"),
+                             ({"options": ["ALLOW_ONCE"]}, "offers"), ({"answeredWith": "ALWAYS_ALLOW"}, "answered"), ({"end": "TIMED_OUT"}, "answered")):
+            checks = L.audit_consent([dict(good, **change)], "alarm")
+            self.assertTrue(any(not c.ok and name in c.name for c in checks), (name, [c for c in checks if not c.ok]))
+        high = dict(good, tool="mcp__alarm__alarm__alarm_delete", risk="HIGH", options=["ALLOW_ONCE", "ALLOW_FOR_SESSION", "DENY"], answeredWith="ALLOW_ONCE")
+        self.assertTrue(any(not c.ok and "HIGH" in c.name for c in L.audit_consent([high], "alarm")), "HIGH must not offer ALLOW_FOR_SESSION")
+
+    def test_a_declined_step_must_show_a_recorded_deny(self):
+        phone, env, report = run()
+        step = self.step(report, "alarm.denied")
+        recorded = [c for c in step["checks"] if "recorded and declined" in c["name"]]
+        self.assertEqual(1, len(recorded))
+        self.assertTrue(recorded[0]["ok"])
+        self.assertEqual("DENY", recorded[0]["actual"]["answeredWith"])
+
+    def test_the_second_set_enabled_call_goes_through_unasked_in_the_same_session(self):
+        phone, env, report = run()
+        step = self.step(report, "alarm.switch_on")
+        check = [c for c in step["checks"] if "asked once" in c["name"]]
+        self.assertEqual(1, len(check))
+        self.assertTrue(check[0]["ok"], check[0])
+
+    def test_recent_of_an_earlier_run_does_not_count(self):
+        phone = FakePhone()
+        phone.consent_log.append({"requestId": "old_1", "tool": "mcp__alarm__alarm__alarm_create", "risk": "WRITE", "source": "x", "options": [], "answeredWith": None, "end": "TIMED_OUT"})
+        _, _, report = run(phone)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
 
 
 class FailureReportingTest(unittest.TestCase):
@@ -189,7 +273,7 @@ class LiveRunTest(unittest.TestCase):
         plan = self.plan()
         plan["记一条关于新品发布的备忘，打上工作标签"] = lambda ph: []
         report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=plan), E.Options(live=True), log=lambda m: None)
-        self.assertEqual({"live.notes"}, failed(report))
+        self.assertEqual({"live.notes", "audit.notes"}, failed(report), "the audit also notices that nothing was ever confirmed for notes")
 
     def test_the_result_never_contains_a_key(self):
         report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=self.plan()), E.Options(live=True), log=lambda m: None)
