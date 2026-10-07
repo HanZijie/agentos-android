@@ -64,6 +64,12 @@ enum class PluginStatus {
 
     /** 签名变了：已停用，需要用户重新确认（[PluginScanLogic.confirmSignature]）；确认之前没有任何服务器可用。 */
     SIGNATURE_CHANGED,
+
+    /**
+     * 没有这个 App 的签名记录（持久化的记忆丢失，[PluginScanLogic.scan] 的 `previous == null`）：无法判断签名有没有变过，
+     * 一律当作没确认过——已停用，需要用户重新确认；确认之前没有任何服务器可用。自带插件不受影响。
+     */
+    SIGNATURE_UNCONFIRMED,
 }
 
 /** 为什么是 [PluginStatus.UNAVAILABLE]。 */
@@ -158,23 +164,36 @@ sealed interface RegistryEvent {
     /** 升级后插件名变了：旧名字的策略已清掉，新名字按“第三方默认关闭”处理。 */
     data class Renamed(override val pluginId: String, val oldName: String, val newName: String?) : RegistryEvent
 
+    /**
+     * 持久化的记忆丢失（`scan(previous = null)`）：全部第三方插件变成 [PluginStatus.SIGNATURE_UNCONFIRMED]，策略清空并停用。
+     * 每个第三方插件另有一条 [Revoke]（reason = [RevokeReason.MEMORY_LOST]）。插件页要显示原因。[pluginId] 为空串（不针对某个插件）。
+     */
+    data object MemoryLost : RegistryEvent {
+        override val pluginId: String = ""
+    }
+
     /** **明确的作废事件**：关闭 [pluginId] 已有的全部 MCP 连接，撤销它的全部授权（[name] 是策略里用的插件名）。 */
     data class Revoke(override val pluginId: String, val name: String?, val reason: RevokeReason) : RegistryEvent
 }
 
-enum class RevokeReason { SIGNATURE_CHANGED, UNINSTALLED, RENAMED }
+enum class RevokeReason { SIGNATURE_CHANGED, UNINSTALLED, RENAMED, MEMORY_LOST }
 
 /** 持久化的最少信息：扫描要和“上一次”比较的东西（其余每次从已安装的 App 重新读）。 */
 data class PersistedPlugin(
     val id: String,
     val packageName: String,
     val name: String?,
-    /** 被信任的签名：第一次看到时记下，用户确认新签名后更新。 */
+    /** 被信任的签名：第一次看到时记下，用户确认新签名后更新；[UNCONFIRMED]（空串）表示记忆丢失后还没有确认。 */
     val trustedSigner: String,
     /** 上一次扫描观察到的签名：用来只在**变化的那一次**发出 [RegistryEvent.SignatureChanged]。 */
     val observedSigner: String,
     val versionCode: Long,
-)
+) {
+    companion object {
+        /** [trustedSigner] 的特殊值：记忆丢失后重建的记录，签名还没有被用户确认过。 */
+        const val UNCONFIRMED = ""
+    }
+}
 
 /** 扫描结果。 */
 data class ScanResult(

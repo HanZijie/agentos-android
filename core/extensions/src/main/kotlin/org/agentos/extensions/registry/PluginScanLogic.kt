@@ -34,6 +34,12 @@ import org.agentos.runtime.broker.PolicyScope
  * 7. 插件名必须唯一：同名时自带插件优先，其次是原来就占着这个名字的，再其次是 id 较小的；其余标为不可用（NAME_CONFLICT）。
  *    `user.` 开头的名字保留给用户配置的第三方 MCP（4.3），也标为 NAME_CONFLICT。
  *
+ * 8. **记忆丢失**（`previous == null`）：无法判断签名有没有变过，所有第三方插件一律当作没确认过——
+ *    状态 [PluginStatus.SIGNATURE_UNCONFIRMED]（没有可用的服务器），策略清空并把 plugin 级 enabled 设为 false，
+ *    发出一条 [RegistryEvent.MemoryLost] 和每个第三方插件的 [RegistryEvent.Revoke]（[RevokeReason.MEMORY_LOST]）。
+ *    新的记忆里它们的被信任签名是 [PersistedPlugin.UNCONFIRMED]，用户确认（[confirmSignature]）之后恢复可用，仍然停用。
+ *    自带插件不受影响；清单被拒绝、assets 缺失的插件仍然是不可用（原因更根本）。
+ *
  * 不可用的插件**留在注册表里**（带原因），插件页要显示，不静默丢弃。
  */
 object PluginScanLogic {
@@ -42,24 +48,28 @@ object PluginScanLogic {
 
     /**
      * @param views 当前已安装的、带 PLUGIN 锚点 Service 的 App
-     * @param previous 上一次保存的记忆
+     * @param previous 上一次保存的记忆。**读不出来（文件丢了、版本缺失、结构坏）时传 null**，不要传空记忆：
+     *   空记忆表示“没装过任何插件”，会把当前的签名当作可信；null 表示“记忆丢失”，此时所有第三方插件按
+     *   [PluginStatus.SIGNATURE_UNCONFIRMED] 处理（见类说明第 8 条）。调用方不需要自己想该怎么办。
      * @param policy 当前用户策略
      * @param builtinPackages AgentOS 自带插件所在的包（通常只有 AgentOS App 自己）
      */
     fun scan(
         views: List<InstalledAppView>,
-        previous: PersistedRegistry,
+        previous: PersistedRegistry?,
         policy: ApprovalPolicy,
         builtinPackages: Set<String> = emptySet(),
     ): ScanResult {
-        val prevById = previous.plugins.associateBy { it.id }
-        var drafts = views.sortedBy { it.identity.packageName }.flatMap { view -> draftsOf(view, prevById, builtinPackages) }
+        val memoryLost = previous == null
+        val prevById = previous?.plugins.orEmpty().associateBy { it.id }
+        var drafts = views.sortedBy { it.identity.packageName }.flatMap { view -> draftsOf(view, prevById, builtinPackages, memoryLost) }
         drafts = resolveNames(drafts, prevById)
 
         var newPolicy = policy
         val events = ArrayList<RegistryEvent>()
         val persisted = ArrayList<PersistedPlugin>()
         val records = ArrayList<PluginRecord>()
+        if (memoryLost) events += RegistryEvent.MemoryLost
 
         for (d in drafts.sortedBy { it.record.id }) {
             val rec = d.record
@@ -68,10 +78,16 @@ object PluginScanLogic {
             val eligible = d.ownsName // 清单合格、名字归它
             val signer = rec.identity.signerDigest
 
-            if (prior == null) {
+            if (memoryLost) {
+                // 没有任何记录可比：第三方插件一律未确认，策略清空并停用；不发 Added（它们不是新装的）
+                if (!rec.builtin) {
+                    events += RegistryEvent.Revoke(rec.id, name, RevokeReason.MEMORY_LOST)
+                    if (name != null) newPolicy = newPolicy.cleared(PolicyScope.Plugin(name)).withEnabled(PolicyScope.Plugin(name), false)
+                }
+            } else if (prior == null) {
                 events += RegistryEvent.Added(rec.id, name)
             } else {
-                if (!rec.builtin && signer != rec.trustedSigner && signer != prior.observedSigner) {
+                if (!rec.builtin && rec.trustedSigner != PersistedPlugin.UNCONFIRMED && signer != rec.trustedSigner && signer != prior.observedSigner) {
                     val who = name ?: prior.name
                     events += RegistryEvent.SignatureChanged(rec.id, who, prior.observedSigner, signer)
                     events += RegistryEvent.Revoke(rec.id, who, RevokeReason.SIGNATURE_CHANGED)
@@ -94,7 +110,7 @@ object PluginScanLogic {
 
         val currentIds = drafts.map { it.record.id }.toSet()
         val namesInUse = drafts.filter { it.ownsName }.mapNotNull { it.record.name }.toSet()
-        for (gone in previous.plugins.filter { it.id !in currentIds }.sortedBy { it.id }) {
+        for (gone in previous?.plugins.orEmpty().filter { it.id !in currentIds }.sortedBy { it.id }) {
             events += RegistryEvent.Removed(gone.id, gone.name)
             events += RegistryEvent.Revoke(gone.id, gone.name, RevokeReason.UNINSTALLED)
             if (gone.name != null && gone.name !in namesInUse) newPolicy = newPolicy.cleared(PolicyScope.Plugin(gone.name))
@@ -114,7 +130,7 @@ object PluginScanLogic {
 
     private class Draft(val record: PluginRecord, val ownsName: Boolean)
 
-    private fun draftsOf(view: InstalledAppView, prev: Map<String, PersistedPlugin>, builtinPackages: Set<String>): List<Draft> {
+    private fun draftsOf(view: InstalledAppView, prev: Map<String, PersistedPlugin>, builtinPackages: Set<String>, memoryLost: Boolean): List<Draft> {
         val anchors = view.services.filter { it.isPluginAnchor }
         if (anchors.isEmpty()) return emptyList()
         val dirs = anchors.mapNotNull { it.assetsDir?.takeIf(String::isNotEmpty) }.distinct().sorted()
@@ -124,7 +140,7 @@ object PluginScanLogic {
             val id = "$packageName/"
             return listOf(
                 Draft(
-                    base(id, null, view, prev[id], builtin).copy(
+                    base(id, null, view, prev[id], builtin, memoryLost).copy(
                         status = PluginStatus.UNAVAILABLE,
                         unavailableReason = UnavailableReason.ASSETS_MISSING,
                         problems = listOf(PluginProblem("assets_missing", "插件的 Service 没有声明 org.agentos.plugin.assets，找不到插件包")),
@@ -133,25 +149,29 @@ object PluginScanLogic {
                 ),
             )
         }
-        return dirs.map { dir -> draftOf(view, dir, prev["$packageName/$dir"], builtin) }
+        return dirs.map { dir -> draftOf(view, dir, prev["$packageName/$dir"], builtin, memoryLost) }
     }
 
-    private fun base(id: String, name: String?, view: InstalledAppView, prior: PersistedPlugin?, builtin: Boolean): PluginRecord {
+    private fun base(id: String, name: String?, view: InstalledAppView, prior: PersistedPlugin?, builtin: Boolean, memoryLost: Boolean): PluginRecord {
         val signer = view.identity.signerDigest
         return PluginRecord(
             id = id,
             name = name,
             identity = view.identity,
-            trustedSigner = if (builtin) signer else prior?.trustedSigner ?: signer,
+            trustedSigner = when {
+                builtin -> signer
+                memoryLost -> PersistedPlugin.UNCONFIRMED
+                else -> prior?.trustedSigner ?: signer
+            },
             builtin = builtin,
             status = PluginStatus.READY,
         )
     }
 
-    private fun draftOf(view: InstalledAppView, dir: String, prior: PersistedPlugin?, builtin: Boolean): Draft {
+    private fun draftOf(view: InstalledAppView, dir: String, prior: PersistedPlugin?, builtin: Boolean, memoryLost: Boolean): Draft {
         val id = "${view.identity.packageName}/$dir"
         val assets = view.assets[dir]
-        val skeleton = base(id, null, view, prior, builtin)
+        val skeleton = base(id, null, view, prior, builtin, memoryLost)
         if (assets?.pluginJson == null) {
             return Draft(
                 skeleton.copy(
@@ -200,13 +220,16 @@ object PluginScanLogic {
         }
         val nothingUsable = declaredServers > 0 && usable.isEmpty() && manifest.skills.isEmpty() && manifest.hooks == null
 
-        val signerChanged = !builtin && view.identity.signerDigest != skeleton.trustedSigner
+        val unconfirmed = !builtin && skeleton.trustedSigner == PersistedPlugin.UNCONFIRMED
+        val signerChanged = !builtin && !unconfirmed && view.identity.signerDigest != skeleton.trustedSigner
         val status = when {
             nothingUsable -> PluginStatus.UNAVAILABLE
+            unconfirmed -> PluginStatus.SIGNATURE_UNCONFIRMED
             signerChanged -> PluginStatus.SIGNATURE_CHANGED
             else -> PluginStatus.READY
         }
         if (signerChanged) problems += PluginProblem("signature_changed", "这个 App 的签名变了：已停用，需要重新确认后才能启用")
+        if (unconfirmed) problems += PluginProblem("signature_unconfirmed", "没有这个 App 的签名记录（记忆丢失）：已停用，需要重新确认后才能启用")
         if (nothingUsable) problems += PluginProblem("no_usable_server", "声明的服务器都不能用，插件没有可用的内容")
 
         return Draft(
