@@ -16,6 +16,7 @@ class AgentScenarioActivity : ScenarioActivityBase() {
         return AgentServiceScenarios(this, work, status).run(name, args)
             ?: ByokStoreScenarios(this, work, runId, status).run(name, args)
             ?: PiScenarios(this, work, status).run(name, args)
+            ?: LiveModelScenarios(this).run(name, args)
             ?: ChannelScenarios(this, work, runId, AppTarget(this), status).run(name, args)
     }
 }
