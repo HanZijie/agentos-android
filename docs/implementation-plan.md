@@ -457,7 +457,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 #### W14 Extension Host 与插件发现
 - [ ] `:ext` 进程：`ExtensionHostService`、`IExtensionHost`、`IExtensionCallback`
 - [x] 把 Agent Plugins 1.0 的 schema 副本放进 `core/protocol/agent-plugins-1.0/`（A7）
-- [x] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`（A7��30 项测试，含三个示例 App 的全部工具名）
+- [x] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`（A7，30 项测试，含三个示例 App 的全部工具名）
 - [x] `ApprovalPolicy`（A7，在 core/runtime 的 broker/，Broker 已按它决定可用与确认）
 - [ ] `AppPluginScanner`（检查 Service 属于本包、已导出、要求 `BIND_MCP_SERVICE`）、`ApprovalStore`（持久化）
 - [ ] 设置页：插件管理（启用、禁用、审批方式）
