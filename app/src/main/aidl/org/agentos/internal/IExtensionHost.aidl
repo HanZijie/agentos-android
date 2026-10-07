@@ -31,19 +31,18 @@ import org.agentos.internal.IExtensionCallback;
  *    "toolCount"}
  *   签名变化（signature_changed）或记忆丢失（signature_unconfirmed）时已停用，要用户先 confirmSignature 再启用。
  *
- * 工具（listTools 的一项；getCatalog 的 tools 也是这个形状）：
+ * 工具（listTools 的一项；getCatalog 的 tools 也是这个形状；目录本身由 core:extensions 的 ExtensionToolHost 生成，A9）：
  *   {"name"（交给模型的名字，ToolNaming：mcp__<插件名>__<服务器>__<工具>，见 extensions.md 5.3）, "pluginId",
- *    "source":{"plugin"（插件名）, "server", "tool"（服务器报告的原始工具名）}, "provider"（插件名）,
- *    "title"（可无）, "description", "inputSchema":{…},
- *    "annotations":{"readOnlyHint","destructiveHint","idempotentHint","openWorldHint"}（只列出服务器给了的）,
- *    "risk":"read"|"write"|"high"（RiskPolicy.effectiveRisk：默认 write，destructiveHint=true 升 high，readOnlyHint 不降级）,
+ *    "source":{"plugin"（插件名）, "server", "tool"（服务器报告的原始工具名）}, "provider"（插件 ID，与 pluginId 相同）,
+ *    "title"（可无）, "description"（截到 1,024 字符）, "inputSchema":{…},
+ *    "risk":"read"|"write"|"high"（RiskPolicy.effectiveRisk：默认 write，destructiveHint=true 升 high；只有自带插件的 readOnlyHint 降为 read）,
  *    "enabled": bool, "approval":"ask"|"always"（ApprovalPolicy.resolve 的结果）, "mayAlwaysAllow": bool（RiskPolicy.mayAlwaysAllow）}
- *   描述、schema、注解都来自第三方，是不可信输入。
+ *   描述、schema 都来自第三方，是不可信输入。
  *
  * 审批方式参数 mode：ask | always | ""（清除这一层，沿用上一层）。
  */
 interface IExtensionHost {
-    /** 本接口的版本：1。 */
+    /** 本接口的版本：2（v2 加了 refreshTools）。 */
     int getVersion();
 
     // ---------------------------------------------------------------- 插件管理（设置页，D）
@@ -67,7 +66,10 @@ interface IExtensionHost {
     /** 插件级审批方式（这个插件下没有单独设置的工具都按它），返回更新后的插件 JSON。错误 code：not_found、bad_mode。 */
     String setPluginApproval(String pluginId, String mode);
 
-    /** 一个插件的全部工具（含被禁用的），JSON 数组。插件已启用但还没连接过时会连接一次去拉取。错误 code：not_found、unavailable。 */
+    /**
+     * 一个插件的全部工具（含被禁用的），JSON 数组。插件已启用但还没有工具时先等一次刷新（最多 10 秒）。错误 code：not_found、unavailable。
+     * 被工具级禁用的工具只在 :ext 进程内记得：:ext 重建后，要等它的服务器再连上一次才重新列出。
+     */
     String listTools(String pluginId);
 
     /** 启用或禁用一个工具（toolName 为目录里的名字），返回更新后的工具 JSON。错误 code：not_found。 */
@@ -93,15 +95,18 @@ interface IExtensionHost {
     void unsubscribe(IExtensionCallback callback);
 
     /**
-     * 当前目录：{"version": long, "tools":[工具…], "policy":{ApprovalPolicy.toJson()}}。
-     * tools 只含插件级启用的插件里的工具（工具级禁用的也在里面，由 Broker 按 policy 过滤）。
-     * 只在 onCatalogChanged 之后来取（目录可能较大，不放在单向回调里）。
+     * 当前目录：{"version": long, "tools":[工具…], "policy":{ApprovalPolicy.toJson()}, "policyFailClosed": bool}。
+     * tools 只含现在可用的工具（插件 ready、插件 / 服务器 / 工具都启用，连上过至少一次）；Broker 仍按 policy 再查一次，
+     * :ext 执行前也再查一次。policyFailClosed = 策略文件读不出来又没有可用的副本：第三方插件一律当作禁用
+     * （运行时的镜像要设 unlistedPluginsEnabled=false，toJson 不带这个状态）。
+     * version 在目录或策略任一变化时加一（:ext 重建后从头开始）。只在 onCatalogChanged 之后来取（目录可能较大，不放在单向回调里）。
      */
     String getCatalog();
 
     /**
      * 发起一次工具调用。立即返回：true = 已受理，结果稍后经 callback.onToolResult(callId, …) 交回（恰好一次）；
      * false = 没有受理（工具不在目录里或已禁用、callId 重复），这时不会有回调，调用确定没有发出。
+     * 请求格式不对抛 agentos.ext.bad_request（同样确定没有发出）。
      * requestJson：{"name"（目录里的名字）, "arguments":{…}, "timeoutMs": long（0 = 不限）,
      *   "sessionId", "taskId", "toolCallId"（只用于诊断和审计）}
      * 受理之后如果 :ext 进程死亡，运行时按“结果未知”处理（已受理的调用可能已经发给插件）。
@@ -113,4 +118,12 @@ interface IExtensionHost {
 
     /** 诊断 JSON：各插件、各服务器的连接状态与计数（不含参数和结果内容）。 */
     String getDiagnostics();
+
+    // ---------------------------------------------------------------- v2
+
+    /**
+     * 等“还没有工具缓存”的可用服务器刷新完，最多 timeoutMs（ExtensionToolHost.refreshNow）；force = 全部可用服务器都重新取。
+     * 返回 {"refreshed":[{"pluginId","server"}], "failed":[…], "timedOut": bool}。没刷新完的继续在后台刷新。
+     */
+    String refreshTools(long timeoutMs, boolean force);
 }

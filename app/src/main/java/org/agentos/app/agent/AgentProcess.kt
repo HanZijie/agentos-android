@@ -67,7 +67,10 @@ class AgentProcess private constructor(val app: Context) {
         log = runtimeLog,
     )
     val environment = AndroidEnvironment()
-    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog)
+
+    /** Extension Host（`:ext`）的代理：工具目录、调用、用户策略的镜像（C7b，docs/extensions.md 第 9 节）。 */
+    val extensions = ExtensionClient(app, runtimeLog)
+    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals)
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
     val engine: RuntimeEngine = AgentRuntimes.create(hostPort, PiAgentCores.create(app, hostPort))
@@ -136,6 +139,8 @@ class AgentProcess private constructor(val app: Context) {
     init {
         AcpAndroid.ensureInitialized()
         installCrashHandler()
+        // BIND_AUTO_CREATE：:ext 随 :agent 存活；目录和策略到了之后才有第三方工具（之前 fail closed）
+        extensions.start()
         // 先订阅任务数，再开始恢复：恢复期间登记的任务不会漏掉
         scope.launch(CoroutineName("run-state")) {
             runtime.runState.collect { lifecycle.onTasksChanged() }
@@ -312,6 +317,7 @@ class AgentProcess private constructor(val app: Context) {
                 .put("runState", JSONObject().put("activeTasks", rs.activeTasks).put("queuedTasks", rs.queuedTasks)
                     .put("recoveryPending", rs.recoveryPending).put("core", rs.core.toString())
                     .put("lastError", rs.lastError?.code?.wire ?: JSONObject.NULL)))
+            .put("extensions", extensions.stats())
             .put("startCommands", JSONArray(startCommands.toList()))
             .put("lastExit", lastExit ?: JSONObject.NULL)
             .put("heartbeat", JSONObject()
