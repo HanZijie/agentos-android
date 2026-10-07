@@ -34,7 +34,12 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class ConsentBridge(private val context: Context, private val log: (String) -> Unit = { Log.w(TAG, it) }) : ConsentSurface {
     @Volatile private var coordinator: ConsentCoordinator? = null
-    private val listeners = RemoteCallbackList<IConsentListener>()
+    /** 监听者所在的主进程死了（被杀、崩溃）时，还没答复的请求转成通知：用户不会因为界面没了就收不到确认。 */
+    private val listeners = object : RemoteCallbackList<IConsentListener>() {
+        override fun onCallbackDied(callback: IConsentListener?) {
+            if (!hasListener()) pending().forEach { notify(it) }
+        }
+    }
     private val notified = ConcurrentHashMap<String, Int>()
 
     /** 协调器要先有界面才能构造，所以晚一步接上。 */
