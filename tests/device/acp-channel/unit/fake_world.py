@@ -3,6 +3,8 @@
 It models what the driver touches, with the same shapes as the real thing:
   - the three apps' SQLite databases (same tables and columns as the real stores) changed by simple Python versions of the tools, and the apps' debug
     `dump` / `reset` receivers with the real JSON shapes (the driver never reads the databases: it has no way to, a real phone has no sqlite3);
+  - the catalog the model is offered: after `enable` / `disable` the plugins' tools appear and disappear one plugin after the other, not together
+    (`list_delay` / `drop_delay`: how many catalog reads later a plugin's tools show up / go away; 0 = at once, the default), as the real host does;
   - the calendar's single armed reminder alarm: the earliest upcoming reminder of all events, re-armed after a data change with a lag (the real app
     debounces by 250 ms), so a dump read right after a change can still show the old alarm;
   - AgentOS: plugin enable/disable, catalog with risk levels (ExtensionDebugReceiver), auto-consent (ConsentDebugReceiver), desktop gateway;
@@ -36,11 +38,15 @@ class FakePhone:
         self.dir = tempfile.mkdtemp(prefix="fake-phone-")
         self.today = today
         self.faults = set(faults or [])
-        self.enabled = {s.package: False for s in L.SAMPLES.values()}
+        self._enabled = {s.package: False for s in L.SAMPLES.values()}
         self.consent_mode = "off"
         self.consent_log = []       # ConsentDebugReceiver `recent` entries, oldest first (max 50)
         self.remembered = set()     # (session id, tool) answered with "allow for this session"
         self._req = 0
+        self.visible = set()        # packages whose tools are in the catalog right now (enabled, and the host has listed them)
+        self.list_delay = {}        # package -> catalog reads after enable until its tools appear
+        self.drop_delay = {}        # package -> catalog reads after disable until its tools are gone
+        self._pending = []          # [package, appears(bool), reads left]
         self.armed = None           # the calendar's armed reminder: {series, start_ms, minutes_before, fire_ms}
         self.dirty = False          # a data change the calendar has not re-armed for yet
         self.rearm_lag = 0          # dump reads that still show the old alarm after a change
@@ -51,6 +57,17 @@ class FakePhone:
         self.model_requests = []
         self._next_alarm = 1
         self._init_dbs()
+
+    @property
+    def enabled(self):
+        """package -> the user switched the plugin on. Assigning a whole dict (a test arranging the phone) also makes those plugins' tools visible at once."""
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value):
+        self._enabled = dict(value)
+        self.visible = {pkg for pkg, on in self._enabled.items() if on}
+        self._pending = []
 
     # ------------------------------------------------------------------ databases
     def db_path(self, name):
@@ -154,18 +171,43 @@ class FakePhone:
             if s is None:
                 return {"ok": False, "error": "agentos.ext.not_found: unknown plugin"}
             self.enabled[s.package] = op == "enable"
+            self._schedule(s.package, op == "enable")
             return {"ok": True, "plugin": self._plugin_json(s)}
         if op == "catalog":
+            self._tick()
             return {"ok": True, "catalog": {"version": 1, "tools": [{"name": n, "risk": r.lower(), "enabled": True} for n, r in self.catalog().items()]}}
         if op == "wait_catalog":
-            present = ex.get("name") in self.catalog()
-            return {"ok": True, "met": present != bool(ex.get("absent", False))}
+            # like the app: waits for catalog changes until the tool is (or is no longer) there; nothing left to change = it would wait out the timeout
+            want_absent = bool(ex.get("absent", False))
+            for _ in range(200):        # the app's timeout, as a number of change cycles
+                if (ex.get("name") in self.catalog()) != want_absent:
+                    return {"ok": True, "met": True}
+                if not self._pending:
+                    return {"ok": True, "met": False}
+                self._tick()
+            return {"ok": True, "met": (ex.get("name") in self.catalog()) != want_absent}
         return {"ok": False, "error": "unknown op: %s" % op}
+
+    def _schedule(self, package, appears):
+        self._pending = [x for x in self._pending if x[0] != package]
+        delay = (self.list_delay if appears else self.drop_delay).get(package, 0)
+        if delay <= 0:
+            (self.visible.add if appears else self.visible.discard)(package)
+        else:
+            self._pending.append([package, appears, delay])
+
+    def _tick(self):
+        """One catalog change cycle: every pending appearance / disappearance comes one read closer."""
+        for item in list(self._pending):
+            item[2] -= 1
+            if item[2] <= 0:
+                (self.visible.add if item[1] else self.visible.discard)(item[0])
+                self._pending.remove(item)
 
     def catalog(self):
         out = {}
         for s in L.SAMPLES.values():
-            if not self.enabled[s.package]:
+            if s.package not in self.visible:
                 continue
             for t in s.tools + ([] if s.name != "alarm" else ["alarm_snooze"]):
                 if "hide-" + t in self.faults:
