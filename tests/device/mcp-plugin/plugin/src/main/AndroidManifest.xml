@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="AgentOS MCP test plugin">
+
+        <!-- 插件 App 的标准写法（docs/extensions.md 4.1）：导出、要求 BIND_MCP_SERVICE、带 PLUGIN action 与插件包目录 -->
+        <service
+            android:name=".TestMcpService"
+            android:exported="true"
+            android:permission="org.agentos.permission.BIND_MCP_SERVICE">
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.PLUGIN" />
+            </intent-filter>
+            <meta-data
+                android:name="org.agentos.plugin.assets"
+                android:value="agent-plugin" />
+        </service>
+
+        <!--
+          自测入口（只在测试 App 里）：adb shell am broadcast -n org.agentos.test.mcp.plugin/.SelfTestReceiver
+          要求 DUMP（只有 shell 和系统能发）；运行在单独的进程，所以对自己服务的调用是真正跨进程的 Binder。
+        -->
+        <receiver
+            android:name=".SelfTestReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":selftest" />
+    </application>
+</manifest>

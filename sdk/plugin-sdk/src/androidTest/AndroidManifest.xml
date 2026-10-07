@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- 跨进程回环：服务在 :mcp 进程，测试在插桩进程，中间是真实的 binder-channel-v1。同一个 App，不需要 BIND_MCP_SERVICE -->
+        <service
+            android:name="org.agentos.plugin.test.LoopbackMcpService"
+            android:exported="false"
+            android:process=":mcp" />
+    </application>
+</manifest>

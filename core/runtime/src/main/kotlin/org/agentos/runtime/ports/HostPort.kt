@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.json.JsonObject
+import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.errors.ErrorInfo
 
@@ -34,6 +35,12 @@ interface HostPort {
 
     /** 工具调用的用户确认（ConsentCoordinator，W16）。 */
     val consent: ConsentPort
+
+    /**
+     * 用户的工具策略（按插件、服务器、工具启用或禁用，审批方式；W16，界面是 D 的插件管理页）。
+     * 有默认实现（全部启用、每次确认），已有的 HostPort 实现不用改；Extension Host 接上之后覆盖它。
+     */
+    val approvals: ApprovalPolicyPort get() = ApprovalPolicyPort.DEFAULT
 
     /** Store 用的 SQLite。 */
     val storage: StoragePort
@@ -98,8 +105,11 @@ data class ToolCatalog(val version: Long, val tools: List<CatalogTool>) {
  * 目录里的一个工具。
  *
  * @property name 交给模型的工具名（core/extensions 的 ToolNaming 生成，W14）。
- * @property risk 风险等级（RiskPolicy，W16）；MCP 工具默认 WRITE，注解只能调高。
+ * @property risk 风险等级，**已经算好**：Extension Host 用 `RiskPolicy.effectiveRisk` 把默认等级（MCP 工具 WRITE）和服务端注解
+ *   （只能调高）合成后放进来；用户策略（启用、审批方式）不在这里，由 Broker 按 [source] 查 `HostPort.approvals`。
  * @property provider 提供方：插件 ID，或 "agentos"（自带插件、内置 read_skill）。只用于展示和审计。
+ * @property source 这个工具来自哪个插件的哪个服务器（MCP 的原始工具名）：用户策略（ApprovalPolicy）据此匹配。
+ *   宿主层自己注册的、不属于任何插件的工具为 null，不受用户策略约束。
  */
 data class CatalogTool(
     val name: String,
@@ -108,7 +118,15 @@ data class CatalogTool(
     val risk: ToolRisk = ToolRisk.WRITE,
     val provider: String,
     val title: String? = null,
+    val source: ToolSource? = null,
 )
+
+/**
+ * 一个 MCP 工具的来源：插件名、服务器名、MCP 服务器报告的**原始**工具名（不是 ToolNaming 处理后的名字——
+ * 处理后的名字会因为目录里别的工具而变，策略要在这种变化下保持不变）。
+ */
+data class ToolSource(val plugin: String, val server: String, val tool: String)
+
 
 /** docs/architecture.md F5 的三级。 */
 enum class ToolRisk { READ, WRITE, HIGH }
@@ -137,7 +155,13 @@ sealed interface ToolInvocationResult {
 interface SkillPort {
     val catalog: StateFlow<SkillCatalog>
 
-    /** 读取 Skill 的 SKILL.md（[path] 为 null）或其中的附属文件。内容是不可信输入。 */
+    /**
+     * 读取 Skill 的 SKILL.md（[path] 为 null）或同一 Skill 目录里的附属文件（[path] 相对 Skill 目录）。内容是**不可信输入**。
+     *
+     * @param skillId [SkillSummary.id]
+     * @throws NoSuchElementException 没有这个 Skill（包括插件被禁用、不再可用），或这个 Skill 里没有这个文件
+     * @throws IllegalArgumentException [path] 不合法（路径穿越、绝对路径、控制字符…）或文件不是文本
+     */
     suspend fun read(skillId: String, path: String? = null): SkillContent
 
     companion object {
@@ -156,8 +180,16 @@ data class SkillCatalog(val version: Long, val skills: List<SkillSummary>) {
     }
 }
 
+/**
+ * 目录里的一个 Skill。[name]、[description] 来自插件（**第三方文本，不可信**）。
+ *
+ * @property id 唯一的标识，`read_skill` 用它：名字不冲突时就是 [name]，冲突时是 `<插件名>:<Skill 名>`
+ * @property name Skill 自己的名字（SKILL.md 的 frontmatter）
+ * @property provider 来源插件的名字
+ */
 data class SkillSummary(val id: String, val name: String, val description: String, val provider: String)
 
+/** [truncated] 为 true 表示内容超过单次读取上限，已经截断。 */
 data class SkillContent(val text: String, val truncated: Boolean = false)
 
 // ---------------------------------------------------------------- Hook
@@ -223,6 +255,7 @@ interface ConsentPort {
 /**
  * @property argumentsPreview 给用户看的参数摘要：宿主层已脱敏并截断（不超过 2,000 字符）。
  * @property rememberable 是否提供“本会话内不再询问”（高风险工具为 false）。
+ * @property source 工具来自哪个插件的哪个服务器（确认框显示“来自插件 X”用）；不属于任何插件的工具为 null。
  */
 data class ConsentRequest(
     val requestId: String,
@@ -236,6 +269,7 @@ data class ConsentRequest(
     val argumentsPreview: String,
     val rememberable: Boolean,
     val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+    val source: ToolSource? = null,
 ) {
     companion object {
         /** architecture F5：60 秒无响应视为拒绝。 */
@@ -249,6 +283,23 @@ sealed interface ConsentDecision {
     data class Deny(val reason: DenyReason) : ConsentDecision
 
     enum class DenyReason { USER, TIMEOUT, UNAVAILABLE }
+}
+
+// ---------------------------------------------------------------- 用户的工具策略
+
+/**
+ * 用户的工具策略的来源。Extension Host 持久化 [ApprovalPolicy]（`toJson` 的格式），改动后发布新值；
+ * Broker 每次调用前读 [policy] 的当前值，所以用户在插件页里禁用一个工具或改审批方式，对正在进行的任务从下一次调用起生效。
+ */
+interface ApprovalPolicyPort {
+    val policy: StateFlow<ApprovalPolicy>
+
+    companion object {
+        /** 没有用户策略：全部启用、每次确认。 */
+        val DEFAULT: ApprovalPolicyPort = object : ApprovalPolicyPort {
+            override val policy: StateFlow<ApprovalPolicy> = MutableStateFlow(ApprovalPolicy.DEFAULT).asStateFlow()
+        }
+    }
 }
 
 // ---------------------------------------------------------------- 存储

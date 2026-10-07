@@ -45,7 +45,7 @@ agentos-android/
 │   │   ├── pi/{PiAdapter,PiEventMapper,JsEngine,PiRuntime,ModelCatalog}.kt   [W3] 新写：Pi 适配层；JsEngine 是 QuickJS 的抽象，Android 和电脑上各一个实现；PiRuntime 是常驻泵
 │   │   ├── net/HostFetch.kt                                       [W3] 新写：给 Pi 用的 fetch（OkHttp），按 endpoint 注入 key，错误分为可重试和不可重试
 │   │   ├── broker/CapabilityBroker.kt                             [W2] 按目录校验工具名；[W16] 接 Extension Host，处理超时和取消
-│   │   ├── broker/RiskPolicy.kt                                   [W16] 新写
+│   │   ├── broker/{RiskPolicy,ApprovalPolicy}.kt                  [W16 的策略部分，A7 已完成] 风险等级与确认决定；按插件、服务器、工具的启用与审批设置（JSON version=1）
 │   │   ├── hooks/HookPoints.kt                                    [W22] 新写：在会话、prompt、工具调用（Pi 的 beforeToolCall / afterToolCall）、停止等节点发出 Hook 事件，按决定执行
 │   │   ├── skills/SkillPrompt.kt                                  [W20] 新写：把 Skill 目录写进系统提示；内置 read_skill 工具
 │   │   ├── ports/{HostPort,AgentCore}.kt                          [W2] 新写：HostPort 是宿主层对 Android 的全部依赖（工具、Skill、Hook、确认、存储、密钥、时钟）；AgentCore 是宿主层对 Agent 循环的依赖，由 Pi 适配层实现，测试时用假实现
@@ -62,15 +62,16 @@ agentos-android/
 │   │   ├── build.mjs                                [W3] ← agenriod runtime/build.mjs：esbuild 打成单文件，输出到 app/src/main/assets/pi-agent.js；同时从 pi-ai 的模型目录导出 model-catalog.json，供设置页的厂商预设使用
 │   │   └── test/                                    [W3] 用假宿主对打包结果做契约测试，Node 和 QuickJS 各跑一遍
 │   └── extensions/                                  # 扩展的纯逻辑（Kotlin/JVM）
-│       ├── ManifestReader.kt                        [W14] plugin.json、mcp.json、extensions."org.agentos"
-│       ├── ToolNaming.kt                            [W14]
+│       ├── ManifestReader.kt                        [W14] plugin.json、mcp.json、extensions."org.agentos"（A7 已完成）
+│       ├── ToolNaming.kt                            [W14]（A7 已完成）
+│       ├── registry/{PluginScanLogic,PersistedRegistry,ApprovalStore}.kt   [W14] 插件注册表的纯 JVM 部分：发现结果 → 注册表与事件（签名变化、卸载、升级、第三方默认关闭）、记忆文件、用户策略的原子持久化与 fail closed（A8 已完成）；依赖 core:runtime 的 ApprovalPolicy
 │       ├── PackageValidator.kt                      [W18]
 │       ├── hooks/{HookMatcher,DecisionMerger}.kt    [W22]
 │       └── src/test/
 │
 ├── app/                                             # AgentOS App（普通 App，项目证书签名）：主进程 · :agent · :ext
 │   ├── src/main/AndroidManifest.xml                 # 定义 BIND_MCP_SERVICE、RUN_COMMANDS（signature）；导出 ACP 服务（:agent）；<queries> 声明插件发现 action；声明 :agent、:ext 进程
-│   ├── src/main/aidl/org/agentos/internal/          [W6] IAgentControl；[W14] IExtensionHost、IExtensionCallback（都不导出）
+│   ├── src/main/aidl/org/agentos/internal/          [W6] IAgentControl；[W14] IExtensionHost、IExtensionCallback（都不导出；AIDL 与 :ext 里的桩实现是 C7a，真实实现是 C7b）
 │   ├── src/main/assets/pi-agent.js                  [W3] 由 core/pi-runtime/build.mjs 生成，不手改，不进仓库；同目录的 model-catalog.json 同样是生成物
 │   ├── src/main/res/xml/network_security_config.xml   [W6，B4] 只对 127.0.0.1、localhost、::1 放行明文 HTTP（debug 与 release 相同，F9），与 HostFetch.LOOPBACK_HOSTS 一致
 │   ├── src/androidTest/                         [W6] 设备测试，跑在 :agent 进程（QuickJsEngine、PiAdapter 契约、冷启动、可选的真实端点）
@@ -94,10 +95,10 @@ agentos-android/
 │       │   └── supervisor/{SupervisorStatusReceiver,SupervisorStatus,SupervisorStatusStore}.kt   [W7] 接收 root 监督进程的状态广播（signature 权限保护），状态文件 key=value 与 toJson()；[W11] safe mode
 │       ├── ext/                                     # Extension Host，:ext 进程（设计见 docs/extensions.md）
 │       │   ├── ExtensionHostService.kt              [W14] IExtensionHost 的实现
-│       │   ├── registry/AppPluginScanner.kt         [W14] ← AgentManagerService.java 的发现与签名校验
+│       │   ├── registry/AppPluginScanner.kt         [W14] 薄适配层：PackageManager → `InstalledAppView`（queryIntentServices、createPackageContext 读 assets、签名摘要、监听包变化），调 `PluginScanLogic`，保存结果并执行 `Revoke` 事件 ← AgentManagerService.java
 │       │   ├── registry/{PackageImporter,PluginStore}.kt   [W18]
 │       │   ├── registry/UserMcpConfig.kt            [W19]
-│       │   ├── policy/ApprovalPolicy.kt             [W14] 按插件、服务器、工具的启用与审批设置
+│       │   ├── policy/                              [W14] 只剩策略文件的路径与接线（`ApprovalStore` 在 core/extensions，覆盖 HostPortImpl.approvals）和插件页的读写操作。`ApprovalPolicy` 本身在 core/runtime 的 broker/（Broker 要读），A7 已完成
 │       │   ├── policy/TrustStore.kt                 [W22] Hook 信任审核（按内容哈希）
 │       │   ├── mcp/{McpClientManager,ToolCatalog}.kt   [W15] 连接管理、工具目录
 │       │   ├── mcp/HttpMcpClient.kt                 [W19] 远端 Streamable HTTP，凭据用 Keystore 加密保存
@@ -206,7 +207,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 |---|---|---|
 | ACP Kotlin SDK | 固定为 `com.agentclientprotocol:acp:0.30.1`，Gradle 会解析到 JVM 变体 `acp-jvm`；客户端和 Agent 端都用它。R8 需要 `-dontwarn org.slf4j.**`（`acp-android` 的 consumer 规则带入）；运行时在 SDK 第一次记日志前设置 `kotlin-logging-to-android-native=true`，电脑上的测试设置 `kotlin-logging-to-jul=true` | 已在 Android 上完成编译、D8、R8 验证，S3 第二部分已在 API 35 / 36 / 37 模拟器上跑通 Binder 往返，见 [spikes/S3.md](spikes/S3.md)。SDK 没有声明 Android target，属于 JVM 兼容性落地。注意：正式包里的版本常量是 `0.30.1-dev-67`，不能拿它判断版本（`AcpSdkVersionLockTest` 检查的是 jar 名和 Transport 签名） |
 | ACP SDK 的 master 分支 | 不使用 | master 的 Transport API 已经改成 `TransportFrame` / `onFrame`，与 0.30.x 的 `JsonRpcMessage` / `onMessage` 不兼容。升级 SDK 要单独评估，改 `BinderAcpTransport` 并在真机上重跑 S3 |
-| MCP Kotlin SDK | 官方 `io.modelcontextprotocol:kotlin-sdk-client` / `kotlin-sdk-server`，版本在 S5 固定；同时固定它所支持的 MCP 协议修订版 | 撰写时查到的最新版 0.15.0 用 Kotlin 2.4、Ktor 3.5 构建。Kotlin 编译器只能读取比自己高一个小版本的库元数据，所以 S5 要一并决定整个工程的 Kotlin 版本 |
+| MCP Kotlin SDK | **不引入**（S5 结论，2026-10-07）：每个还在维护的版本都要求 kotlinx-serialization ≥ 1.9.0、kotlinx-io ≥ 0.8，与 ACP 0.30.1 冲突；`sdk/plugin-sdk` 自己实现 MCP 的 tools 子集，协议修订版 2025-06-18（兼容 2025-03-26、2024-11-05）。原先的设想是官方 `io.modelcontextprotocol:kotlin-sdk-client` / `kotlin-sdk-server` | 撰写时查到的最新版 0.15.0 用 Kotlin 2.4、Ktor 3.5 构建。Kotlin 编译器只能读取比自己高一个小版本的库元数据，所以 S5 要一并决定整个工程的 Kotlin 版本 |
 | Pi Agent core | `@earendil-works/pi-agent-core` 和 `@earendil-works/pi-ai` 固定 0.86.1；`pi-ai` 只打包 `anthropic-messages`、`openai-completions` 两个协议族，连同它们的官方 SDK（S8 时为 `@anthropic-ai/sdk` 0.124.0、`openai` 6.40.0、`typebox` 1.3.27）按 `package-lock.json` 锁定。S8 实测 `pi-agent.js` 压缩后 573 KB（gzip 147 KB），`model-catalog.json` 419 KB（APK 内约 26 KB） | 与 Profile 核对过的 Pi 主线版本一致；原型 agenriod 用 0.85.1 在 QuickJS 里跑通了上游 `Agent` 循环。2026-09 在电脑上用 0.85.1 试打包：只含 Agent 核心约 587 KB，加上 MiniMax、Anthropic、OpenAI、DeepSeek 四个预设约 1.9 MB，其中两个官方 SDK 占约 1.2 MB。Pi 还在 0.x，升级要单独评估，并重跑 S8 和契约测试 |
 | JS 引擎 | QuickJS，Kotlin 绑定 `io.github.dokar3:quickjs-kt` 固定 **1.0.15**（S8）；App 只打 `arm64-v8a` 的原生库（真机与本机 arm64 模拟器够用，需要 x86_64 模拟器时再加）；电脑上用同一个绑定的 JVM 变体 `quickjs-kt-jvm`，另可用 Node 的裸 `vm` 上下文跑快速契约测试 | 体积小，不需要 Node。1.0.15 用 Kotlin 2.4.10 构建，要求 Kotlin 编译器 ≥ 2.3；最后一个能配 Kotlin 2.2 的 1.0.5 遇到中文 + emoji 会挂住，不可用。`quickjs-kt-jvm` 只在 macOS arm64 上验证过，Linux x64 待 CI 跑一次 |
 | JS 打包 | esbuild；Node 只在构建机上使用 | 原型的 `build.mjs` 已经能把 Pi 打成 QuickJS 可以执行的单文件 |
@@ -214,7 +215,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 | 其他 Kotlin / Java 库 | kotlinx-coroutines **1.11.0**、kotlinx-serialization-json 1.7.3；OkHttp 4.12.0；JUnit 4.13.2；androidx.test runner 1.5.2 / ext-junit 1.1.5（设备测试） | coroutines 于 2026-09-29 由 1.9.0（acp-jvm-0.30.1.pom 的版本）升到 1.11.0：quickjs-kt 1.0.15 需要 ≥ 1.11.0，不显式升级时测试类路径会被悄悄解析成 1.11.0、主代码仍是 1.9.0；acp 0.30.1 在 1.11.0 上已用 tests/device/acp-channel 回归验证。有 quickjs-kt 的类路径上 kotlin-stdlib 解析为 2.4.10（编译器仍是 2.3.20） |
 | 支持的系统 | Android 15–17（API 35–37） | Android 17 已正式发布；真机验证覆盖这三个版本 |
 | 传输 | Android 上的 ACP 和 MCP 都走 `binder-channel-v1`；SDK 的 `StdioTransport` 只用于电脑上的测试 | 两种协议都是 JSON-RPC 消息流，共用一套通道 |
-| HTTP | 宿主层的网络出口（给 Pi 用的 `fetch`）用 OkHttp；MCP 远端客户端用 Ktor 加 OkHttp 引擎，不用 Ktor 的 Android 引擎 | 共用一套连接池和证书配置；HTTP 引擎版本在 S5 与 MCP SDK 一起固定 |
+| HTTP | 宿主层的网络出口（给 Pi 用的 `fetch`）用 OkHttp；MCP 远端客户端（W19）用 OkHttp 自己实现 Streamable HTTP，不引入 Ktor（S5 结论） | 共用一套连接池和证书配置 |
 | 存储 | SQLite（WAL），驱动 `androidx.sqlite` 2.7.1（W2 选定）：`core/runtime` 只依赖 `SQLiteDriver` 接口，电脑测试与 `:agent` 都用 `BundledSQLiteDriver`，共用同一套 schema | 运行时的事实都在 Store 里，测试必须覆盖真实的 SQL |
 | Agent Plugins schema | 固定 1.0.0 的副本，放在 `core/protocol/agent-plugins-1.0/` | 校验插件时不联网；升级到新版规范要单独评估 |
 
@@ -247,11 +248,13 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 | # | 状态 | 结论 | 还差什么 |
 |---|---|---|---|
-| S1 | 不需要设备的部分完成；root 模拟器（adb root，API 35 / 37）上 M1–M7 通过 | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降级、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁；`pm install` 的输入方式按 tmp → pipe → path → stdin → session 依次回退（模拟器上 path 被 SELinux 拒） | Magisk / KernelSU 真机（M1–M8，含 Play Protect） |
-| S2 | 监督契约 v0.1；root 模拟器（adb root，API 35 / 37）上 B0、K1、K2、K4、K5、T1、P1、B1（缩短为 10 分钟）通过 | [spikes/S2.md](spikes/S2.md)：判活看进程，心跳记录任务状态并用来发现短命进程（`boot` 字段必须等于 `Settings.Global.BOOT_COUNT`）；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起，包处于 stopped 时不拉起。**root 拉起前台服务按 `SYSTEM_UID` 豁免后台启动限制**，App 自己在后台被拒时由监督进程 1.9 s 内代为提升 | Magisk / KernelSU 真机（SELinux 上下文与 adb root 不同）；灭屏 30 分钟、24 小时驻留与内存；K3、K5b |
-| S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑） | 可用；通道参数已定 | API 35 / 36 / 37 真机 |
-| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort；OpenAI 兼容端点用 MiniMax 的 `https://api.minimax.cn/v1`（B7）在电脑和 Pixel_8a 的 `:agent` 上跑通对话、跨轮回忆、工具调用、abort，思考内容以 `<think>` 混在正文里（B8 处理） | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3 | 真机；MiniMax 国际预设（需要国际 key） |
-| S4–S7 | 未开始 | — | — |
+| S1 | 不需要设备的部分完成；root 模拟器（adb root，API 35 / 37）上 M1–M7 通过；**Pixel 8（Magisk 30.7，API 35）真机上刷入、重启安装（M1、M2 对应的正式模块路径）通过** | 安装规则写进 [spikes/S1.md](spikes/S1.md)：比较版本、核对 SHA-256、不降级、签名不符就停止；先等 `pm path android` 可用再装，不必等解锁；`pm install` 的输入方式按 tmp → pipe → path → stdin → session 依次回退（模拟器上 path 被 SELinux 拒） | KernelSU 真机；真机上的 M3–M5、M7、M8（含 Play Protect 界面） |
+| S2 | 监督契约 v0.1；root 模拟器（adb root，API 35 / 37）上 B0、K1、K2、K4、K5、T1、P1、B1（缩短为 10 分钟）通过；**Pixel 8（Magisk 30.7）真机上正式模块的开机拉起、有任务被杀、崩溃循环进 / 出 safe mode、root 拉前台服务、禁用 / 启用 / 卸载全部通过（`real_supervisor.py` 21/21，`smoke-test.sh` 0 FAIL）** | [spikes/S2.md](spikes/S2.md)：判活看进程，心跳记录任务状态并用来发现短命进程（`boot` 字段必须等于 `Settings.Global.BOOT_COUNT`）；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起，包处于 stopped 时不拉起。**root 拉起前台服务按 `SYSTEM_UID` 豁免后台启动限制**，App 自己在后台被拒时由监督进程 1.9 s 内代为提升 | KernelSU 真机；灭屏 30 分钟、24 小时驻留与内存；K3、K5b |
+| S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑）；**Pixel 8 真机（API 35）上回归 sdk 套件 release 16/16、app 套件 25/25、一致性 33/0/5、desktop_idle 20/20** | 可用；通道参数已定 | API 36 / 37 真机；debug 构建的 sdk 套件；主线程与延迟数值的专门测量 |
+| S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort；OpenAI 兼容端点用 MiniMax 的 `https://api.minimax.cn/v1`（B7）在电脑和 Pixel_8a 的 `:agent` 上跑通对话、跨轮回忆、工具调用、abort，思考内容以 `<think>` 混在正文里（B8 处理） | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3；Pixel 8 真机（API 35）上经 `:agent` 的真实对话通过 | 真机上的冷启动 / 内存数值；API 36 / 37 真机；MiniMax 国际预设（需要国际 key） |
+| S4 | 未开始（C7b 的设备回归会覆盖大部分：发现、bind、进程死亡、没有权限的 App；结果写 S4.md） | — | — |
+| S5 | 精简版完成（C7a）：**不引入官方 MCP Kotlin SDK**，自写 tools 子集；Binder 部分在 JVM（10 项）、API 36 模拟器跨进程回环（2 项）、R8 release 自测（6/6）通过；单条上限 65,536 字符 | [spikes/S5.md](spikes/S5.md) | 远端 Streamable HTTP（W19，用 OkHttp）；真机 |
+| S6–S7 | 未开始 | — | — |
 
 **S2、S3、S4、S6 验证的是四段不同的连接，不能互相替代：**
 - S2：root 监督进程 → AgentOS App，进程管理与状态广播；
@@ -393,7 +396,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] `customize.sh`、`uninstall.sh`、`module.prop.template`、`support-matrix.yaml`（KernelSU 最低版本暂不检查，W27 定）
 - [x] `service.sh`：安装或升级 App、开机拉起运行时、判活、有任务时退避拉起、状态广播
 - [x] `SupervisorStatusReceiver`（signature 权限保护）
-- [x] `tools/`：`package-module.py`、`check-device.sh`、`smoke-test.sh`（已能打出 debug 签名的 `agentos-0.1.0.zip`；root 模拟器上刷入、开机拉起、禁用、重新启用、卸载都通过，真机待测）
+- [x] `tools/`：`package-module.py`、`check-device.sh`、`smoke-test.sh`（已能打出 debug 签名的 `agentos-0.1.0.zip`；root 模拟器和 Pixel 8 真机（Magisk 30.7）上刷入、开机拉起、禁用、重新启用、卸载都通过）
 - [x] `.github/workflows/module-package.yml`（还没在 GitHub 上实际跑过）
 
 #### W8 自带界面
@@ -410,13 +413,13 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
   - A6：设备模式跑完整的一致性用例。手机上是真实 Pi，模型端点是电脑上的 `FakeModelServerMain`（经 `adb reverse`）。14 例中 10 例通过、4 例跳过：3 例依赖工具（W14 / W15，其中 1 例还要确认，W16），1 例依赖只有电脑上才有的 `--jev` 开关。
   - 设备前置条件：App 已有“忽略电池优化”豁免（对应首次引导里的这一步；用例用 `dumpsys deviceidle whitelist` 模拟），否则从后台启动前台服务会被拒。
   - 之后：freezer 用例转正（C6 之后，空闲 15 秒后新连接能配对、已建立会话照常应答）；握手超时在设备上实测约 10.0 秒断开，用例只校验上限。
-  - 真机待测。
+  - 真机（Pixel 8，API 35）：同一套一致性用例 38 项，33 过、0 败、5 跳。
 - [x] 电脑端接入打开期间 `:agent` 以前台服务运行并显示通知，避免空闲时被 cached-apps freezer 冻结（architecture F11 第 4 点；A6 发现，C6 实现）。
   - C 的模拟器（API 35 / 36 / 37）上 `desktop_idle.py` 各 18/18：空闲 60 s 后经 acp-bridge 握手 73–344 ms，对话与取消成功，`isFrozen` 始终为 false。
   - 整合人在 Pixel_8a 上复核：`desktop_idle.py` 15/18，核心项全部通过（空闲 60 s 后握手 111–126 ms，对话与取消成功，36 个采样都没有被冻结，开机拉起和 bind 拉起后都回到前台）。失败的 3 项都是脚本没有先展开 Silent 分组里折叠的通知、点不到“关闭”；手动展开后“关闭”有效，开关关闭并退出前台。
   - 后台拉起需要电池优化豁免，监督进程按 `hold=desktop` 拉起放到 W11
 
-**M1 验收**：代码项已全部进 main，验收清单和最新回归数据见 [m1-acceptance.md](m1-acceptance.md)；剩下的是真机、发布证书和内测。
+**M1 验收**：代码项已全部进 main，验收清单和最新回归数据见 [m1-acceptance.md](m1-acceptance.md)；Pixel 8（Magisk 30.7，API 35）真机验证已跑完（见该文第三节之二）；剩下的是发布证书、内测，以及 KernelSU 和 API 36 / 37 的真机。
 - [ ] 找 10 名极客内测
 
 **出口条件**：
@@ -456,19 +459,22 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 
 #### W14 Extension Host 与插件发现
 - [ ] `:ext` 进程：`ExtensionHostService`、`IExtensionHost`、`IExtensionCallback`
-- [ ] 把 Agent Plugins 1.0 的 schema 副本放进 `core/protocol/agent-plugins-1.0/`
-- [ ] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`
-- [ ] `AppPluginScanner`、`ApprovalPolicy`
+- [x] 把 Agent Plugins 1.0 的 schema 副本放进 `core/protocol/agent-plugins-1.0/`（A7）
+- [x] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`（A7，30 项测试，含三个示例 App 的全部工具名）
+- [x] `ApprovalPolicy`（A7，在 core/runtime 的 broker/，Broker 已按它决定可用与确认）
+- [x] 插件注册表的纯 JVM 部分：`PluginScanLogic`、`PersistedRegistry`、`ApprovalStore`（A8：33 项注册表测试 + ApprovalStore 的坏文件、原子写、备份、fail closed 测试；core:extensions 共 63 项）
+- [ ] `AppPluginScanner`（Android 薄适配层：PackageManager → `InstalledAppView`，保存结果，执行 `Revoke`）
 - [ ] 设置页：插件管理（启用、禁用、审批方式）
 - [ ] 测试：清单解析与校验、工具命名
 
 #### W15 MCP over Binder
-- [ ] `sdk/plugin-sdk/`：`IMcpService`、`McpBinderTransport`、`McpBinderService` 基类、插件包校验与打包
+- [x] `sdk/plugin-sdk/`：`IMcpService`、`McpBinderTransport`、`McpBinderService` 基类、`McpBinderClient`、`McpToolRegistry`（C7a；自写 tools 子集，R8 下自测 6/6）
+- [ ] `sdk/plugin-sdk/` 的插件包校验与打包（属于 W26）
 - [ ] `app/ext/mcp/`：`McpClientManager`、`ToolCatalog`；连接生命周期（按需 bind、空闲 30 秒回收）
 - [ ] `tests/device/` 的 MCP Binder 用例：`bindService()` 失败、后台 bind、插件 App 进程死亡、调用超时、发送方 UID 不符、签名变化后停用
 
 #### W16 风险策略与确认
-- [ ] `RiskPolicy`（MCP 工具默认按“写”处理，注解只能调高等级）
+- [x] `RiskPolicy`（A7：MCP 工具默认按“写”处理，注解只能调高等级；`CapabilityBroker` 已按用户策略决定可用与确认，被禁用的工具对模型等同不存在）
 - [ ] `CapabilityBroker` 接上 Extension Host：按目录校验工具名，转发、超时、取消
 - [ ] `ConsentCoordinator` 与 `consent/` 界面：前台弹窗、后台通知、写明发起请求的 App
 - [ ] `session/request_permission`：按“只能追加拒绝”的规则接入
@@ -594,7 +600,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 | `plugins/api/` 中 Plugin 端的部分 | 不迁移：自有 Plugin 协议由标准插件 + MCP over Binder 取代；`SystemToolEndpoint.kt` 只作参考 |
 | `plugins/api/` 中的 `AgentManagerClient` | 不迁移，由 ACP 取代 |
 | `plugins/notes/`、`demo-apps/*` | `plugins/samples/`，改写为内嵌插件的示例 App |
-| `libraries/mcp-client/` | 不迁移：远端 MCP 用官方 MCP Kotlin SDK 的 Streamable HTTP 客户端；只作参考 |
+| `libraries/mcp-client/` | 不迁移：远端 MCP 用 OkHttp 自己实现 Streamable HTTP 客户端（不引入官方 MCP Kotlin SDK）；只作参考 |
 | `runtime/src/acp-adapter.js`、`runtime/src/pi-worker.js`、workspace 中的 `pi-acp-adapter/` | 作为 ACP ↔ Pi 映射的参考，经验写进 `acp-mapping.md` 和 Pi 适配层 |
 | workspace 根目录的 `agentos-acp-profile-v1.md` | `core/protocol/acp-profile-v1.md` |
 | AIDL（`com.example.agentos`）、SELinux `.te`、init rc、`agentos.fs`、`tools/aosp/*`、`wire-platform.py`、`PhoneWindowManager` / LatinIME 补丁、Cuttlefish 相关文档 | **不迁移**。这是 ROM 方向的实现，留在 agenriod 里作为历史参考 |
@@ -610,7 +616,7 @@ agenriod 仓库冻结为原型，不再加新功能。
 1. **运行时保活**。`:agent` 可能被系统回收或被厂商策略冻结；Android 17 还会按设备内存给 App 设上限。对策：只在有任务时进入前台，其余时间按需由 bind 拉起；root 监督进程在有任务时退避拉起；S2 测出实际表现，退路是电池优化豁免和 standby bucket。
 2. **Pi Agent core 跑在 QuickJS 里**。上游只面向 Node 和浏览器，QuickJS 不在它的支持范围内。混合方案下，风险集中在 `pi-ai` 依赖的两个官方 SDK：它们需要完整的 `fetch`、`ReadableStream`、`Headers` 等 Web API，还引用了 Node 内置模块，要在打包时替换；bundle 也从约 0.6 MB 涨到约 1.9 MB。原型已经跑通过 `Agent` 循环，但用的是非流式的模型桥接。对策：S8 在真机上验证流式、`abort`、并发会话、内存和冷启动；官方 SDK 跑不通就退回宿主层实现两个协议族，引擎本身不行就换 V8 类引擎。Pi 还在 0.x，版本固定在 0.86.1，升级时重跑 S8 和契约测试。
 3. **ACP Kotlin SDK 没有官方 Android 支持承诺**。它是 JVM SDK，在 Android 上属于兼容性落地（S3 第一部分已验证编译、D8、R8）；master 分支的 Transport API 已经和 0.30.x 不兼容。对策：固定 `acp:0.30.1`；升级 SDK 或工具链时，改 Transport 并在真机上重跑 S3；如果 SDK 在设备上出现运行时问题，退回“只用 SDK 的数据类型 + 自写 JSON-RPC 层”。另外 Profile 已经注意到 ACP v2 还是草案，版本升级时要重新核对。
-4. **MCP Kotlin SDK 与工具链**。新版 MCP SDK 依赖更高的 Kotlin 和 Ktor 版本，可能迫使整个工程升级，进而要重跑 S3 第一部分；MCP 2026-07-28 修订版改动较大，SDK 和协议版本要一起固定。由 S5 解决。
+4. **MCP Kotlin SDK 与工具链**（**已由 S5 解决**）。新版 MCP SDK 依赖更高的 serialization、kotlinx-io 版本，与 ACP 0.30.1 冲突；结论是不引入，自己实现 tools 子集，不需要升级工程。MCP 2026-07-28 修订版改动较大，将来升级只改 `plugin-sdk` 的生命周期部分。
 5. **远端 MCP 只支持 Streamable HTTP**。只提供旧 HTTP+SSE 传输的服务连不上，导入时标为不支持。
 6. **不为插件提供解释器**。`:agent` 里的 QuickJS 只运行打包进 APK 的 Pi Agent core，不对插件开放。生态里的 stdio MCP 服务，以及依赖 python、node、jq 的 Hook 和 Skill 脚本，在手机上都不能用。导入时标出不支持的部分，Hook 失败进诊断页。
 7. **厂商 ROM**。国内厂商 ROM 的助理入口、后台冻结和电池策略差异很大。首版只承诺 Pixel 官方系统和 LineageOS，其他设备在支持矩阵里标为“社区适配”。

@@ -113,10 +113,67 @@ class AgentServiceScenarios(
         "desktop-access" -> desktopAccess(args)
         "desktop-restart" -> desktopRestart(args)
         "desktop-status" -> desktopStatus()
+        "ext-host" -> extHost()
         else -> null
     }
 
     private fun now() = SystemClock.elapsedRealtime()
+
+    // ------------------------------------------------------------------ C7：Extension Host（:ext）的 IExtensionHost
+
+    /**
+     * 从主进程跨进程调用 :ext 里的 IExtensionHost（inapp 看不到 app 的 AIDL 类，用反射）：版本、插件列表、目录、
+     * 不受理的 callTool、错误以 agentos.ext.<code> 原样传回、诊断；并确认服务确实运行在 :ext 进程。
+     */
+    private suspend fun extHost(): JSONObject {
+        val component = android.content.ComponentName(TestIds.APP_PKG, "${TestIds.APP_PKG}.ext.ExtensionHostService")
+        val b = ServiceBinding(ctx, component)
+        check(b.bind()) { "cannot bind ExtensionHostService" }
+        try {
+            val binder = b.awaitConnected(15_000) ?: error("ExtensionHostService not connected")
+            return withContext(Dispatchers.IO) {
+                val iface = Class.forName("org.agentos.internal.IExtensionHost\$Stub")
+                    .getMethod("asInterface", IBinder::class.java).invoke(null, binder)!!
+                fun call(name: String, vararg args: Any?): Any? {
+                    val m = iface.javaClass.methods.first { it.name == name && it.parameterCount == args.size }
+                    return try {
+                        m.invoke(iface, *args)
+                    } catch (e: java.lang.reflect.InvocationTargetException) {
+                        throw e.targetException
+                    }
+                }
+                fun errorOf(block: () -> Unit): String? = try {
+                    block()
+                    null
+                } catch (e: Exception) {
+                    "${e.javaClass.simpleName}: ${e.message}"
+                }
+                val version = call("getVersion") as Int
+                val plugins = org.json.JSONArray(call("listPlugins") as String)
+                val catalog = JSONObject(call("getCatalog") as String)
+                val accepted = call("callTool", "c7a-1", JSONObject().put("name", "mcp__x__y__z").toString(), null) as Boolean
+                val notFound = errorOf { call("setPluginEnabled", "org.example.none", true) }
+                val badMode = errorOf { call("setToolApproval", "mcp__x__y__z", "always_allow") }
+                val diag = JSONObject(call("getDiagnostics") as String)
+                val extPid = ctx.getSystemService(ActivityManager::class.java).runningAppProcesses
+                    ?.firstOrNull { it.processName == "${TestIds.APP_PKG}:ext" }?.pid
+                val checks = JSONObject()
+                    .put("version", version == 1)
+                    .put("noPluginsYet", plugins.length() == 0)
+                    .put("emptyCatalog", catalog.optJSONArray("tools")?.length() == 0 && catalog.optJSONObject("policy")?.optInt("version") == 1)
+                    .put("callNotAccepted", !accepted)
+                    .put("notFoundCode", notFound?.startsWith("IllegalArgumentException: agentos.ext.not_found") == true)
+                    .put("badModeCode", badMode?.startsWith("IllegalArgumentException: agentos.ext.bad_mode") == true)
+                    .put("runsInExtProcess", extPid != null && extPid != Process.myPid())
+                JSONObject().put("ok", checks.keys().asSequence().all { checks.optBoolean(it) })
+                    .put("summary", "version=$version plugins=${plugins.length()} catalog=${catalog.optLong("version")} " +
+                        "extPid=$extPid impl=${diag.optString("implementation")} checks=${checks.keys().asSequence().count { checks.optBoolean(it) }}/${checks.length()}")
+                    .put("checks", checks).put("notFound", notFound).put("badMode", badMode).put("diagnostics", diag)
+            }
+        } finally {
+            b.unbind()
+        }
+    }
 
     // ------------------------------------------------------------------ C6：电脑端接入打开期间留在前台（F11 第 4 点）
 
