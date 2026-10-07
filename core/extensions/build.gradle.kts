@@ -6,6 +6,9 @@ plugins {
 }
 
 dependencies {
+    // 注册表与审批存储（registry/）要用 core:runtime 的 ApprovalPolicy、ApprovalPolicyPort；它们都不依赖 Android。
+    // 反方向没有依赖：core:runtime 不知道 core:extensions
+    api(project(":core:runtime"))
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.kotlin.test.junit)
