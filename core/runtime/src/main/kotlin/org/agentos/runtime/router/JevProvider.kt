@@ -90,7 +90,12 @@ class HttpJevProvider(
             if (!r.isSuccessful) {
                 throw JevException(if (r.code == 408 || r.code == 429 || r.code >= 500) "jev_http_retryable" else "jev_http_error")
             }
-            val text = r.body?.string().orEmpty()
+            // callTimeout 也覆盖读响应体：头到了、体迟迟不来时抛的是 InterruptedIOException，要和连接阶段一样归为 jev_timeout
+            val text = try {
+                r.body?.string().orEmpty()
+            } catch (e: IOException) {
+                throw JevException(if (e is java.io.InterruptedIOException) "jev_timeout" else "jev_network_error", cause = e)
+            }
             val json = runCatching { RuntimeJson.parseToJsonElement(text).jsonObject }.getOrNull() ?: throw JevException("jev_invalid_response")
             val choice = ((json["answers"] as? JsonObject)?.get("session") as? JsonObject)?.get("choice")
             return (choice as? JsonPrimitive)?.contentOrNull ?: throw JevException("jev_invalid_response")
