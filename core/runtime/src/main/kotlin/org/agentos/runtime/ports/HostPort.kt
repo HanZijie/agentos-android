@@ -75,6 +75,15 @@ interface ToolPort {
      */
     suspend fun invoke(invocation: ToolInvocation): ToolInvocationResult
 
+    /**
+     * **任务开始前的准备**：Scheduler 在为这个任务构造 Agent 的工具目录和系统提示之前调用一次，最多等 [timeoutMillis]
+     * （`SchedulerConfig.toolPrepareTimeoutMillis`，默认 2 秒）。Extension Host 借此保证模型看到的目录不是空的：
+     * 等“还没有缓存”的 MCP 服务器取完工具列表（刚启用、刚开机）。默认什么都不做。
+     *
+     * 实现必须在 [timeoutMillis] 内返回（Scheduler 也会用同样的时限强制取消）；抛异常只会被记录，任务照常开始。
+     */
+    suspend fun prepare(timeoutMillis: Long) {}
+
     companion object {
         /** 没有任何工具（M1）。 */
         val NONE: ToolPort = object : ToolPort {
@@ -155,7 +164,13 @@ sealed interface ToolInvocationResult {
 interface SkillPort {
     val catalog: StateFlow<SkillCatalog>
 
-    /** 读取 Skill 的 SKILL.md（[path] 为 null）或其中的附属文件。内容是不可信输入。 */
+    /**
+     * 读取 Skill 的 SKILL.md（[path] 为 null）或同一 Skill 目录里的附属文件（[path] 相对 Skill 目录）。内容是**不可信输入**。
+     *
+     * @param skillId [SkillSummary.id]
+     * @throws NoSuchElementException 没有这个 Skill（包括插件被禁用、不再可用），或这个 Skill 里没有这个文件
+     * @throws IllegalArgumentException [path] 不合法（路径穿越、绝对路径、控制字符…）或文件不是文本
+     */
     suspend fun read(skillId: String, path: String? = null): SkillContent
 
     companion object {
@@ -174,8 +189,16 @@ data class SkillCatalog(val version: Long, val skills: List<SkillSummary>) {
     }
 }
 
+/**
+ * 目录里的一个 Skill。[name]、[description] 来自插件（**第三方文本，不可信**）。
+ *
+ * @property id 唯一的标识，`read_skill` 用它：名字不冲突时就是 [name]，冲突时是 `<插件名>:<Skill 名>`
+ * @property name Skill 自己的名字（SKILL.md 的 frontmatter）
+ * @property provider 来源插件的名字
+ */
 data class SkillSummary(val id: String, val name: String, val description: String, val provider: String)
 
+/** [truncated] 为 true 表示内容超过单次读取上限，已经截断。 */
 data class SkillContent(val text: String, val truncated: Boolean = false)
 
 // ---------------------------------------------------------------- Hook
@@ -240,6 +263,7 @@ interface ConsentPort {
 
 /**
  * @property argumentsPreview 给用户看的参数摘要：宿主层已脱敏并截断（不超过 2,000 字符）。
+ * @property argumentsTruncated [argumentsPreview] 是不是被截断过（完整参数更长）。
  * @property rememberable 是否提供“本会话内不再询问”（高风险工具为 false）。
  * @property source 工具来自哪个插件的哪个服务器（确认框显示“来自插件 X”用）；不属于任何插件的工具为 null。
  */
@@ -256,6 +280,7 @@ data class ConsentRequest(
     val rememberable: Boolean,
     val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
     val source: ToolSource? = null,
+    val argumentsTruncated: Boolean = false,
 ) {
     companion object {
         /** architecture F5：60 秒无响应视为拒绝。 */

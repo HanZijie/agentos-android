@@ -86,9 +86,9 @@
 | `tool_blocked` | 否 | -32051 | 被 Hook 或风险策略拦截 |
 | `tool_failed` | 否 | -32051 | 工具提供方返回了错误 |
 | `tool_timeout` | 否 | -32051 | 调用已发出，超时没拿到结果（副作用未知，按 `tool_result_unknown` 处理恢复） |
-| `tool_unavailable` | 是 | -32051 | 请求确定没有到达提供方：未连接、bind 失败、提供方正在重启 |
+| `tool_unavailable` | 是 | -32051 | 请求确定没有到达提供方：未连接、bind 失败、连接超时、提供方正在重启 |
 | `tool_result_unknown` | 否 | -32051 | 请求已发出，但提供方进程死亡或运行时重启，副作用未知 |
-| `tool_result_too_large` | 否 | -32051 | 结果超过上限，已截断或改为 `resource_link` |
+| `tool_result_too_large` | 否 | -32051 | 结果超过上限，已截断或改为 `resource_link`；实际由 `ExtensionToolHost` 先截断（文字超过 32,768 字符），`CapabilityBroker.afterExecute` 不会再截一次 |
 
 工具错误的 JSON-RPC code 只在极少数情况下用到（工具错误通常不会让请求失败），统一写 -32051。
 
