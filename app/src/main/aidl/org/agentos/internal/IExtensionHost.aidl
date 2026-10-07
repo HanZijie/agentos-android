@@ -12,24 +12,28 @@ import org.agentos.internal.IExtensionCallback;
  *   code 见各方法；Binder 只能把这两类异常原样传回调用方，其他异常在服务端换成 "agentos.ext.internal: <类型>"。
  * - 都会读写文件或 bind 别的 App，不要在主线程调用。
  *
- * 用户策略（启用 / 禁用、审批方式）就是 core/runtime 的 ApprovalPolicy（org.agentos.runtime.broker，A 车道），
- * 由 Extension Host 保存，随目录一起交给运行时（getCatalog 的 "policy"），Broker 每次调用前按它决定可用与确认。
- * 策略里的插件键是插件 ID（App 内嵌插件 = 包名），不是 plugin.json 的 name：另一个 App 声明同名插件不会继承这份策略。
- * 第三方插件第一次被发现时写入插件级 enabled=false（默认关闭）；签名变化时同样改回 false。
+ * 插件注册表与用户策略都用 A 车道的纯逻辑（core:extensions 的 PluginScanLogic / ApprovalStore，core:runtime 的
+ * ApprovalPolicy、RiskPolicy）：Extension Host 是唯一的写入方，策略随目录一起交给运行时（getCatalog 的 "policy"），
+ * Broker 每次调用前按它决定可用与确认。策略按插件名记（plugin.json 的 name；注册表保证名字唯一，原来的主人优先，
+ * 改名、卸载、签名变化时清掉旧策略）。第三方插件第一次被发现时写入插件级 enabled=false（默认关闭）。
  *
  * 插件（listPlugins 的一项）：
- *   {"id"（插件 ID，App 内嵌插件 = 包名）, "source":"app", "packageName", "name"（plugin.json 的 name）, "displayName",
- *    "description", "versionName", "versionCode", "signingDigest"（证书 SHA-256，小写十六进制，多签名时逗号分隔）,
- *    "enabled": bool（插件级是否启用）, "approval":"ask"|"always"|null（插件级审批方式，null = 没设，按 ask）,
- *    "state", "problems":[string], "unsupported":[{"kind","location","detail"}]（ManifestReader 的 unsupported）,
- *    "servers":[{"name", "service"（完整类名）, "state", "error"（可无）, "toolCount"}],
- *    "toolCount", "updatedAtMs"}
- *   state：ok（可用）| disabled（用户没启用）| invalid（插件包或 Service 校验不通过，见 problems）|
- *          signature_changed（签名变了，已停用，需要用户重新启用）| unavailable（启用了但连不上，见 servers[].error）
+ *   {"id"（PluginRecord.id = "<包名>/<assets 目录>"）, "source":"app", "packageName", "name"（plugin.json 的 name，读不出时为 null）,
+ *    "displayName", "description", "versionName", "versionCode",
+ *    "signingDigest"（当前签名摘要：SHA-256 小写十六进制；多个签名者时排序后拼接再 SHA-256）,
+ *    "status":"ready"|"unavailable"|"signature_changed"|"signature_unconfirmed"（PluginStatus）,
+ *    "unavailableReason":"assets_missing"|"manifest_rejected"|"no_usable_server"|"name_conflict"|null,
+ *    "builtin": bool, "enabled": bool（插件级是否启用）, "approval":"ask"|"always"|null（插件级审批方式，null = 没设，按 ask）,
+ *    "problems":[{"code","message"}]（中文，给插件页显示）, "unsupported":[{"kind","location","detail"}]（PluginManifest.unsupported）,
+ *    "servers":[{"name", "service"（完整类名，Binder）或 "url"（https）, "state":"idle"|"connected"|"unreachable"|"disabled",
+ *                "error"（可无）, "toolCount"}],
+ *    "rejectedServers":[{"name","service","reason":"not_in_package"|"not_exported"|"missing_permission"}],
+ *    "toolCount"}
+ *   签名变化（signature_changed）或记忆丢失（signature_unconfirmed）时已停用，要用户先 confirmSignature 再启用。
  *
  * 工具（listTools 的一项；getCatalog 的 tools 也是这个形状）：
- *   {"name"（交给模型的名字，ToolNaming：mcp__<插件名>__<服务器>__<工具>，见 extensions.md 5.3）,
- *    "source":{"plugin"（插件 ID）, "server", "tool"（服务器报告的原始工具名）}, "provider"（插件 ID）,
+ *   {"name"（交给模型的名字，ToolNaming：mcp__<插件名>__<服务器>__<工具>，见 extensions.md 5.3）, "pluginId",
+ *    "source":{"plugin"（插件名）, "server", "tool"（服务器报告的原始工具名）}, "provider"（插件名）,
  *    "title"（可无）, "description", "inputSchema":{…},
  *    "annotations":{"readOnlyHint","destructiveHint","idempotentHint","openWorldHint"}（只列出服务器给了的）,
  *    "risk":"read"|"write"|"high"（RiskPolicy.effectiveRisk：默认 write，destructiveHint=true 升 high，readOnlyHint 不降级）,
@@ -50,9 +54,15 @@ interface IExtensionHost {
     /**
      * 启用或停用一个插件（插件级 enabled），返回更新后的插件 JSON。停用：立即从目录移除、关闭连接、取消进行中的调用。
      * 启用后在后台连接一次拉取工具（结果见 listTools），之后第一次用到工具时才再连接。
-     * 错误 code：not_found、invalid（插件包或 Service 校验不通过，不能启用）。
+     * 错误 code：not_found、not_ready（status 不是 ready：不可用，或签名变化 / 未确认，要先 confirmSignature）。
      */
     String setPluginEnabled(String pluginId, boolean enabled);
+
+    /**
+     * 确认插件的当前签名（status 为 signature_changed / signature_unconfirmed 时），返回更新后的插件 JSON：恢复可用，但仍然停用。
+     * 错误 code：not_found、not_needed（签名没有待确认的变化）。
+     */
+    String confirmSignature(String pluginId);
 
     /** 插件级审批方式（这个插件下没有单独设置的工具都按它），返回更新后的插件 JSON。错误 code：not_found、bad_mode。 */
     String setPluginApproval(String pluginId, String mode);

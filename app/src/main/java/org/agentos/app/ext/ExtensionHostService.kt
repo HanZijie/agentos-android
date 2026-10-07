@@ -32,6 +32,8 @@ class ExtensionHostService : Service() {
             throw ExtError.notFound(pluginId)
         }
 
+        override fun confirmSignature(pluginId: String?): String = guarded { throw ExtError.notFound(pluginId) }
+
         override fun setPluginApproval(pluginId: String?, mode: String?): String = guarded {
             ExtError.checkMode(mode)
             throw ExtError.notFound(pluginId)
@@ -119,7 +121,8 @@ internal object ExtError {
 
     fun notFound(what: String?) = IllegalArgumentException("${PREFIX}not_found: no such plugin or tool: $what")
     fun badMode(mode: String?) = IllegalArgumentException("${PREFIX}bad_mode: approval mode must be ask, always or \"\" (clear), got $mode")
-    fun invalid(detail: String) = IllegalStateException("${PREFIX}invalid: $detail")
+    fun notReady(detail: String) = IllegalStateException("${PREFIX}not_ready: $detail")
+    fun notNeeded(detail: String) = IllegalStateException("${PREFIX}not_needed: $detail")
     fun highRisk(tool: String) = IllegalArgumentException("${PREFIX}high_risk: $tool is a high-risk tool and cannot be set to always")
     fun unavailable(detail: String) = IllegalStateException("${PREFIX}unavailable: $detail")
 }
