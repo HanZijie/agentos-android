@@ -63,6 +63,9 @@ class FakeAgentCore(
     private val sessions = ConcurrentHashMap<String, FakeSession>()
     private val toolIds = AtomicLong()
 
+    /** 每次 openSession / reconfigure 收到的会话配置（按时间顺序），测试用来看系统提示和工具目录。 */
+    val configs: MutableList<AgentSessionConfig> = java.util.Collections.synchronizedList(mutableListOf())
+
     /** 所有会话累计的 runTurn 次数，测试用来断言“没有被重放”。 */
     val turnsStarted = AtomicInteger()
 
@@ -76,6 +79,7 @@ class FakeAgentCore(
 
     override suspend fun openSession(sessionId: String, config: AgentSessionConfig, restore: PiMessages?): AgentCoreSession {
         ensureReady()
+        configs += config
         val initial: MutableList<JsonElement> = restore?.json?.toMutableList<JsonElement>() ?: mutableListOf(systemMessage(config.systemPrompt))
         val session = FakeSession(sessionId, config, initial)
         check(sessions.putIfAbsent(sessionId, session) == null) { "session $sessionId is already open" }
@@ -140,6 +144,7 @@ class FakeAgentCore(
         override suspend fun reconfigure(config: AgentSessionConfig) {
             checkUsable()
             check(running == null) { "cannot reconfigure while a turn is running" }
+            configs += config
             this.config = config
         }
 

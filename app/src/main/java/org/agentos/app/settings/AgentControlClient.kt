@@ -47,5 +47,7 @@ class AgentControlClient(private val context: Context) {
         const val BYOK_VERSION = 2
         /** IAgentControl version that is expected to add the desktop access switch (W9, A). */
         const val DESKTOP_VERSION = 3
+        /** IAgentControl version that added the Jev (auto-select session) key and endpoint (D5.1). */
+        const val JEV_VERSION = 4
     }
 }
