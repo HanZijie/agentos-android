@@ -38,7 +38,7 @@ import org.agentos.runtime.ports.ToolPort
  * | log | [AndroidRuntimeLog]：android.util.Log，写之前去掉 key | — |
  * | tools | [ExtensionClient]：`:ext` 的 IExtensionHost 的薄代理（目录、三种结局；C7b） | — |
  * | approvals | [ExtensionClient.approvals]：`:ext` 的用户策略的镜像，收到第一份之前 fail closed（C7b） | — |
- * | consent | [NotOpen.CONSENT]：一律拒绝（UNAVAILABLE）；debug 构建里是 ConsentCoordinator（见 AgentProcess） | W16：D5.2 的确认界面 |
+ * | consent | [ConsentCoordinator]（见 AgentProcess）：前台对话框、后台通知（D5.2）；[NotOpen.CONSENT] 只是构造默认值 | — |
  * | skills | [ExtensionClient.skills]：`:ext` 里 ExtensionSkillPort 的代理（C7b） | — |
  * | hooks | [NotOpen.HOOKS]：没有 Hook，NO_OPINION | W22 |
  */
@@ -51,7 +51,7 @@ class HostPortImpl(
     override val tools: ToolPort = NotOpen.TOOLS,
     override val approvals: ApprovalPolicyPort = ApprovalPolicyPort.DEFAULT,
     override val skills: SkillPort = NotOpen.SKILLS,
-    /** 工具调用的用户确认：默认一律拒绝；debug 构建里 AgentProcess 换成 ConsentCoordinator（D5.2 的界面接入后 release 也换）。 */
+    /** 工具调用的用户确认：默认一律拒绝；AgentProcess 传入 ConsentCoordinator（D5.2，release 和 debug 都是）。 */
     override val consent: ConsentPort = NotOpen.CONSENT,
 ) : HostPort {
     override val hooks: HookPort = NotOpen.HOOKS

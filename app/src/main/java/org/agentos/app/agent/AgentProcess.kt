@@ -74,20 +74,22 @@ class AgentProcess private constructor(val app: Context) {
     /** Extension Host（`:ext`）的代理：工具目录、调用、用户策略的镜像（C7b，docs/extensions.md 第 9 节）。 */
     val extensions = ExtensionClient(app, runtimeLog)
     /**
-     * 工具调用的用户确认。**release 仍是“一律拒绝”**，直到 D5.2 的确认界面（ConsentSurface）接入；
-     * debug 构建里先接上 A11 的 ConsentCoordinator + AutoConsentResponder，让 adb 无人值守端到端测试能放行（ConsentDebugReceiver 设置 mode）。
+     * 工具调用的用户确认（D5.2，architecture F5）：[ConsentCoordinator]（排队、60 秒超时、选项校验、“始终允许”写回）+ [consentBridge]
+     * （前台把待确认推给主进程的对话框，后台发带“允许 / 拒绝”的通知）。release 和 debug 都生效。
+     * debug 构建再用 A 的 [AutoConsentResponder] 包住界面：ConsentDebugReceiver 设置 mode 后无人值守地回答；mode=off 时和 release 一样交给界面。
      */
+    val consentBridge = org.agentos.app.agent.consent.ConsentBridge(app)
     val autoConsent: org.agentos.runtime.consent.AutoConsentResponder? =
-        if (debuggable) org.agentos.runtime.consent.AutoConsentResponder() else null
-    private val consentPort: org.agentos.runtime.ports.ConsentPort = autoConsent?.let { responder ->
-        // “始终允许”的跨进程写回已经有了（extensions.approvalWriter，C7b），但 sample_apps_consent_e2e.py 还按“不提供始终允许”断言：
-        // 换上它要同时改那条断言，由整合人决定；在那之前保持不可用（安全默认）
-        org.agentos.runtime.consent.ConsentCoordinator(responder, org.agentos.runtime.consent.ApprovalWriter.UNAVAILABLE, scope, log = runtimeLog)
-            .also { responder.attach(it) }
-    } ?: NotOpen.CONSENT
+        if (debuggable) org.agentos.runtime.consent.AutoConsentResponder(consentBridge) else null
+    val consent = org.agentos.runtime.consent.ConsentCoordinator(
+        autoConsent ?: consentBridge, extensions.approvalWriter, scope, log = runtimeLog,
+    ).also { c ->
+        consentBridge.attach(c)
+        autoConsent?.attach(c)
+    }
     val hostPort = HostPortImpl(
         store, models, secrets, environment, runtimeLog,
-        tools = extensions, approvals = extensions.approvals, skills = extensions.skills, consent = consentPort,
+        tools = extensions, approvals = extensions.approvals, skills = extensions.skills, consent = consent,
     )
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */

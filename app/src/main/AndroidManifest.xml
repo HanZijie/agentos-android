@@ -43,6 +43,7 @@
     </queries>
 
     <application
+        android:name=".AgentOSApp"
         android:allowBackup="false"
         android:label="AgentOS"
         android:networkSecurityConfig="@xml/network_security_config">
@@ -89,6 +90,20 @@
             android:exported="false"
             android:process=":ext" />
 
+        <!--
+          ================= W16（D5.2）：工具确认 =================
+          IConsentService：主进程在前台时 bind，把待确认交给对话框、把用户的选择回传给 :agent 的协调器。不导出，服务端再校验调用方 UID。
+          通知上的“允许一次 / 拒绝”：不导出的 receiver，运行在 :agent（协调器在那里）。
+        -->
+        <service
+            android:name=".agent.consent.ConsentService"
+            android:exported="false"
+            android:process=":agent" />
+        <receiver
+            android:name=".agent.consent.ConsentActionReceiver"
+            android:exported="false"
+            android:process=":agent" />
+
         <!-- ================= W7：root 监督进程的状态广播 ================= -->
 
         <!-- 在主进程（状态广播不会拉起 :agent），不导出，并要求上面的 signature 权限（监督契约 S2 e） -->
@@ -125,6 +140,13 @@
             android:exported="false"
             android:theme="@style/Theme.AgentOS"
             android:windowSoftInputMode="adjustResize" />
+        <!-- 确认界面（D5.2）：点确认通知进来看全文并回答；前台时对话框由当前 Activity 弹，不经它 -->
+        <activity
+            android:name=".ui.consent.ConsentActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.AgentOS" />
         <activity
             android:name=".settings.JevSourceActivity"
             android:exported="false"
