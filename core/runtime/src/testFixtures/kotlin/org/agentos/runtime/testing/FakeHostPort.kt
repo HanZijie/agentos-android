@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.agentos.runtime.errors.ErrorCode
+import org.agentos.runtime.broker.ApprovalPolicy
+import org.agentos.runtime.ports.ApprovalPolicyPort
 import org.agentos.runtime.ports.CatalogTool
 import org.agentos.runtime.ports.Clock
 import org.agentos.runtime.ports.ConsentDecision
@@ -32,6 +34,7 @@ import org.agentos.runtime.ports.ToolInvocationResult
 import org.agentos.runtime.ports.ToolPort
 import org.agentos.runtime.ports.ToolResult
 import org.agentos.runtime.ports.ToolRisk
+import org.agentos.runtime.ports.ToolSource
 import java.io.File
 import java.nio.file.Files
 import java.util.Collections
@@ -65,17 +68,18 @@ class FakeToolPort : ToolPort {
         name: String,
         risk: ToolRisk = ToolRisk.READ,
         inputSchema: JsonObject = OBJECT_SCHEMA,
+        source: ToolSource? = null,
         impl: suspend (ToolInvocation) -> ToolInvocationResult,
     ) = synchronized(this) {
         impls[name] = impl
         val tools = _catalog.value.tools.filter { it.name != name } +
-            CatalogTool(name, "fake tool $name", inputSchema, risk, provider = "fake")
+            CatalogTool(name, "fake tool $name", inputSchema, risk, provider = "fake", source = source)
         _catalog.value = ToolCatalog(_catalog.value.version + 1, tools)
     }
 
     /** 注册一个直接返回结果的工具。 */
-    fun registerSimple(name: String, risk: ToolRisk = ToolRisk.READ, impl: suspend (JsonObject) -> ToolResult) =
-        register(name, risk) { ToolInvocationResult.Completed(impl(it.arguments)) }
+    fun registerSimple(name: String, risk: ToolRisk = ToolRisk.READ, source: ToolSource? = null, impl: suspend (JsonObject) -> ToolResult) =
+        register(name, risk, source = source) { ToolInvocationResult.Completed(impl(it.arguments)) }
 
     fun unregister(name: String) = synchronized(this) {
         impls.remove(name)
@@ -91,6 +95,16 @@ class FakeToolPort : ToolPort {
 
     companion object {
         val OBJECT_SCHEMA: JsonObject = buildJsonObject { put("type", "object") }
+    }
+}
+
+/** 内存里的用户工具策略：测试直接改 [policy]。 */
+class FakeApprovalPolicyPort(initial: ApprovalPolicy = ApprovalPolicy.DEFAULT) : ApprovalPolicyPort {
+    private val flow = MutableStateFlow(initial)
+    override val policy: StateFlow<ApprovalPolicy> = flow
+
+    fun update(change: (ApprovalPolicy) -> ApprovalPolicy) {
+        flow.value = change(flow.value)
     }
 }
 
@@ -131,6 +145,7 @@ class FakeHostPort(
     override val tools: FakeToolPort = FakeToolPort(),
     override val consent: FakeConsentPort = FakeConsentPort(),
     override val hooks: FakeHookPort = FakeHookPort(),
+    override val approvals: FakeApprovalPolicyPort = FakeApprovalPolicyPort(),
     override val skills: SkillPort = SkillPort.NONE,
     override val clock: ManualClock = ManualClock(),
     override val log: CollectingLog = CollectingLog(),

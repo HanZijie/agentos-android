@@ -1,25 +1,25 @@
 # M1 验收清单
 
-最后更新：2026-10-06，main `e3b797f`（A9 与 B 的并发遍历修复之后）。
+最后更新：2026-10-07，main `ea38eeb`。真机（Pixel 8，Magisk 30.7，API 35）验证已跑完，见第三节之后的“真机验证”；还差发布证书、内测和 KernelSU / 其他 API 的真机。
 
-M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现在还差的只有真机、发布证书和内测。**
+M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现在还差的是发布证书、内测，以及 KernelSU 和 API 36 / 37 的真机。**
 
 ## 一、出口条件
 
 | 出口条件 | 状态 | 证据 |
 |---|---|---|
-| 从刷 zip 到完成第一次对话不超过 10 分钟 | 未验证，要真机和内测用户 | 模拟器上的流程已通了：安装 → 首次引导 → 填 key → 对话（见下面的“用户流程”）。耗时要在真机上由内测用户计 |
-| 安装、重启、禁用、重新启用、卸载全部通过，卸载后系统干净 | 模拟器通过，真机待测 | root 模拟器（API 35 / 37）上刷入、开机拉起、禁用、重新启用、卸载都通过；`module/test/unit.sh` 26/26、`service-sim.sh` 57/57；`package-module.py --check` 通过 |
-| 官方 ACP 客户端经电脑端接入能完成对话和取消 | 模拟器通过，真机待测 | 官方 TypeScript 客户端的一致性测试在手机上 38 项，33 过、0 败、5 跳（跳过的依赖工具、确认或 Jev，归 W14 / W15 / W16）；`desktop_idle.py` 20/20（空闲 60 s 后握手、对话、取消，进程不被冻结） |
+| 从刷 zip 到完成第一次对话不超过 10 分钟 | 未验证，要内测用户计时 | 模拟器上的流程已通了：安装 → 首次引导 → 填 key → 对话（见下面的“用户流程”）。真机上：刷 zip 重启后 App 自动装好（开机 11 s 内），真实 MiniMax 对话首字 2.3 s；首次引导和填 key 要点界面，这一轮真机只用 adb，没有走 |
+| 安装、重启、禁用、重新启用、卸载全部通过，卸载后系统干净 | **真机通过**（Pixel 8，Magisk 30.7，API 35） | `tools/smoke-test.sh all` 0 FAIL：刷入、重启、禁用（禁用状态重启后无监督进程）、重新启用、卸载、清理检查（模块目录、`/data/adb/agentos`、监督进程、`/data/local/tmp` 都干净）。root 模拟器（API 35 / 37）也通过；`module/test/unit.sh` 26/26、`service-sim.sh` 57/57；`package-module.py --check` 通过 |
+| 官方 ACP 客户端经电脑端接入能完成对话和取消 | **真机通过**（Pixel 8，API 35） | 官方 TypeScript 客户端的一致性测试在手机上 38 项，33 过、0 败、5 跳（跳过的依赖工具、确认或 Jev，归 W14 / W15 / W16）；`desktop_idle.py` 20/20（空闲 60 s 后握手、对话、取消，进程不被冻结；真机上关开关走调试入口，没有点通知栏） |
 
 ## 二、M1 工作包
 
 | 工作包 | 状态 | 说明 |
 |---|---|---|
 | W6 `:agent` 进程接线 | 完成 | Agent 核心是 Pi；`--suite app` 26 项；release（R8）包经 ACP 完成真实对话 |
-| W7 模块与打包 | 完成（模拟器） | 只能打 debug 签名的 zip；真机待测 |
+| W7 模块与打包 | 完成（模拟器 + Pixel 8 真机） | 只能打 debug 签名的 zip；Magisk 真机生命周期通过，KernelSU 待测 |
 | W8 自带界面 | 完成 | 对话、流式、取消、Markdown、设置页、首次引导 |
-| W9 电脑端接入 | 完成（模拟器） | 打开期间 `:agent` 前台运行，需要电池优化豁免 |
+| W9 电脑端接入 | 完成（模拟器 + Pixel 8 真机） | 打开期间 `:agent` 前台运行，需要电池优化豁免 |
 
 ## 三、最新一轮回归（Pixel_8a 模拟器，API 36，main `09ed2ac`）
 
@@ -33,6 +33,26 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 | `desktop_idle.py` | 20/20 |
 | 一致性测试设备模式 | 38 项，33 过、0 败、5 跳；A9 修复合入后在 Pixel_8a 上连跑 3 次都是这个结果，没有再出现关闭开关失败 |
 | key 泄漏扫描 | 日志和结果文件都是 0 |
+
+## 三之二、真机验证（Pixel 8，Magisk 30.7，API 35，2026-10-07）
+
+设备：Pixel 8（shiba），Android 15，build `BP1A.250505.005.B1`，内核 6.1.99，user 构建，bootloader 已解锁，Magisk 30.7（R），SELinux Enforcing，有锁屏 PIN。app 是 debug 签名的 zip 里带的 debug 包。这一轮手机上有人在用，所以**只用 adb，不点界面**：电池优化豁免用 `cmd deviceidle whitelist +org.agentos.app` 代替引导里的那一步，重启后用 adb 输 PIN 解锁。
+
+| 项目 | 结果 |
+|---|---|
+| `tools/check-device.sh` | 0 FAIL，1 WARN（指纹不在 support-matrix，按社区适配提示） |
+| 刷入、重启后自动安装 App 并拉起运行时 | 通过：开机 11 s 内装好 App（`pm install` 10.5 s），解锁后 up 19 s 拉起运行时 |
+| `--suite app`（排除需点界面的用例） | **25/25**，含真实 MiniMax 对话 `live-minimax`（`minimax-cn` / `MiniMax-M2.7`，END_TURN，首字 2.3 s） |
+| `--suite sdk --build release` | **16/16** |
+| 一致性测试设备模式 | 38 项，33 过、0 败、5 跳 |
+| `desktop_idle.py`（`AGENTOS_NO_UI_TAP=1`） | **20/20**：空闲 60 s 握手 244 ms，空闲后对话与取消正常，36 个采样没有一次被冻结，关开关后 14.8 s 进入冻结 |
+| 监督进程（`real_supervisor.py`） | **21/21**：有任务时 `kill -9` 后 1.3–6.0 s 拉起；每轮重连并发任务再杀，第 5 次死亡进入 `safe_mode / crash_loop`，15 s 内不拉起，删 `safe_mode` 标记后退出并拉起；Magisk root 拉前台服务按 `SYSTEM_UID` 豁免（`Allowed … callingUid: 0`），App 自己在后台被拒（`Disallowed … DENIED`） |
+| 模块生命周期（`smoke-test.sh all`） | **0 FAIL**；之后重新刷回并验证 |
+| key 泄漏扫描 | 日志和结果文件命中 0 次；key 只经 stdin 进设备 |
+
+**没做**：KernelSU；API 36 / 37 真机；灭屏 30 分钟与 24 小时驻留；真机上的 `run-android.sh` 冷启动 / 内存数值；Play Protect 界面观察（S1 M8）；首次引导、设置页填 key、通知栏点“关闭”、界面里的真实对话（都要点界面）。
+
+**Jev**：用户给的 Jev key 对默认端点 `https://omnilabs.vibeadmin.cn/v1/systemone` 返回 401 `Invalid API key.`；同一把 key 用 `https://api.typesafe.ai/v1/systemone` 返回 200（Bearer 头，请求体同 `HttpJevProvider`，约 0.8 s，选中了请求里的会话，confidence 0.92）。决定：默认端点改为 `api.typesafe.ai`，仍可配置；手机上的 App 当时没有 Jev 接线（`RuntimeConfig.jev` 没传值），由 D5.1 补上后再在真机上用真 key 测一次。
 
 ## 四、已验证的用户流程（Pixel_8a，用 MiniMax 国内平台真实 key）
 
@@ -48,7 +68,7 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 
 ## 六、需要人来做的事
 
-1. **root 真机**：Magisk / KernelSU × API 35 / 36 / 37。S1、S2、S3、S8 的真机部分、模块安装卸载、监督进程、`desktop_idle.py` 都要在真机上跑一遍。
+1. **更多真机**：Pixel 8（Magisk 30.7，API 35）已跑完；还差 KernelSU，以及 API 36 / 37 的真机。灭屏 30 分钟、24 小时驻留（S2 的 B1、L1）和真机上的冷启动 / 内存数值（S8）也没做。真机上首次引导、填 key、界面对话要有人点界面，这一轮没有走。
 2. **发布证书**：按 README 生成项目发布证书，重新打包。
 3. **内测**：找 10 名极客，计从刷 zip 到第一次对话的时间。
 4. 可选：国际平台的 MiniMax key，用来验证国际预设。
