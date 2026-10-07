@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.agentos.runtime.errors.ErrorCode
+import org.agentos.runtime.ports.ApprovalPolicyPort
 import org.agentos.runtime.ports.Clock
 import org.agentos.runtime.ports.ConsentDecision
 import org.agentos.runtime.ports.ConsentPort
@@ -35,7 +36,8 @@ import org.agentos.runtime.ports.ToolPort
  * | clock | 系统时钟 | — |
  * | environment | [AndroidEnvironment]：previousExitStoppedByUser 来自 ApplicationExitInfo；safe mode 关 | W11：safe mode 来自监督状态 |
  * | log | [AndroidRuntimeLog]：android.util.Log，写之前去掉 key | — |
- * | tools | [NotOpen.TOOLS]：目录为空，调用一律“未开放” | W16：Extension Host |
+ * | tools | [ExtensionClient]：`:ext` 的 IExtensionHost 的薄代理（目录、三种结局；C7b） | — |
+ * | approvals | [ExtensionClient.approvals]：`:ext` 的用户策略的镜像，收到第一份之前 fail closed（C7b） | — |
  * | consent | [NotOpen.CONSENT]：一律拒绝（UNAVAILABLE） | W16：ConsentCoordinator |
  * | skills | [NotOpen.SKILLS]：目录为空，读取一律“未开放” | W20 |
  * | hooks | [NotOpen.HOOKS]：没有 Hook，NO_OPINION | W22 |
@@ -46,8 +48,9 @@ class HostPortImpl(
     override val secrets: KeystoreSecrets,
     override val environment: AndroidEnvironment,
     override val log: RuntimeLog,
+    override val tools: ToolPort = NotOpen.TOOLS,
+    override val approvals: ApprovalPolicyPort = ApprovalPolicyPort.DEFAULT,
 ) : HostPort {
-    override val tools: ToolPort = NotOpen.TOOLS
     override val skills: SkillPort = NotOpen.SKILLS
     override val hooks: HookPort = NotOpen.HOOKS
     override val consent: ConsentPort = NotOpen.CONSENT
