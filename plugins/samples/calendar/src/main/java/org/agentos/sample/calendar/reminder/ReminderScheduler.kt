@@ -28,6 +28,8 @@ class ReminderScheduler(private val context: Context, private val repo: Calendar
         val pending = pendingIntent()
         if (next == null) {
             alarmManager.cancel(pending)
+            pending.cancel() // 连 PendingIntent 一起作废：isAlarmRegistered() 才能如实反映“没有挂闹钟”
+            prefs.edit().remove(KEY_ARMED_AT).remove(KEY_ARMED_ID).remove(KEY_ARMED_LEAD).apply()
             Log.i(TAG, "no upcoming reminders; alarm cancelled")
             return
         }
@@ -37,7 +39,25 @@ class ReminderScheduler(private val context: Context, private val repo: Calendar
             // 没有精确闹钟权限时退化为非精确（USE_EXACT_ALARM 通常是安装时授予的）
             alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.fireAtMs, pending)
         }
+        prefs.edit().putLong(KEY_ARMED_AT, next.fireAtMs).putString(KEY_ARMED_ID, next.occurrenceId).putInt(KEY_ARMED_LEAD, next.minutesBefore).apply()
         Log.i(TAG, "next reminder '${next.title}' (-${next.minutesBefore} min) at ${next.fireAtMs}")
+    }
+
+    /** 系统里是否挂着我们的提醒闹钟（AlarmManager 没有查询接口，用 FLAG_NO_CREATE 看 PendingIntent 是否存在）。 */
+    fun isAlarmRegistered(): Boolean {
+        val intent = Intent(context, ReminderReceiver::class.java).setAction(ACTION_REMINDER)
+        return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE) != null
+    }
+
+    /**
+     * 最近一次交给 AlarmManager 的那条提醒（触发时刻、日程出现的 id、提前分钟）；没有记录则为 null。仅供调试读取。
+     * 记录和系统里是否真的挂着是两回事：用 [isAlarmRegistered] 单独核对。
+     */
+    fun armed(): Triple<Long, String, Int>? {
+        val at = prefs.getLong(KEY_ARMED_AT, -1L)
+        val id = prefs.getString(KEY_ARMED_ID, null)
+        if (at < 0 || id == null) return null
+        return Triple(at, id, prefs.getInt(KEY_ARMED_LEAD, 0))
     }
 
     /** 闹钟触发：发出到点的提醒，然后排下一条。 */
@@ -67,6 +87,9 @@ class ReminderScheduler(private val context: Context, private val repo: Calendar
         const val TAG = "CalendarReminder"
         const val ACTION_REMINDER = "org.agentos.sample.calendar.action.REMINDER"
         private const val KEY_LAST_PROCESSED = "last_processed_ms"
+        private const val KEY_ARMED_AT = "armed_at_ms"
+        private const val KEY_ARMED_ID = "armed_occurrence_id"
+        private const val KEY_ARMED_LEAD = "armed_minutes_before"
         private const val MAX_CATCH_UP_MS = 30 * 60_000L
     }
 }
