@@ -26,6 +26,16 @@
             android:exported="true"
             android:permission="android.permission.DUMP" />
 
+        <!--
+          整合人：工具确认的 adb 无人值守应答（debug / TEST_HOOKS；D5.2 的真实确认界面接入后仍保留）。
+          要求 DUMP 权限；运行在 :agent（ConsentCoordinator 在那里）。
+        -->
+        <receiver
+            android:name=".agent.ConsentDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":agent" />
+
     </application>
 
 </manifest>

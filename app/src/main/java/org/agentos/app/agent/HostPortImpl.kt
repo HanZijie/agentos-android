@@ -50,10 +50,11 @@ class HostPortImpl(
     override val log: RuntimeLog,
     override val tools: ToolPort = NotOpen.TOOLS,
     override val approvals: ApprovalPolicyPort = ApprovalPolicyPort.DEFAULT,
+    /** 工具调用的用户确认：默认一律拒绝；debug 构建里 AgentProcess 换成 ConsentCoordinator（D5.2 的界面接入后 release 也换）。 */
+    override val consent: ConsentPort = NotOpen.CONSENT,
 ) : HostPort {
     override val skills: SkillPort = NotOpen.SKILLS
     override val hooks: HookPort = NotOpen.HOOKS
-    override val consent: ConsentPort = NotOpen.CONSENT
     override val clock: Clock = Clock.SYSTEM
 }
 

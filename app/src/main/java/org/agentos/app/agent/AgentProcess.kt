@@ -73,7 +73,18 @@ class AgentProcess private constructor(val app: Context) {
 
     /** Extension Host（`:ext`）的代理：工具目录、调用、用户策略的镜像（C7b，docs/extensions.md 第 9 节）。 */
     val extensions = ExtensionClient(app, runtimeLog)
-    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals)
+    /**
+     * 工具调用的用户确认。**release 仍是“一律拒绝”**，直到 D5.2 的确认界面（ConsentSurface）接入；
+     * debug 构建里先接上 A11 的 ConsentCoordinator + AutoConsentResponder，让 adb 无人值守端到端测试能放行（ConsentDebugReceiver 设置 mode）。
+     */
+    val autoConsent: org.agentos.runtime.consent.AutoConsentResponder? =
+        if (debuggable) org.agentos.runtime.consent.AutoConsentResponder() else null
+    private val consentPort: org.agentos.runtime.ports.ConsentPort = autoConsent?.let { responder ->
+        // ApprovalWriter 在 D5.2 / C 的跨进程实现到位前不可用：不提供“始终允许”（安全默认）
+        org.agentos.runtime.consent.ConsentCoordinator(responder, org.agentos.runtime.consent.ApprovalWriter.UNAVAILABLE, scope, log = runtimeLog)
+            .also { responder.attach(it) }
+    } ?: NotOpen.CONSENT
+    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals, consent = consentPort)
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
     val engine: RuntimeEngine = AgentRuntimes.create(
