@@ -174,3 +174,25 @@ class World(val scope: TestScope, views: List<InstalledAppView>, enable: List<St
     fun host(config: ExtensionHostConfig = ExtensionHostConfig()): ExtensionToolHost =
         ExtensionToolHost(registry, policy, connector, scope.backgroundScope, config, nowMillis = { scope.testScheduler.currentTime })
 }
+
+/**
+ * 端到端测试（真线程、真 SQLite）的等待：**等条件成立，不等挂钟时间**。
+ *
+ * 以前这些测试用 `delay(50)` / `delay(100)` 后直接断言异步的结果，并把整个测试放在 15 秒的 `withTimeout` 里；机器忙的时候（整个构建并行跑各模块的测试）
+ * 第一个用例光冷启动就能慢几倍，睡眠不够、总预算也容易被挤爆。现在：
+ * - [awaitUntil]：轮询到条件成立为止，最多 [SETUP_MILLIS]；超时抛 [AssertionError]，说明在等什么和当时的状态（[diagnostics]），不是一个没有信息的 TimeoutCancellationException；
+ * - [TEST_MILLIS]：一个用例的总预算，只是防止真挂住时测试永远不结束，不是性能断言；
+ * 断言本身一条没有放宽：等的只是断言的前提（目录里出现了、策略传到了、界面回调到了）。
+ */
+object E2e {
+    const val SETUP_MILLIS = 30_000L
+    const val TEST_MILLIS = 90_000L
+
+    suspend fun awaitUntil(what: String, diagnostics: () -> String = { "" }, timeoutMillis: Long = SETUP_MILLIS, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000
+        while (!condition()) {
+            if (System.nanoTime() > deadline) throw AssertionError("timed out after $timeoutMillis ms waiting for $what" + diagnostics().let { if (it.isEmpty()) "" else ": $it" })
+            delay(10)
+        }
+    }
+}
