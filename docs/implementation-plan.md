@@ -252,7 +252,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 | S2 | 监督契约 v0.1；root 模拟器（adb root，API 35 / 37）上 B0、K1、K2、K4、K5、T1、P1、B1（缩短为 10 分钟）通过；**Pixel 8（Magisk 30.7）真机上正式模块的开机拉起、有任务被杀、崩溃循环进 / 出 safe mode、root 拉前台服务、禁用 / 启用 / 卸载全部通过（`real_supervisor.py` 21/21，`smoke-test.sh` 0 FAIL）** | [spikes/S2.md](spikes/S2.md)：判活看进程，心跳记录任务状态并用来发现短命进程（`boot` 字段必须等于 `Settings.Global.BOOT_COUNT`）；退避 1 → 60 s，10 分钟内 5 次异常退出进入 safe mode；等用户解锁后再拉起，包处于 stopped 时不拉起。**root 拉起前台服务按 `SYSTEM_UID` 豁免后台启动限制**，App 自己在后台被拒时由监督进程 1.9 s 内代为提升 | KernelSU 真机；灭屏 30 分钟、24 小时驻留与内存；K3、K5b |
 | S3 | 第二部分模拟器完成（API 35 / 36 / 37，另在 Pixel_8a 上用 Kotlin 2.3.20 复跑）；**Pixel 8 真机（API 35）上回归 sdk 套件 release 16/16、app 套件 25/25、一致性 33/0/5、desktop_idle 20/20** | 可用；通道参数已定 | API 36 / 37 真机；debug 构建的 sdk 套件；主线程与延迟数值的专门测量 |
 | S8 | 电脑与模拟器全部通过（Node vm、QuickJS/JVM、API 36 debug / R8 release、Pixel_8a R8 release 均 20/20）；MiniMax 国内真实端点（`api.minimaxi.com` 与 `api.minimax.cn`）在电脑和 Pixel_8a 上跑通对话、工具调用、abort；OpenAI 兼容端点用 MiniMax 的 `https://api.minimax.cn/v1`（B7）在电脑和 Pixel_8a 的 `:agent` 上跑通对话、跨轮回忆、工具调用、abort，思考内容以 `<think>` 混在正文里（B8 处理） | 官方 SDK 能在 QuickJS 里跑通，不需要退路；一个运行时承载全部会话，由常驻泵驱动；quickjs-kt 1.0.15，Kotlin ≥ 2.3；Pixel 8 真机（API 35）上经 `:agent` 的真实对话通过 | 真机上的冷启动 / 内存数值；API 36 / 37 真机；MiniMax 国际预设（需要国际 key） |
-| S4 | 未开始（C7b 的设备回归会覆盖大部分：发现、bind、进程死亡、没有权限的 App；结果写 S4.md） | — | — |
+| S4 | **通过**（C7b，laneC 模拟器 API 35 / 36 / 37：发现、读 assets、bind、入站 UID 校验、后台 bind、插件进程死亡、没有权限的 App bind 失败；Pixel 8 真机上三个示例 App 的发现、启用、调用也已跑通） | [spikes/S4.md](spikes/S4.md) | — | — |
 | S5 | 精简版完成（C7a）：**不引入官方 MCP Kotlin SDK**，自写 tools 子集；Binder 部分在 JVM（10 项）、API 36 模拟器跨进程回环（2 项）、R8 release 自测（6/6）通过；单条上限 65,536 字符 | [spikes/S5.md](spikes/S5.md) | 远端 Streamable HTTP（W19，用 OkHttp）；真机 |
 | S6–S7 | 未开始 | — | — |
 
@@ -458,12 +458,12 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] 按 S7 的结论，在支持矩阵里写明已验证的助理手势
 
 #### W14 Extension Host 与插件发现
-- [ ] `:ext` 进程：`ExtensionHostService`、`IExtensionHost`、`IExtensionCallback`
+- [x] `:ext` 进程：`ExtensionHostService`、`IExtensionHost`（v1 和 v2，v2 只在末尾追加）、`IExtensionCallback`，以及 `:agent` 侧的薄代理 `ExtensionClient`（C7b）
 - [x] 把 Agent Plugins 1.0 的 schema 副本放进 `core/protocol/agent-plugins-1.0/`（A7）
 - [x] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`（A7，30 项测试，含三个示例 App 的全部工具名）
 - [x] `ApprovalPolicy`（A7，在 core/runtime 的 broker/，Broker 已按它决定可用与确认）
 - [x] 插件注册表的纯 JVM 部分：`PluginScanLogic`、`PersistedRegistry`、`ApprovalStore`（A8：33 项注册表测试 + ApprovalStore 的坏文件、原子写、备份、fail closed 测试；core:extensions 共 63 项）
-- [ ] `AppPluginScanner`（Android 薄适配层：PackageManager → `InstalledAppView`，保存结果，执行 `Revoke`）
+- [x] `AppPluginScanner`（Android 薄适配层：PackageManager → `InstalledAppView`，监听包变化，保存结果，执行 `Revoke`）、`BinderMcpConnector`、`ExtensionDebugReceiver`、设备回归 `tests/device/mcp-plugin/run.py`（24 项，C7b）
 - [ ] 设置页：插件管理（启用、禁用、审批方式）
 - [ ] 测试：清单解析与校验、工具命名
 
