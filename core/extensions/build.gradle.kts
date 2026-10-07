@@ -38,4 +38,6 @@ tasks.named<Test>("test") {
             .withPropertyName("sampleApps-${root.name}").withPathSensitivity(PathSensitivity.ABSOLUTE).optional()
     }
     inputs.file(rootProject.layout.projectDirectory.file("docs/sample-apps.md")).withPropertyName("sampleAppsDoc").optional()
+    // ToolNamingGoldenTest：与设备验收的 Python 假模型共用的工具名样本
+    inputs.file(rootProject.layout.projectDirectory.file("tests/device/acp-channel/tool_naming_golden.json")).withPropertyName("toolNamingGolden").optional()
 }
