@@ -55,36 +55,53 @@ object MarkdownParser {
 
     fun parseInlines(source: String): List<Inline> = InlineParser(source).parse()
 
-    /** 把一条备忘录的开头渲染成一行纯文本（去掉标记），用于卡片摘要；只解析前面 [maxSourceChars] 个字符。 */
+    /**
+     * 把一条备忘录的开头变成去掉标记的纯文本，保留行结构（一行一段 / 一项），用于卡片预览：
+     * 列表项以 • / 1. / ☐ / ☑ 开头。只解析前面 [maxSourceChars] 个字符，总长不超过 [maxChars]（超出以 … 结尾）。
+     */
     fun plainText(content: String, maxChars: Int = 160, maxSourceChars: Int = 1200): String {
         val head = if (content.length > maxSourceChars) content.substring(0, maxSourceChars) else content
-        val sb = StringBuilder()
-        fun add(text: String) {
+        val lines = ArrayList<String>()
+        var size = 0
+        fun add(text: String, indent: Int = 0) {
             val t = text.trim()
-            if (t.isEmpty()) return
-            if (sb.isNotEmpty()) sb.append(' ')
-            sb.append(t)
+            if (t.isEmpty() || size > maxChars) return
+            val line = "  ".repeat(indent) + t
+            lines += line
+            size += line.length + 1
         }
-        fun walk(blocks: List<Block>) {
+        fun walk(blocks: List<Block>, depth: Int) {
             for (block in blocks) {
-                if (sb.length >= maxChars) return
+                if (size > maxChars) return
                 when (block) {
                     is Block.Heading -> add(inlinesText(block.inlines))
-                    is Block.Paragraph -> add(inlinesText(block.inlines).replace(Regex("\\s+"), " "))
-                    is Block.CodeBlock -> add(block.code.replace(Regex("\\s+"), " "))
-                    is Block.Quote -> walk(block.blocks)
-                    is Block.ListBlock -> block.items.forEach { item ->
-                        val mark = when (item.checked) { true -> "☑"; false -> "☐"; null -> "•" }
-                        val before = sb.length
-                        walk(item.blocks)
-                        if (sb.length > before) sb.insert(before + if (before > 0) 1 else 0, "$mark ")
+                    is Block.Paragraph -> inlinesText(block.inlines).lines().forEach { add(it) }
+                    is Block.CodeBlock -> block.code.lines().forEach { add(it) }
+                    is Block.Quote -> walk(block.blocks, depth)
+                    is Block.ListBlock -> block.items.forEachIndexed { index, item ->
+                        val mark = when {
+                            item.checked == true -> "☑ "
+                            item.checked == false -> "☐ "
+                            block.ordered -> "${block.start + index}. "
+                            else -> "• "
+                        }
+                        val first = item.blocks.firstOrNull()
+                        if (first is Block.Paragraph) {
+                            val itemLines = inlinesText(first.inlines).lines().filter { it.isNotBlank() }
+                            itemLines.forEachIndexed { i, l -> add(if (i == 0) mark + l.trim() else l, depth) }
+                            walk(item.blocks.drop(1), depth + 1)
+                        } else {
+                            add(mark.trim(), depth)
+                            walk(item.blocks, depth + 1)
+                        }
                     }
                     Block.Rule -> Unit
                 }
             }
         }
-        walk(parse(head))
-        return if (sb.length <= maxChars) sb.toString() else sb.substring(0, maxChars).trimEnd() + "…"
+        walk(parse(head), 0)
+        val joined = lines.joinToString("\n")
+        return if (joined.length <= maxChars) joined else joined.substring(0, maxChars).trimEnd() + "…"
     }
 
     fun inlinesText(inlines: List<Inline>): String = buildString {

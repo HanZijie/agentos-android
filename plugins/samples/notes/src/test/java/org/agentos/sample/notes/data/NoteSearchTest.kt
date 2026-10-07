@@ -99,6 +99,14 @@ class NoteSearchTest {
         assertEquals("Budget", hit.note.displayTitle.substring(hit.titleRanges[0].first, hit.titleRanges[0].last + 1))
     }
 
+    @Test fun `snippet does not start in the middle of a latin word`() {
+        val text = "alphabetical ".repeat(10) + "needle" + " tail"
+        val s = NoteSearch.search(listOf(note("1", content = text)), "needle").single().snippet
+        val body = s.text.removePrefix("…")
+        assertTrue(body, body.startsWith("alphabetical"))
+        assertEquals("needle", s.text.substring(s.ranges[0].first, s.ranges[0].last + 1))
+    }
+
     @Test fun `snippet does not split surrogate pairs`() {
         val emoji = "😀"
         val text = emoji.repeat(60) + "needle" + emoji.repeat(60)

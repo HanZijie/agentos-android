@@ -15,6 +15,7 @@ import kotlinx.serialization.json.jsonPrimitive
 class SqliteNoteStore(context: Context, name: String? = DB_NAME) : NoteStore {
     private val helper = Helper(context.applicationContext, name)
 
+    @Suppress("Recycle") // Cursor 由下面的 use 关闭
     override fun loadAll(): List<Note> {
         val result = ArrayList<Note>()
         helper.readableDatabase.query(

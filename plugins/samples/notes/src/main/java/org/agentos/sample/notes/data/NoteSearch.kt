@@ -113,6 +113,13 @@ object NoteSearch {
         var end = minOf(content.length, anchor + AFTER)
         if (start > 0 && Character.isLowSurrogate(content[start])) start++
         if (end < content.length && Character.isLowSurrogate(content[end])) end--
+        // 起点落在英文单词中间时，往后挪到词尾，免得片段以半个词开头
+        if (start > 0 && content[start].code < 0x2E80 && content[start].isLetterOrDigit() && content[start - 1].isLetterOrDigit()) {
+            var next = start
+            while (next < anchor && next - start < 12 && content[next].isLetterOrDigit()) next++
+            while (next < anchor && content[next] == ' ') next++
+            if (next < anchor) start = next
+        }
         val body = oneLine(content.substring(start, end))
         val prefix = if (start > 0) "…" else ""
         val suffix = if (end < content.length) "…" else ""

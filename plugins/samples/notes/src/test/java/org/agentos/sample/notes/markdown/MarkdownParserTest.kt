@@ -140,10 +140,13 @@ class MarkdownParserTest {
         assertTrue(list.items[0].blocks[1] is Block.ListBlock)
     }
 
-    @Test fun `plain text strips markup for card summaries`() {
-        val src = "# Title\nSome **bold** and [link](https://a.org).\n- [x] done\n- open\n> quote\n```\ncode here\n```"
-        assertEquals("Title Some bold and link. ☑ done • open quote code here", MarkdownParser.plainText(src, 200))
-        assertEquals("Title Some…", MarkdownParser.plainText(src, 10))
+    @Test fun `plain text strips markup but keeps the line structure for card previews`() {
+        val src = "# Title\nSome **bold** and [link](https://a.org).\n- [x] done\n- open\n  - nested\n1. first\n> quote\n```\ncode here\n```"
+        assertEquals(
+            "Title\nSome bold and link.\n☑ done\n• open\n  • nested\n1. first\nquote\ncode here",
+            MarkdownParser.plainText(src, 200),
+        )
+        assertEquals("Title\nSome…", MarkdownParser.plainText(src, 10))
         assertEquals("", MarkdownParser.plainText("---\n\n"))
     }
 

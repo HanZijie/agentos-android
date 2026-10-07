@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <!-- 只在 debug 包里：adb 直接调工具层（与 MCP 走同一个仓库），用来在设备上验证界面实时刷新 -->
+        <receiver
+            android:name=".debug.DebugCallReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver" />
+    </application>
+
+</manifest>
