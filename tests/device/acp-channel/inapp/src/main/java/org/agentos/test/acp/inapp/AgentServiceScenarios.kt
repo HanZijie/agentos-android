@@ -123,7 +123,8 @@ class AgentServiceScenarios(
 
     /**
      * 从主进程跨进程调用 :ext 里的 IExtensionHost（inapp 看不到 app 的 AIDL 类，用反射）：版本、插件列表、目录、
-     * 不受理的 callTool、错误以 agentos.ext.<code> 原样传回、诊断；并确认服务确实运行在 :ext 进程。
+     * 不受理的 callTool、错误以 agentos.ext.<code> 原样传回、refreshTools、诊断；并确认服务确实运行在 :ext 进程。
+     * C7b 起是真实实现：插件列表取决于设备上装了哪些插件 App，这里只查形状；插件与工具的行为见 tests/device/mcp-plugin。
      */
     private suspend fun extHost(): JSONObject {
         val component = android.content.ComponentName(TestIds.APP_PKG, "${TestIds.APP_PKG}.ext.ExtensionHostService")
@@ -151,17 +152,24 @@ class AgentServiceScenarios(
                 val version = call("getVersion") as Int
                 val plugins = org.json.JSONArray(call("listPlugins") as String)
                 val catalog = JSONObject(call("getCatalog") as String)
-                val accepted = call("callTool", "c7a-1", JSONObject().put("name", "mcp__x__y__z").toString(), null) as Boolean
+                // 回调传 null（inapp 拿不到 app 的 Stub 类）：不在目录里的工具在要求回调之前就返回 false
+                val accepted = call("callTool", "c7b-1", JSONObject().put("name", "mcp__x__y__z").toString(), null) as Boolean
+                val badRequest = errorOf { call("callTool", "c7b-2", "not json", null) }
+                val refresh = JSONObject(call("refreshTools", 2_000L, false) as String)
                 val notFound = errorOf { call("setPluginEnabled", "org.example.none", true) }
                 val badMode = errorOf { call("setToolApproval", "mcp__x__y__z", "always_allow") }
                 val diag = JSONObject(call("getDiagnostics") as String)
                 val extPid = ctx.getSystemService(ActivityManager::class.java).runningAppProcesses
                     ?.firstOrNull { it.processName == "${TestIds.APP_PKG}:ext" }?.pid
                 val checks = JSONObject()
-                    .put("version", version == 1)
-                    .put("noPluginsYet", plugins.length() == 0)
-                    .put("emptyCatalog", catalog.optJSONArray("tools")?.length() == 0 && catalog.optJSONObject("policy")?.optInt("version") == 1)
+                    .put("version", version == 2)
+                    .put("pluginsShape", (0 until plugins.length()).all { plugins.getJSONObject(it).let { p -> p.has("id") && p.has("status") && p.has("servers") } })
+                    .put("catalogShape", catalog.optJSONArray("tools") != null && catalog.optJSONObject("policy")?.optInt("version") == 1 &&
+                        catalog.opt("policyFailClosed") is Boolean)
                     .put("callNotAccepted", !accepted)
+                    .put("badRequestCode", badRequest?.startsWith("IllegalArgumentException: agentos.ext.bad_request") == true)
+                    .put("refreshShape", refresh.optJSONArray("refreshed") != null && refresh.has("timedOut"))
+                    .put("realImplementation", diag.optString("implementation") == "c7b" && diag.optJSONObject("calls") != null)
                     .put("notFoundCode", notFound?.startsWith("IllegalArgumentException: agentos.ext.not_found") == true)
                     .put("badModeCode", badMode?.startsWith("IllegalArgumentException: agentos.ext.bad_mode") == true)
                     .put("runsInExtProcess", extPid != null && extPid != Process.myPid())

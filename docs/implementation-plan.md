@@ -476,7 +476,8 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 #### W16 风险策略与确认
 - [x] `RiskPolicy`（A7：MCP 工具默认按“写”处理，注解只能调高等级；`CapabilityBroker` 已按用户策略决定可用与确认，被禁用的工具对模型等同不存在）
 - [ ] `CapabilityBroker` 接上 Extension Host：按目录校验工具名，转发、超时、取消
-- [ ] `ConsentCoordinator` 与 `consent/` 界面：前台弹窗、后台通知、写明发起请求的 App
+- [x] `ConsentCoordinator` 的逻辑部分（A11，core/runtime：排队、超时、选项校验、始终允许写回、文案转义、任务取消时撤回、自动应答器；58 + 8 项测试）
+- [ ] `consent/` 界面（D5.2）：前台对话框、后台通知、`ConsentSurface` 与 `ApprovalWriter` 的 Android 实现、`HostPortImpl.consent` 接线、`ConsentDebugReceiver`
 - [ ] `session/request_permission`：按“只能追加拒绝”的规则接入
 
 #### W17 自带插件与示例 App
@@ -499,7 +500,8 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [ ] `UserMcpConfig` 与设置页：填写地址和请求头、试连一次
 
 #### W20 Skills
-- [ ] `SkillCatalog`、`SkillPrompt`（系统提示里的目录、`read_skill` 工具）
+- [x] `ExtensionSkillPort`、`SkillPrompt`（系统提示里的目录、`read_skill` 工具、路径检查、frontmatter 容错）：纯 JVM 部分由 A10 完成，含注入用例；`ToolPort.prepare` 任务开始前钩子
+- [ ] Android 接缝：`SkillFileSource`（读 App 内嵌插件的 assets，C7b）、`HostPortImpl.skills` 接线、设置页显示 Skill 问题
 
 #### W21 Runner
 - [ ] Runner APK：`RunnerService`、`CommandExecutor`、`PluginMirror`
