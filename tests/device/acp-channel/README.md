@@ -122,7 +122,7 @@ app 用例要求 APK 里有 `assets/model-catalog.json`（BYOK 的厂商预设�
 
 ## 示例 App 端到端验收（A12，`sample_apps_e2e.py`）
 
-目标：闹钟、日历、备忘录三个示例 App（`plugins/samples/*`）能被 AgentOS 经 MCP 完整操作，可重复、有证据。只用 adb，不点界面。需要 AgentOS 与三个示例 App 的 **debug** 包（App 数据库用 `run-as` 读，是判断结果的依据，不是 App 自己的工具层）。
+目标：闹钟、日历、备忘录三个示例 App（`plugins/samples/*`）能被 AgentOS 经 MCP 完整操作，可重复、有证据。只用 adb，不点界面。需要 AgentOS 与三个示例 App 的 **debug** 包。判断结果的依据是各 App 自己的 debug `dump` 入口（`adb shell am broadcast -n <包名>/<接收器> --es cmd dump [--ei offset N --ei limit M]`，结果在广播的 result data，按 `next_offset` 翻页）：真机（user 构建）上没有 `sqlite3`，`run-as … sqlite3` 用不了。闹钟 `.debug.DebugToolReceiver`（`scheduled[].registered` 是向 AlarmManager 实测的，证明“通过 MCP 设的闹钟真的在系统里排了”）、备忘录 `.debug.DebugCallReceiver`；日历的 dump 还没到 main，暂时用 `run-as <包名> cat databases/calendar.db` 把库拷到电脑上读（手机上不需要 sqlite3），dump 到位后只换 `CalendarState` 一个类。\n\n**驱动会在运行前后对三个 App 做 `--es cmd reset`（清空 App 里全部闹钟、备忘录、日程，并取消系统里已排的闹钟）**，请在测试机上跑；`--no-reset` 则保留原有数据、只清理本次运行创建的（标记 `e2e-<run id>`）。
 
 ```sh
 ./gradlew :app:assembleDebug :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug :tests:device:acp-channel:client:assembleDebug
@@ -131,12 +131,20 @@ set -a; . ../.secrets/minimax.env; set +a
 python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live     # 自然语言，真实 MiniMax
 ```
 
-选项：`--only alarm,calendar,notes`、`--no-install`、`--allow-enabled`（上次中断后插件还开着）、`--keep-data`（不清理）、`--label`。
+选项：`--only alarm,calendar,notes`、`--no-install`、`--allow-enabled`（上次中断后插件还开着）、`--no-reset`、`--keep-data`（运行后什么都不清）、`--live`（真实 MiniMax-M3）、`--tunnel`（`--live` 时手机没有互联网：真实 key 留在电脑上，由 `live_tunnel.py` 转发）、`--tell-date`（`--live` 时每条 prompt 前面加上今天的日期；不加则模型要自己查，`agenda_today`）、`--label`。
 
-流程与判定：`ExtensionDebugReceiver list`（三个插件被发现且默认关）→ `enable` → `catalog`（29 个文档要求的工具以最终名字出现，风险按 RiskPolicy：第三方 MCP 工具 WRITE，`*_delete` 为 HIGH）→ 电脑端接入 + 配对 + `ConsentDebugReceiver mode=allow` → 每一步一个假模型脚本（`toolCalls`），步骤后读 App 数据库对比。脚本模式覆盖：闹钟 建→列→改→关→开→get→next→删；日历 建日历→建日程（每周重复+提醒）→列区间（展开 3 次）→搜索→free_slots→改→删日程→删日历；备忘录 建→追加→搜索→改标签→tag_list→进回收站→恢复→再回收站→永久删除。失败路径：缺参数、非法值、不存在的 id（错误回到模型、数据不变）、拒绝确认（`tool_denied`、数据不变）、插件关闭（目录里没有它的工具、调用被拒）再打开（工具回来）、备忘录 `note_delete` 非回收站笔记被拒。`--live` 三条 prompt（“明早 7 点叫我起床”“下周三下午 3 点和王总开会，提前 15 分钟提醒”“记一条关于新品发布的备忘，打上工作标签”）：同样读 App 状态，记录模型实际的工具序列（`toolSequence`）与耗时；key 经 stdin（`live-model-set`），结束后 `live-model-clear`，结果与 logcat 里搜 key（`leakScan`）。
+流程与判定：`ExtensionDebugReceiver list`（三个插件被发现且默认关）→ `enable` → `catalog`（29 个文档要求的工具以最终名字出现，风险按 RiskPolicy：第三方 MCP 工具 WRITE，`*_delete` 为 HIGH）→ 配对 + `ConsentDebugReceiver mode=allow` → 每一步一个假模型脚本（`toolCalls`），步骤后读 App 的 dump 对比（闹钟还核对 `registered`：建、改、开之后为真，关、删之后不再有）。脚本模式覆盖：闹钟 建→列→改→关→开→get→next→删；日历 建日历→建日程（每周重复+提醒）→列区间（展开 3 次）→搜索→free_slots→改→删日程→删日历；备忘录 建→追加→搜索→改标签→tag_list→进回收站→恢复→再回收站→永久删除。失败路径：缺参数、非法值、不存在的 id（错误回到模型、数据不变）、拒绝确认（`tool_denied`、数据不变）、插件关闭（目录里没有它的工具、调用被拒）再打开（工具回来）、备忘录 `note_delete` 非回收站笔记被拒。`--live` 三条 prompt（“明早 7 点叫我起床”“下周三下午 3 点和王总开会，提前 15 分钟提醒”“记一条关于新品发布的备忘，打上工作标签”）：**只看 App 状态**，不要求固定的工具序列（真实 M3 会先 `note_search` 再 `note_create`、先 `event_list` 再 `event_create`，也可能出错后重试）；实际的工具序列（`toolSequence`）、失败的调用（`failedCalls`）和耗时只作记录。
 
-结果 `results/raw/sample-apps-<serial>-api<N>-<mode>-<时间>.json`：每步 `checks[{name, ok, expected, actual}]`、`turn`（停止原因、工具调用与结果摘要）、失败摘要在 `summary.failures`（“哪一步失败、期望什么、实际什么”）；退出码 0 = 全部通过。本次运行创建的数据带标记 `e2e-<run id>`，结束（含失败）时自动清理，清理不掉的在 `notes` 里写明。
+**模型的顺序很重要**：名字不以 `live-` / `byok-` 开头的 inapp 场景（`desktop-access`、`handshake` 等）会先跑 `ensureTestModel`，把模型源改回回环假端点（127.0.0.1:18787）。所以驱动先开电脑端接入、**最后**才配真实模型（预设 `minimax-cn` / `MiniMax-M3`，key 经 stdin，`live-model-set`），并在发第一条 prompt 前用 `DesktopGatewayDebugReceiver status` 核对 `modelBaseUrl` 以 `https://api.minimaxi.com` 开头、`modelId=MiniMax-M3`（`setup.model` 步骤，不对就整个运行停在这里）；结束后 `live-model-clear`，在 logcat 和结果里搜 key（`leakScan`）。
 
-调试入口的形状（AgentOS 侧 C7b / D5.2 还在做）按 `sample_apps_lib.py` 开头的约定写：`ExtensionDebugReceiver` 的 `list` 返回 `{"plugins":[{name,package,enabled}]}`，`catalog` 返回 `{"tools":[{name,risk}]}`（只含已启用的工具）；`ConsentDebugReceiver` 的 `mode`、`recent`。组件名可用 `AGENTOS_EXT_RECEIVER`、`AGENTOS_CONSENT_RECEIVER` 覆盖。
+结果 `results/raw/sample-apps-<serial>-api<N>-<mode>-<时间>.json`：每步 `checks[{name, ok, expected, actual}]`、`turn`（停止原因、工具调用与结果摘要）、失败摘要在 `summary.failures`（“哪一步失败、期望什么、实际什么”）；退出码 0 = 全部通过。默认的清场是运行前后的 reset（`setup.reset` / `teardown.reset` 两步，核对三个 App 确实空了、闹钟在系统里也取消了）；`--no-reset` 时本次运行创建的数据带标记 `e2e-<run id>`，结束（含失败）时自动清理，清理不掉的在 `notes` 里写明。
 
-不需要设备的测试：`unit/test_sample_apps_driver.py` 用 `unit/fake_world.py`（三个 App 的 SQLite、AgentOS 的调试入口和 acp-bridge 的假实现，脚本由真正的 `scripted_tools` 规划）跑完整流程，并验证各种故障（App 没写入、目录缺工具、风险被降低、数据库读不出、模型选错时间…）会在对应步骤被指出。
+调试入口（main 里已有，形状见 `sample_apps_lib.py` 开头）：`ExtensionDebugReceiver`（`list` 的 `plugins[{id, packageName, name, enabled, status}]`；`enable`/`disable` 用 `--es id <包名或插件 ID>`；`catalog` 的 `catalog.tools[{name, risk:"read|write|high"}]`；`wait_catalog` 在 App 里等工具出现/消失）、`ConsentDebugReceiver`（`mode`、`status`、`recent[{requestId, tool, risk, source, args, options, answeredWith, end, notice}]`）、`DesktopGatewayDebugReceiver`。组件名可用 `AGENTOS_EXT_RECEIVER`、`AGENTOS_CONSENT_RECEIVER` 覆盖。
+
+确认行为（整合在 Pixel 8 上发现，驱动按它写）：
+1. `mode=allow` 对 WRITE 工具自动选“本会话内不再询问”（`ALLOW_FOR_SESSION`），该工具在这个 ACP 会话里被记住；同一会话里再切 `mode=deny`，同一工具直接执行、不再确认。所以**拒绝路径一律先 `session/new` 再跑**（`deny_pre`），并且用 `recent` 核对这条请求确实被记成 `DENY`（`declined()`）；`alarm.switch_on` 还核对 `alarm_set_enabled` 在会话里只被问了一次。
+2. HIGH（`*_delete`）只提供 `ALLOW_ONCE` / `DENY`，`mode=allow` 选 `ALLOW_ONCE`，照样放行。
+3. 每个 App 结束后有一步 `audit.<app>`：读 `recent` 里本次运行的请求（以开始前的 requestId 为基线，不受上次运行影响），核对来源行 `来自插件「alarm」 · 服务器「alarm」`、风险（`*_delete` 为 HIGH，其余全是 WRITE）、选项、自动应答的选择（在选项内、从不是 `ALWAYS_ALLOW`、没有超时）。`--live` 结束时对每个 App 也做这一步。
+4. 第三方 App 的所有工具默认 WRITE，包括 `*_list` / `*_get`：查询也要确认；只有自带插件的 `readOnlyHint` 才降为 READ。
+
+不需要设备的测试：`unit/test_sample_apps_driver.py` 用 `unit/fake_world.py`（三个 App 的 SQLite 加它们真实形状的 dump / reset 入口——闹钟的 `scheduled[].registered`、翻页的 `next_offset`、只认 Int 的 `offset` / `limit`——AgentOS 的调试入口含“本会话内不再询问”的记忆，和 acp-bridge 的假实现，脚本由真正的 `scripted_tools` 规划）跑完整流程，并验证各种故障（App 没写入、闹钟存了但没在系统里排、删除后仍登记、reset 清不干净、dump 失败或不翻页、目录缺工具、风险被降低、模型源被换回假端点、模型选错时间…）会在对应步骤被指出。假手机不允许拷闹钟和备忘录的数据库：只要驱动那样读，单测就会失败。

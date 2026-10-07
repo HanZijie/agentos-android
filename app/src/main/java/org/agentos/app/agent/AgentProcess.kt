@@ -80,11 +80,15 @@ class AgentProcess private constructor(val app: Context) {
     val autoConsent: org.agentos.runtime.consent.AutoConsentResponder? =
         if (debuggable) org.agentos.runtime.consent.AutoConsentResponder() else null
     private val consentPort: org.agentos.runtime.ports.ConsentPort = autoConsent?.let { responder ->
-        // ApprovalWriter 在 D5.2 / C 的跨进程实现到位前不可用：不提供“始终允许”（安全默认）
-        org.agentos.runtime.consent.ConsentCoordinator(responder, org.agentos.runtime.consent.ApprovalWriter.UNAVAILABLE, scope, log = runtimeLog)
+        // “始终允许”经 IExtensionHost 写到 :ext 的 ApprovalStore（C7b，整合人 2026-10-07 确认）。:ext 没连上、还没收到策略、
+        // 策略 fail closed 时 available=false，确认框不提供这一项；AutoConsentResponder 从不选它，测试不会改用户策略
+        org.agentos.runtime.consent.ConsentCoordinator(responder, extensions.approvalWriter, scope, log = runtimeLog)
             .also { responder.attach(it) }
     } ?: NotOpen.CONSENT
-    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals, consent = consentPort)
+    val hostPort = HostPortImpl(
+        store, models, secrets, environment, runtimeLog,
+        tools = extensions, approvals = extensions.approvals, skills = extensions.skills, consent = consentPort,
+    )
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
     val engine: RuntimeEngine = AgentRuntimes.create(

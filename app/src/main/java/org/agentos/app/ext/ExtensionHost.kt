@@ -27,15 +27,18 @@ import kotlinx.serialization.json.put
 import org.agentos.app.agent.AndroidRuntimeLog
 import org.agentos.app.ext.mcp.BinderMcpConnector
 import org.agentos.app.ext.registry.ExtRegistry
-import org.agentos.app.ext.registry.resolvePluginEnabled
+import org.agentos.app.ext.skills.AssetSkillFileSource
 import org.agentos.app.ext.registry.toApprovalMode
 import org.agentos.extensions.host.DisabledReason
 import org.agentos.extensions.host.ExtensionHostConfig
 import org.agentos.extensions.host.ExtensionToolHost
+import org.agentos.extensions.host.KnownTool
 import org.agentos.extensions.host.McpServerConnector
 import org.agentos.extensions.host.ServerKey
 import org.agentos.extensions.host.ServerState
+import org.agentos.extensions.registry.PluginRecord
 import org.agentos.extensions.registry.PluginStatus
+import org.agentos.extensions.skills.ExtensionSkillPort
 import org.agentos.extensions.registry.RegistryEvent
 import org.agentos.runtime.broker.ApprovalMode
 import org.agentos.runtime.broker.ApprovalPolicy
@@ -43,6 +46,7 @@ import org.agentos.runtime.broker.PolicyScope
 import org.agentos.runtime.broker.RiskPolicy
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.ports.CatalogTool
+import org.agentos.runtime.ports.SkillCatalog
 import org.agentos.runtime.ports.ToolCatalog
 import org.agentos.runtime.ports.ToolInvocationResult
 import org.agentos.runtime.ports.ToolSource
@@ -57,8 +61,10 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * - 插件注册表与用户策略：[ExtRegistry]（A8 的 PluginScanLogic / ApprovalStore；:ext 是策略的唯一写入方）。
  * - 工具目录、连接生命周期、调用的三种结局：A9 的 [ExtensionToolHost]（纯 JVM），连接器是 [BinderMcpConnector]。
- * - [snapshot]：目录 + 策略，**任一变化**版本号加一（ExtensionToolHost 的目录版本只随目录内容变，审批方式改了它不变，
+ * - Skill 目录与读取：A10 的 [ExtensionSkillPort]，文件经 [AssetSkillFileSource]（插件 App 的 assets）。
+ * - [snapshot]：工具目录 + Skill 目录 + 策略，**任一变化**版本号加一（ExtensionToolHost 的目录版本只随目录内容变，审批方式改了它不变，
  *   但运行时的策略镜像要更新），经 IExtensionCallback.onCatalogChanged 通知订阅方。
+ * - 注册表变了（安装、升级、卸载）或启用了插件：后台 `refreshNow(force = true)`（ExtensionToolHost 连接失败后 30 秒内不自动重试）。
  * - 调用：[callTool] 受理后恰好一次 `deliver`；[cancelTool] 取消（ExtensionToolHost 把取消转给插件）；
  *   调用方（:agent）死亡时它的调用全部取消（[cancelCallsOf]）。
  */
@@ -83,17 +89,13 @@ class ExtensionHost(
         nowMillis = SystemClock::elapsedRealtime,
     )
 
+    val skills = ExtensionSkillPort(registry.registry, registry.approvals, AssetSkillFileSource(context), scope)
+
     /** 目录 + 策略的一致快照；[version] 在 :ext 进程内单调递增（:ext 重建后从 1 重新开始，运行时不依赖它跨进程单调）。 */
-    data class Snapshot(val version: Long, val catalog: ToolCatalog, val policy: ApprovalPolicy)
+    data class Snapshot(val version: Long, val catalog: ToolCatalog, val policy: ApprovalPolicy, val skills: SkillCatalog = SkillCatalog.EMPTY)
 
     private val snapshotFlow = MutableStateFlow(Snapshot(0, ToolCatalog.EMPTY, registry.approvals.policy.value))
     val snapshot: StateFlow<Snapshot> = snapshotFlow.asStateFlow()
-
-    /**
-     * 见过的工具（按来源），给插件页列出**被禁用的**工具（ExtensionToolHost 的目录只含启用的）。
-     * 只在本进程内记得：:ext 重建后，被工具级禁用的工具要等它的服务器再连上一次才重新出现（报告里请 A 提供已知工具的接口）。
-     */
-    private val known = LinkedHashMap<ToolSource, CatalogTool>()
 
     private class Call(val job: Job, val owner: IBinder?)
     private val calls = ConcurrentHashMap<String, Call>()
@@ -107,15 +109,11 @@ class ExtensionHost(
 
     fun start() {
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            registry.events.collect { e ->
-                tools.onRegistryEvent(e)
-                if (e is RegistryEvent.Revoke) forget(e.pluginId)
-            }
+            registry.events.collect { e -> tools.onRegistryEvent(e) }
         }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            combine(tools.catalog, registry.approvals.policy) { c, p -> c to p }.collect { (c, p) ->
-                remember(c, p)
-                snapshotFlow.update { Snapshot(it.version + 1, c, p) }
+            combine(tools.catalog, registry.approvals.policy, skills.catalog) { c, p, k -> Triple(c, p, k) }.collect { (c, p, k) ->
+                snapshotFlow.update { Snapshot(it.version + 1, c, p, k) }
             }
         }
         scope.launch(Dispatchers.IO) {
@@ -139,15 +137,49 @@ class ExtensionHost(
     }
 
     override fun close() {
+        skills.close()
         tools.close()
         scope.cancel()
     }
 
+    /** 重新扫描；注册表变了就强制刷新一次工具列表。失败抛出（IExtensionHost.rescan 用）。 */
+    fun rescan() {
+        val before = registry.registry.value
+        registry.rescan()
+        if (registry.registry.value != before) refreshInBackground("registry changed")
+    }
+
+    /** 包变化时用：失败只记下原因。 */
+    fun rescanQuietly() {
+        val before = registry.registry.value
+        if (registry.rescanQuietly() && registry.registry.value != before) refreshInBackground("registry changed")
+    }
+
+    fun setPluginEnabled(id: String?, enabled: Boolean) {
+        registry.setPluginEnabled(id, enabled)
+        if (enabled) refreshInBackground("plugin enabled")
+    }
+
+    private fun refreshInBackground(why: String) {
+        scope.launch {
+            val r = tools.refreshNow(FORCED_REFRESH_TIMEOUT_MS, force = true)
+            Log.i(TAG, "forced refresh ($why): ${r.refreshed.size} refreshed, ${r.failed.size} failed, timedOut=${r.timedOut}")
+        }
+    }
+
     // ------------------------------------------------------------------ 插件管理
 
-    fun pluginsJson(): String = JSONArray(registry.registry.value.plugins.map { registry.pluginJson(it, serverViews(it.id)) }).toString()
+    fun pluginsJson(): String = JSONArray(registry.registry.value.plugins.map { pluginView(it) }).toString()
 
-    fun pluginJson(id: String?): String = registry.plugin(id).let { registry.pluginJson(it, serverViews(it.id)) }.toString()
+    fun pluginJson(id: String?): String = pluginView(registry.plugin(id)).toString()
+
+    private fun pluginView(p: PluginRecord): JSONObject {
+        val problems = skills.problems.value[p.id].orEmpty()
+        return registry.pluginJson(p, serverViews(p.id))
+            // SkillSummary.provider 是插件名（A10），不是插件 ID
+            .put("skillCount", skills.catalog.value.skills.count { p.name != null && it.provider == p.name })
+            .put("skillProblems", JSONArray(problems.map { JSONObject().put("code", it.code).put("message", it.message) }))
+    }
 
     private fun serverViews(pluginId: String): Map<String, ExtRegistry.ServerView> {
         val catalog = tools.catalog.value
@@ -158,58 +190,59 @@ class ExtensionHost(
     }
 
     /**
-     * 一个插件的全部工具（含被禁用的）。插件可用、已启用但还没有任何工具时，先等一次刷新（最多 [LIST_REFRESH_TIMEOUT_MS]）。
+     * 一个插件的全部工具（含被策略禁用的）：A9 的 [ExtensionToolHost.knownTools]，JSON 与 [KnownTool] 字段一一对应（[ExtWire.knownToolJson]）。
+     * 插件可用、插件级已启用但还没有已知工具（刚启用、`:ext` 刚重建还没连上）时，先等一次刷新（最多 [LIST_REFRESH_TIMEOUT_MS]）。
+     * 插件被禁用时不为了显示去连接：`:ext` 重建后、启用一次之前它没有工具列表（返回空数组，插件页显示“启用后可查看工具”）。
      */
     fun listTools(pluginId: String?): String {
         val p = registry.plugin(pluginId)
         if (p.status != PluginStatus.READY) throw ExtError.unavailable("plugin $pluginId is ${p.status.name.lowercase()}")
         val name = p.name
-        if (name != null && registry.approvals.policy.value.resolvePluginEnabled(name) && knownFor(p.id).isEmpty()) {
+        if (name != null && registry.approvals.policy.value.pluginEnabled(name) && tools.knownTools(p.id).isEmpty()) {
             runBlocking { tools.refreshNow(LIST_REFRESH_TIMEOUT_MS) }
         }
-        val policy = registry.approvals.policy.value
-        remember(tools.catalog.value, policy)
-        return JsonArray(knownFor(p.id).map { ExtWire.toolJson(it, policy) }).toString()
+        return JsonArray(tools.knownTools(p.id).map { ExtWire.knownToolJson(it) }).toString()
     }
 
     fun setToolEnabled(toolName: String?, enabled: Boolean): String {
         val t = findTool(toolName)
-        val s = t.source ?: throw ExtError.notFound(toolName)
+        val s = t.source
         // 启用写 null（清掉工具级的禁用，沿用服务器 / 插件级）；禁用写 false
-        val policy = registry.updatePolicy { it.withEnabled(PolicyScope.Tool(s.plugin, s.server, s.tool), if (enabled) null else false) }
-        return ExtWire.toolJson(t, policy).toString()
+        registry.updatePolicy { it.withEnabled(PolicyScope.Tool(s.plugin, s.server, s.tool), if (enabled) null else false) }
+        return updated(t)
     }
 
+    /** 先校验审批方式（bad_mode），再找工具（not_found）：与插件级 setPluginApproval 的顺序相同。 */
     fun setToolApproval(toolName: String?, mode: String?): String {
         ExtError.checkMode(mode)
-        val t = findTool(toolName)
-        val s = t.source ?: throw ExtError.notFound(toolName)
+        return setApproval(findTool(toolName), mode)
+    }
+
+    /** 按来源（确认框的“始终允许”写回，A11 ApprovalWriter）。 */
+    fun setToolApprovalBySource(plugin: String?, server: String?, tool: String?, mode: String?): String {
+        ExtError.checkMode(mode)
+        val src = ToolSource(plugin ?: "", server ?: "", tool ?: "")
+        val t = tools.knownTools().firstOrNull { it.source == src } ?: throw ExtError.notFound("$plugin/$server/$tool")
+        return setApproval(t, mode)
+    }
+
+    private fun setApproval(t: KnownTool, mode: String?): String {
+        ExtError.checkMode(mode)
+        val s = t.source
         val approval = mode.toApprovalMode()
         if (approval == ApprovalMode.ALWAYS && !RiskPolicy.mayAlwaysAllow(t.risk)) throw ExtError.highRisk(t.name)
-        val policy = registry.updatePolicy { it.withApproval(PolicyScope.Tool(s.plugin, s.server, s.tool), approval, t.risk) }
-        return ExtWire.toolJson(t, policy).toString()
+        registry.updatePolicy { it.withApproval(PolicyScope.Tool(s.plugin, s.server, s.tool), approval, t.risk) }
+        return updated(t)
     }
 
-    private fun findTool(name: String?): CatalogTool {
+    /** 改完策略后的工具 JSON：knownTools 按当前策略算 enabled / approval，改动立即反映出来。 */
+    private fun updated(t: KnownTool): String =
+        ExtWire.knownToolJson(tools.knownTools(t.pluginId).firstOrNull { it.source == t.source } ?: t).toString()
+
+    /** 按目录里的名字找（含被禁用的已知工具）。 */
+    private fun findTool(name: String?): KnownTool {
         if (name.isNullOrEmpty()) throw ExtError.notFound(name)
-        tools.catalog.value[name]?.let { return it }
-        return synchronized(known) { known.values.firstOrNull { it.name == name } } ?: throw ExtError.notFound(name)
-    }
-
-    private fun knownFor(pluginId: String): List<CatalogTool> = synchronized(known) { known.values.filter { it.provider == pluginId } }.sortedBy { it.name }
-
-    /** 目录变了：记下新出现的工具；不在目录里、但按策略是启用的（服务器不再提供、插件不可用）就忘掉。 */
-    private fun remember(catalog: ToolCatalog, policy: ApprovalPolicy) {
-        val ready = registry.registry.value.plugins.filter { it.status == PluginStatus.READY }.map { it.id }.toSet()
-        synchronized(known) {
-            for (t in catalog.tools) t.source?.let { known[it] = t }
-            val inCatalog = catalog.tools.mapNotNull { it.source }.toSet()
-            known.entries.removeAll { (src, t) -> t.provider !in ready || (src !in inCatalog && policy.resolve(src).enabled) }
-        }
-    }
-
-    private fun forget(pluginId: String) {
-        synchronized(known) { known.entries.removeAll { it.value.provider == pluginId } }
+        return tools.knownTools().firstOrNull { it.name == name } ?: throw ExtError.notFound(name)
     }
 
     // ------------------------------------------------------------------ 运行时
@@ -221,7 +254,19 @@ class ExtensionHost(
         return JSONObject().put("refreshed", keys(r.refreshed)).put("failed", keys(r.failed)).put("timedOut", r.timedOut).toString()
     }
 
-    fun catalogJson(): String = snapshot.value.let { ExtWire.catalogJson(it.version, it.catalog, it.policy) }
+    fun catalogJson(): String = snapshot.value.let { ExtWire.catalogJson(it.version, it.catalog, it.policy, it.skills) }
+
+    /** IExtensionHost.readSkill：ExtensionSkillPort.read 的错误换成 agentos.ext.not_found / bad_path。 */
+    fun readSkill(skillId: String?, path: String?): String {
+        val content = try {
+            runBlocking { skills.read(skillId ?: "", path?.ifEmpty { null }) }
+        } catch (e: NoSuchElementException) {
+            throw IllegalArgumentException("${ExtError.PREFIX}not_found: ${e.message}")
+        } catch (e: IllegalArgumentException) {
+            throw ExtError.badPath(e.message ?: "invalid path")
+        }
+        return JSONObject().put("text", content.text).put("truncated", content.truncated).toString()
+    }
 
     /**
      * 受理一次调用：工具不在目录里、callId 重复时返回 false（不会有回调）；受理后 [deliver] 恰好调用一次（在后台线程）。
@@ -297,6 +342,7 @@ class ExtensionHost(
                 .put("completed", completed.get()).put("notDispatched", notDispatched.get()).put("unknown", unknown.get())
                 .put("cancelled", cancelled.get()))
             .put("servers", JSONArray(tools.serverStates.value.map { (k, s) -> stateJson(k, s) }))
+            .put("connector", (connector as? BinderMcpConnector)?.stats() ?: JSONObject.NULL)
             .toString()
     }
 
@@ -305,6 +351,7 @@ class ExtensionHost(
         const val LIST_REFRESH_TIMEOUT_MS = 10_000L
         const val MAX_REFRESH_TIMEOUT_MS = 30_000L
         const val FIRST_SCAN_WAIT_MS = 10_000L
+        const val FORCED_REFRESH_TIMEOUT_MS = 20_000L
 
         fun stateName(s: ServerState): String = when (s) {
             ServerState.Idle -> "idle"

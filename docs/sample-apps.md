@@ -140,5 +140,5 @@ class McpToolResult {
 
 1. **JVM 单元测试**：数据层 + 工具层，`./gradlew :plugins:samples:<name>:testDebugUnitTest`。
 2. **设备（模拟器）**：装 debug 包，界面逐页走一遍，截图；SDK 合入后加“自测入口”（debug 构建的导出 `BroadcastReceiver` 或 `adb shell am start` 的 Activity，经 `McpBinderClient` 绑自己的 Service，依次 `tools/list`、增删改查全部工具，结果写 logcat 一行 JSON 摘要），确认 MCP 路径通。
-3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），用 adb 读各 App 的数据库确认结果。
+3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），读各 App 的状态确认结果。**读状态用各 App 的 debug `dump`（`--es cmd dump [--ei offset N --ei limit M]`，结果在广播 result data，按 `next_offset` 翻页），复位用 `reset`；不要在真机上跑 `run-as sqlite3`（user 构建的真机没有 sqlite3）。**闹钟的 dump 带 `scheduled[].registered`，是 `AlarmManager` 里真的登记了的实测。日历的 `dump` / `reset` 还没提交，驱动暂时用 `run-as cat` 把 `calendar.db` 拷到电脑上读（真机已验证可用），`reset` 用 `--es cmd clear`。驱动是 `tests/device/acp-channel/sample_apps_e2e.py`（脚本模式；`--live` 用真实模型，要先开电脑端接入、最后配真实模型并核对 `modelBaseUrl`）。
 4. 提交前：`./gradlew :plugins:samples:<name>:assembleDebug :plugins:samples:<name>:assembleRelease :plugins:samples:<name>:lintDebug` 通过；`git diff | grep -c` 自查没有任何 key。

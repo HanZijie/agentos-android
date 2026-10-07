@@ -1,9 +1,11 @@
 package org.agentos.app.ext
 
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.agentos.extensions.host.KnownTool
 import org.agentos.runtime.broker.ApprovalMode
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.PolicyScope
@@ -12,6 +14,8 @@ import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.CatalogTool
 import org.agentos.runtime.ports.ContentPart
+import org.agentos.runtime.ports.SkillCatalog
+import org.agentos.runtime.ports.SkillSummary
 import org.agentos.runtime.ports.ToolCatalog
 import org.agentos.runtime.ports.ToolInvocation
 import org.agentos.runtime.ports.ToolInvocationResult
@@ -70,10 +74,12 @@ class ExtWireTest {
         val policy = ApprovalPolicy.DEFAULT
             .withEnabled(PolicyScope.Plugin("mcptest"), true)
             .withApproval(PolicyScope.Tool("mcptest", "test", "echo"), ApprovalMode.ALWAYS, ToolRisk.WRITE)
-        val text = ExtWire.catalogJson(7, ToolCatalog(3, listOf(echo, wipe)), policy)
+        val skills = SkillCatalog(2, listOf(SkillSummary("notes", "notes", "Take notes", echo.provider), SkillSummary("mcptest:x", "x", "", echo.provider)))
+        val text = ExtWire.catalogJson(7, ToolCatalog(3, listOf(echo, wipe)), policy, skills)
         val d = ExtWire.decodeCatalog(text)
         assertEquals(7, d.version)
         assertEquals(listOf(echo, wipe), d.tools)
+        assertEquals(skills.skills, d.skills)
         assertEquals(policy, d.policy)
         assertEquals(ApprovalMode.ALWAYS, d.policy.resolve(echo.source).approval)
 
@@ -94,6 +100,26 @@ class ExtWireTest {
         val w = ExtWire.toolJson(wipe, policy)
         assertEquals("high", (w["risk"] as JsonPrimitive).content)
         assertEquals("false", (w["mayAlwaysAllow"] as JsonPrimitive).content)
+    }
+
+    @Test
+    fun `known tool json has exactly the KnownTool fields, title null is kept`() {
+        val k = KnownTool(
+            name = wipe.name, pluginId = wipe.provider, source = wipe.source!!, title = null, description = "",
+            inputSchema = wipe.inputSchema, risk = ToolRisk.HIGH, enabled = false, approval = ApprovalMode.ASK, mayAlwaysAllow = false,
+        )
+        val j = ExtWire.knownToolJson(k)
+        assertEquals(ExtWire.KNOWN_TOOL_KEYS, j.keys.toList())
+        assertEquals(JsonNull, j["title"])
+        assertEquals("high", (j["risk"] as JsonPrimitive).content)
+        assertEquals("ask", (j["approval"] as JsonPrimitive).content)
+        assertEquals("false", (j["enabled"] as JsonPrimitive).content)
+        assertEquals("false", (j["mayAlwaysAllow"] as JsonPrimitive).content)
+        assertEquals(wipe.provider, (j["pluginId"] as JsonPrimitive).content)
+        assertEquals("wipe", ((j["source"] as JsonObject)["tool"] as JsonPrimitive).content)
+        val titled = ExtWire.knownToolJson(k.copy(title = "Wipe", enabled = true, approval = ApprovalMode.ALWAYS))
+        assertEquals("Wipe", (titled["title"] as JsonPrimitive).content)
+        assertEquals("always", (titled["approval"] as JsonPrimitive).content)
     }
 
     @Test

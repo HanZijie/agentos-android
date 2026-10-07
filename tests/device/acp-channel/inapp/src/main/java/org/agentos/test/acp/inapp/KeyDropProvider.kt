@@ -48,7 +48,10 @@ class KeyDropProvider : ContentProvider() {
     companion object {
         const val AUTHORITY = "org.agentos.test.acp.inapp.keydrop"
 
-        /** byok_key：BYOK 用例的随机测试 key；live_key：真实对话用的 key（只在主机端设置了环境变量时投递）。 */
-        val NAMES = setOf("byok_key", "live_key")
+        /**
+         * byok_key：BYOK 用例的随机测试 key；live_key：真实对话用的 key（只在主机端设置了环境变量时投递）；
+         * jev_key：Jev（自动选会话）用例的随机测试 key，只有假 Jev（fake_jev.py）认它（D5.1）。
+         */
+        val NAMES = setOf("byok_key", "live_key", "jev_key")
     }
 }

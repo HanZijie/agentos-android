@@ -33,6 +33,7 @@ class McpBinderTransport private constructor(val channel: BinderChannel) {
         override val maxMessageChars: Int get() = channel.config.maxMessageChars
         override fun close(reason: String) = channel.close(reason)
         override fun closeReason(): String? = channel.closeCauseOrNull?.toString()
+        override fun stats(): JSONObject = channel.stats()
     }
 
     val isOpen: Boolean get() = channel.isOpen

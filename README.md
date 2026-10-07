@@ -92,6 +92,18 @@ agentos-android/
 
 源码用 Gradle 的标准布局。implementation-plan.md 里的简写路径按包名展开，例如 `core/runtime/ports/AgentCore.kt` 就是 `core/runtime/src/main/kotlin/org/agentos/runtime/ports/AgentCore.kt`。SDK 级别（`compileSdk` / `targetSdk` 36，`minSdk` 35）、字节码版本和 release 签名由根 `build.gradle.kts` 统一配置，各模块只写 `namespace` 和依赖。
 
+### 示例 App
+
+`plugins/samples/` 下有闹钟、日历、备忘录三个示例 App，各自带一个 MCP 服务（Binder，不开 HTTP 端口），用来演示和验收“AgentOS 通过 MCP 完整操作一个 App”。工具清单、数据与构建见 [docs/sample-apps.md](docs/sample-apps.md) 和各 App 目录下的 README。
+
+```bash
+./gradlew :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug
+./gradlew :plugins:samples:calendar:testDebugUnitTest
+python3 tests/device/acp-channel/sample_apps_e2e.py --serial <序列号>          # 脚本模式；--live 用真实模型
+```
+
+目前只有 debug 构建能放行需要确认的写操作（真实确认界面还在做），验收结果见 [docs/m1-acceptance.md](docs/m1-acceptance.md) 三之三。
+
 ### 项目发布证书
 
 AgentOS App 和 Runner 用同一张项目发布证书签名。模块的 `service.sh` 升级 App 时要求签名一致，所以证书发布后就不能更换；私钥丢了，已安装的用户就无法再升级。**私钥只放在仓库外**，不进仓库，不进 CI 日志。

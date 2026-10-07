@@ -180,6 +180,12 @@ class McpBinderClient internal constructor(
         request(McpProtocol.PING, null, timeoutMillis)
     }
 
+    /**
+     * 诊断用的通道统计（binder-channel-v1：peerUid、uidRejects、收发计数、流控；不含消息内容）。
+     * 每个入站调用都按 peerUid（插件 App 的 UID，取自 PackageManager）校验 `Binder.getCallingUid()`，不符的计入 uidRejects，然后关掉通道。
+     */
+    fun stats(): org.json.JSONObject? = pipe.stats()
+
     /** 关闭连接；进行中的请求以 [McpClosedException] 结束。用 [bind] 建立的连接同时 unbind。 */
     fun close(reason: String = "client closed") = pipe.close(reason)
 
