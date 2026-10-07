@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 构建：设备上驱动工具层的入口（adb shell am broadcast；要求 DUMP 权限，只有 shell 持有，其他 App 调不了），结果写 logcat（tag AlarmDebug）。release 包里没有它。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".debug.DebugToolReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>
