@@ -80,6 +80,7 @@ class McpToolResult {
 ```
 
 - handler 在 SDK 的协程作用域里运行，收到 `notifications/cancelled` 时被取消；handler 抛出的异常由 SDK 转成 `isError` 结果，不会让 Service 崩溃。
+- **实际实现（C7a，已在 main）**：`McpToolResult` 有只读属性 `content` / `structuredContent` / `isError` / `text`；客户端侧的工具描述是 `McpTool`，失败用四种异常区分：`McpRpcException`（服务端回了错误）、`McpClosedException(dispatched)`、`McpTimeoutException`、`McpRequestTooLargeException`。工具名 1–128 个 `[A-Za-z0-9_.-]` 字符，不能重名，`inputSchema.type` 必须是 `object`，违反时第一次 bind 就抛 `IllegalArgumentException`。单个结果编码后超过 65,536 字符会被换成一个 `isError` 结果；`McpToolResult.json(对象)` 的文本在 `content` 和 `structuredContent` 里各出现一次，列表类工具要控制条数。完整范例见 `tests/device/mcp-plugin/plugin/`。
 - C7a 同时提供测试用的客户端（`McpBinderClient`，Extension Host 也用它）：给定一个 `ComponentName` 或 `IMcpService`，可以 `initialize`、`listTools`、`callTool`，方便示例 App 在 debug 构建里做“自测入口”和设备上的 androidTest。
 - 实现上用不用官方 MCP Kotlin SDK 由 C 在 S5 里定，不影响上面的公开接口。
 

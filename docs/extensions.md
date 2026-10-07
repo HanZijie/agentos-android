@@ -223,16 +223,16 @@ interface IMcpService {                   // 提供插件的 App 导出，要求
 
 规则：
 
-- 单条消息上限与 ACP 相同（初定 128 KiB，S3 测定后冻结）。图片等大内容用 `content://` URI 并临时授予读权限，由 Extension Host 读取后按需压缩，再交给运行时。
+- 单条消息上限与 ACP 相同（65,536 字符，S3 定参，见 binder-channel-v1）；单个工具结果编码后超过上限时，SDK 把它换成一个 `isError` 结果。图片等大内容用 `content://` URI 并临时授予读权限，由 Extension Host 读取后按需压缩，再交给运行时。
 - 插件 App 每次调用 `IChannel.send` 时，Extension Host 用 `Binder.getCallingUid()` 校验它等于这个 App 的 UID。
 - **连接生命周期**：第一次用到时 `bindService(BIND_AUTO_CREATE)` → `open` → MCP 初始化 → `tools/list` 并缓存（收到 `tools/list_changed` 时刷新）→ 空闲 30 秒后 `close` 并 unbind，App 进程可以被系统回收。
 - **App 进程死亡**：通过 `linkToDeath` 感知。进行中的调用返回错误；已经发出、结果未知的，按 [architecture.md](architecture.md) F8 标为“结果未知”；下次用到时重新连接。
-- **SDK**：两端都用官方 MCP Kotlin SDK。`McpBinderTransport` 在 `binder-channel` 上实现 SDK 的 Transport 接口，Extension Host（客户端）和 `plugin-sdk` 的 `McpBinderService`（服务端）共用它。
-- **协议版本**：MCP 协议修订版本和 SDK 版本在 S5 一起固定。2026-07-28 修订版改动较大（去掉了协议层会话，改为每个请求自带元数据）；一条 Binder 通道天然对应一次连接，按 SDK 支持的修订版实现生命周期即可。
+- **实现**：**不引入官方 MCP Kotlin SDK**（S5 结论，见 [spikes/S5.md](spikes/S5.md)：它每个还在维护的版本都要求 kotlinx-serialization ≥ 1.9.0、kotlinx-io ≥ 0.8，与 ACP 0.30.1 共用并锁定的 1.7.3 / 0.5.4 冲突；唯一兼容的 0.4.0 太旧，还把 Ktor 服务端带进每个插件 App）。`sdk/plugin-sdk` 自己实现 MCP 的 tools 子集：`McpBinderTransport` 在 `binder-channel` 上收发 JSON-RPC，Extension Host 一侧的 `McpBinderClient` 和插件 App 一侧的 `McpBinderService` 共用同一套编码。
+- **协议版本**：实现 2025-06-18 修订版，兼容 2025-03-26、2024-11-05（`initialize` 协商）。2026-07-28 修订版改动较大（去掉了协议层会话，改为每个请求自带元数据）；一条 Binder 通道天然对应一次连接，将来升级只改 `plugin-sdk` 的生命周期部分，公开接口不变。
 
 ### 5.2 远端：Streamable HTTP
 
-- 用 MCP Kotlin SDK 的 `StreamableHttpClientTransport`，底层 HTTP 引擎用 Ktor 的 OkHttp 引擎；版本在 S5 选定。
+- 用现有的 OkHttp 自己实现 Streamable HTTP 客户端（W19；S5 结论：不引入 MCP Kotlin SDK 和 Ktor）。
 - 只允许 `https://`，按系统默认方式校验证书；不支持 OAuth。
 - 请求头里的凭据来自 Keystore 加密存储，不写进插件包、日志、事件和模型输入。
 - 断线后按退避重连；正在进行的调用按“结果未知”处理，不自动重放。
@@ -424,7 +424,7 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 | 项目 | 说明 |
 |---|---|
 | S4：插件 App 的发现与 Binder 连接 | 读取对方 App 的 assets、后台 bind、跨进程往返、`linkToDeath`、没有权限的 App bind 失败 |
-| S5：MCP Kotlin SDK 在 Android 上 | 编译、D8、R8；`McpBinderTransport`；连一个真实的远端 Streamable HTTP 服务；固定 SDK 版本、MCP 协议修订版，以及与 ACP SDK 共用的 Kotlin / Ktor 版本 |
+| S5：MCP Kotlin SDK 在 Android 上 | **结论：不引入官方 SDK，自写 tools 子集**（C7a；Binder 部分已验证：JVM、API 36 跨进程、R8 release）；远端 Streamable HTTP 未做，W19 用 OkHttp 实现 |
 | S6：Runner | 普通 App UID 下用 `/system/bin/sh` 执行命令；超时和进程组清理；输出上限；读不到 AgentOS 的数据、绑定不了内部服务；`bash` 转发是否可行；一次 Hook 往返的耗时 |
 | 只支持 Streamable HTTP | 只提供旧 HTTP+SSE 传输的远端服务连不上，导入时标为不支持 |
 | 不为插件提供解释器 | `:agent` 里的 QuickJS 只运行 Pi Agent core，不对插件开放。生态里的 stdio MCP 服务，以及依赖 python、node、jq 的 Hook 和 Skill 脚本，在手机上都不能用。导入时标出不支持的部分，Hook 失败进诊断页 |
