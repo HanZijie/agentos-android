@@ -267,6 +267,15 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 2. **服务端注解只能调高等级**：`destructiveHint=true` 升为“高风险”；`readOnlyHint=true` 不会降低等级，因为注解是服务端自报的，不可信。
 3. **用户策略**：可以按插件、服务器、工具分别启用或禁用；审批方式可设为“每次确认”（默认）或“始终允许”，但“高风险”工具不能设为始终允许。这一层参照了 OpenAI 的 `enabled`、`default_tools_approval_mode`、`enabled_tools`、`approval_mode` 设计。
 
+确认协调器（`core/runtime` 的 `consent/ConsentCoordinator`，实现 `ConsentPort`，A11；界面和通知在 Android 侧）：
+
+- **排队与超时**：多个并发请求按先进先出排队，界面看到的是同一份 `pending`；每个请求自己的 60 秒从创建时算起，排队时间计入，到点按拒绝处理并撤回；同一个 `requestId` 重复、或同时超过 16 条待确认，直接拒绝（`unavailable`）。
+- **选项**：每个请求只提供它允许的选项。高风险没有“本会话内不再询问”和“始终允许”；没有 `source` 的工具、非“写”级别的工具、策略写入方不可用时，没有“始终允许”。界面回传的选项不在允许集里，按拒绝处理并记日志。
+- **始终允许**：先写用户策略，写成功才放行；写失败（策略文件损坏、fail closed、超过 5 秒）只放行这一次，并在界面上提示“没能保存，下次还会询问”，不假装保存成功。
+- **取消**：任务被取消时撤回确认（事件 `consent.resolved` 的 `reason=client`），不等 60 秒。Agent core 的 `beforeToolCall` 回调不会被中止信号打断，所以由 `ToolContext.cancelRequested` 通知 Broker。
+- **文案**：由协调器给出，界面按 `ConsentView` 画。工具名、参数等第三方文字一律去掉控制字符、双向控制符和零宽字符，折叠空白，按码点截断并标明，再用「」框起（文字里的「」换成单引号），所以伪造“已得到用户同意”之类的话只会显示成被框住的一行数据。高风险写明“可能不可恢复”。
+- **调试**：`AutoConsentResponder`（关 / 允许 / 允许一次 / 拒绝，从不选始终允许，只留最近 50 条请求的摘要）只用于测试构建的无人值守测试。
+
 ---
 
 ## 6. Skills
