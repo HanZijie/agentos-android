@@ -12,6 +12,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import org.agentos.extensions.host.KnownTool
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.RiskPolicy
 import org.agentos.runtime.errors.ErrorCode
@@ -56,6 +57,26 @@ object ExtWire {
         put("approval", resolved.approval.wire)
         put("mayAlwaysAllow", RiskPolicy.mayAlwaysAllow(t.risk))
     }
+
+    /**
+     * 插件页的工具（listTools、setToolEnabled、setToolApproval、setToolApprovalBySource 的返回值）：与 A9 的 [KnownTool] **字段一一对应**，
+     * 键固定为 [KNOWN_TOOL_KEYS]（title 没有时为 null，不省略），D 的插件页依赖这个形状。
+     */
+    fun knownToolJson(k: KnownTool): JsonObject = buildJsonObject {
+        put("name", k.name)
+        put("pluginId", k.pluginId)
+        put("source", buildJsonObject { put("plugin", k.source.plugin); put("server", k.source.server); put("tool", k.source.tool) })
+        put("title", k.title?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("description", k.description)
+        put("inputSchema", k.inputSchema)
+        put("risk", k.risk.name.lowercase())
+        put("enabled", k.enabled)
+        put("approval", k.approval.wire)
+        put("mayAlwaysAllow", k.mayAlwaysAllow)
+    }
+
+    /** [knownToolJson] 的全部键，按输出顺序。 */
+    val KNOWN_TOOL_KEYS = listOf("name", "pluginId", "source", "title", "description", "inputSchema", "risk", "enabled", "approval", "mayAlwaysAllow")
 
     /** getCatalog 的返回值。[failClosed]：策略文件坏了又没有可用的副本，第三方插件一律当作禁用（toJson 不带这个状态）。 */
     fun catalogJson(version: Long, catalog: ToolCatalog, policy: ApprovalPolicy, skills: SkillCatalog = SkillCatalog.EMPTY): String = buildJsonObject {
