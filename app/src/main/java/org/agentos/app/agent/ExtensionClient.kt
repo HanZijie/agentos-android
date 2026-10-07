@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -29,14 +30,23 @@ import org.agentos.app.ext.ExtWire
 import org.agentos.app.ext.ExtensionHostService
 import org.agentos.internal.IExtensionCallback
 import org.agentos.internal.IExtensionHost
+import org.agentos.runtime.broker.ApprovalMode
 import org.agentos.runtime.broker.ApprovalPolicy
+import org.agentos.runtime.broker.RiskPolicy
+import org.agentos.runtime.consent.ApprovalWriteResult
+import org.agentos.runtime.consent.ApprovalWriter
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.ports.ApprovalPolicyPort
 import org.agentos.runtime.ports.RuntimeLog
+import org.agentos.runtime.ports.SkillCatalog
+import org.agentos.runtime.ports.SkillContent
+import org.agentos.runtime.ports.SkillPort
 import org.agentos.runtime.ports.ToolCatalog
 import org.agentos.runtime.ports.ToolInvocation
 import org.agentos.runtime.ports.ToolInvocationResult
 import org.agentos.runtime.ports.ToolPort
+import org.agentos.runtime.ports.ToolRisk
+import org.agentos.runtime.ports.ToolSource
 import org.agentos.runtime.ports.info
 import org.agentos.runtime.ports.warn
 import org.json.JSONObject
@@ -55,6 +65,9 @@ import java.util.concurrent.atomic.AtomicLong
  *   `:ext` 是唯一写入方，这里只读。
  * - **调用**（[invoke]）：callTool 受理后等 onToolResult；三种结局原样（ExtWire 解码）。`:ext` 进程在调用期间死亡 → Unknown
  *   （已受理的调用可能已经发出，F8 不重放）；没受理 → NotDispatched。协程被取消时发 cancelTool，再以 CancellationException 结束。
+ * - **任务开始前**（[prepare]，A10 的 ToolPort.prepare）：IExtensionHost.refreshTools（不强制），严格在时限内返回。
+ * - **Skills**（[skills]，`HostPort.skills`）：目录随 getCatalog 一起来；读取经 IExtensionHost.readSkill（A10 的 ExtensionSkillPort 在 `:ext`）。
+ * - **“始终允许”写回**（[approvalWriter]，A11 的 ApprovalWriter）：IExtensionHost.setToolApprovalBySource，写完立即刷新镜像。
  */
 class ExtensionClient(private val context: Context, private val log: RuntimeLog) : ToolPort, AutoCloseable {
 
@@ -64,6 +77,8 @@ class ExtensionClient(private val context: Context, private val log: RuntimeLog)
     private val policyFlow = MutableStateFlow(FAIL_CLOSED)
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<ToolInvocationResult>>()
+    private val skillsFlow = MutableStateFlow(SkillCatalog.EMPTY)
+    private val fetchLock = Any()
 
     override val catalog: StateFlow<ToolCatalog> = catalogFlow.asStateFlow()
 
@@ -71,6 +86,55 @@ class ExtensionClient(private val context: Context, private val log: RuntimeLog)
     val approvals: ApprovalPolicyPort = object : ApprovalPolicyPort {
         override val policy: StateFlow<ApprovalPolicy> = policyFlow.asStateFlow()
         override fun toString() = "ExtensionClient.approvals"
+    }
+
+    /** `HostPort.skills`：Skill 目录随 getCatalog 来，读取经 IExtensionHost.readSkill。 */
+    val skills: SkillPort = object : SkillPort {
+        override val catalog: StateFlow<SkillCatalog> = skillsFlow.asStateFlow()
+
+        override suspend fun read(skillId: String, path: String?): SkillContent {
+            val h = hostFlow.value ?: withTimeoutOrNull(HOST_WAIT_MS) { hostFlow.filterNotNull().first() }
+                ?: throw NoSuchElementException("skills are not available right now (the extension host is not running)")
+            val text = try {
+                withContext(Dispatchers.IO) { h.readSkill(skillId, path ?: "") }
+            } catch (e: IllegalArgumentException) {
+                val msg = e.message.orEmpty().substringAfter(": ", e.message.orEmpty())
+                if (e.message.orEmpty().startsWith("agentos.ext.bad_path")) throw IllegalArgumentException(msg)
+                throw NoSuchElementException(msg)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                throw NoSuchElementException("skills are not available right now (${e.javaClass.simpleName})")
+            }
+            val o = JSONObject(text)
+            return SkillContent(o.getString("text"), o.optBoolean("truncated"))
+        }
+
+        override fun toString() = "ExtensionClient.skills"
+    }
+
+    /** A11 的 ApprovalWriter：确认框里的“始终允许”写到 `:ext` 的 ApprovalStore（唯一写入方）。 */
+    val approvalWriter: ApprovalWriter = object : ApprovalWriter {
+        override val available: Boolean
+            get() = hostFlow.value != null && policyReceived && policyFlow.value.unlistedPluginsEnabled
+
+        override suspend fun setAlways(source: ToolSource, risk: ToolRisk): ApprovalWriteResult {
+            if (!RiskPolicy.mayAlwaysAllow(risk)) return ApprovalWriteResult.Failed("a $risk tool cannot be set to always allow")
+            val h = hostFlow.value ?: return ApprovalWriteResult.Failed("the extension host is not connected")
+            return try {
+                withContext(Dispatchers.IO) {
+                    h.setToolApprovalBySource(source.plugin, source.server, source.tool, ApprovalMode.ALWAYS.wire)
+                    fetchCatalog() // 镜像立即更新：同一任务的下一次调用就按“始终允许”
+                }
+                ApprovalWriteResult.Saved
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ApprovalWriteResult.Failed(e.message ?: e.javaClass.simpleName)
+            }
+        }
+
+        override fun toString() = "ExtensionClient.approvalWriter"
     }
 
     @Volatile private var bound = false
@@ -84,6 +148,7 @@ class ExtensionClient(private val context: Context, private val log: RuntimeLog)
     private val fetches = AtomicLong()
     private val calls = AtomicLong()
     private val callsLostToDeath = AtomicLong()
+    private val prepares = AtomicLong()
 
     private val callback = object : IExtensionCallback.Stub() {
         override fun onCatalogChanged(version: Long) {
@@ -169,7 +234,9 @@ class ExtensionClient(private val context: Context, private val log: RuntimeLog)
         ErrorCode.TOOL_RESULT_UNKNOWN.info("$why after the call was accepted; the result is unknown."),
     )
 
-    private fun fetchCatalog() {
+    private fun fetchCatalog() = synchronized(fetchLock) { fetchCatalogLocked() }
+
+    private fun fetchCatalogLocked() {
         val h = hostFlow.value ?: return
         val text = try {
             h.catalog
@@ -195,6 +262,26 @@ class ExtensionClient(private val context: Context, private val log: RuntimeLog)
             catalogFlow.value = ToolCatalog(current.version + 1, decoded.tools)
             log.info(TAG, "tool catalog v${current.version + 1}: ${decoded.tools.size} tool(s)")
         }
+        val sk = skillsFlow.value
+        if (sk.skills != decoded.skills) skillsFlow.value = SkillCatalog(sk.version + 1, decoded.skills)
+    }
+
+    /**
+     * ToolPort.prepare：等 `:ext` 连上（启动中）、再等还没有缓存的服务器取完工具列表，然后取一次目录。必须在 [timeoutMillis] 内返回：
+     * Binder 调用不能被取消，所以放在后台，这里只按时限等它。
+     */
+    override suspend fun prepare(timeoutMillis: Long) {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        fun left() = deadline - SystemClock.elapsedRealtime()
+        val h = hostFlow.value ?: withTimeoutOrNull(left() / 2) { hostFlow.filterNotNull().first() } ?: return
+        val budget = left() - PREPARE_MARGIN_MS
+        if (budget <= 0) return
+        val job = scope.async {
+            runCatching { h.refreshTools(budget, false) }
+            fetchCatalog()
+        }
+        withTimeoutOrNull(left().coerceAtLeast(0)) { job.await() }
+        prepares.incrementAndGet()
     }
 
     override suspend fun invoke(invocation: ToolInvocation): ToolInvocationResult {
@@ -277,6 +364,8 @@ class ExtensionClient(private val context: Context, private val log: RuntimeLog)
         .put("catalogVersion", catalogFlow.value.version)
         .put("remoteVersion", remoteVersion)
         .put("tools", catalogFlow.value.tools.size)
+        .put("skills", skillsFlow.value.skills.size)
+        .put("prepares", prepares.get())
         .put("policyReceived", policyReceived)
         .put("policyFailClosed", !policyFlow.value.unlistedPluginsEnabled)
         .put("calls", calls.get())
@@ -303,6 +392,9 @@ class ExtensionClient(private val context: Context, private val log: RuntimeLog)
 
         /** 调用自带超时之外再等这么久（`:ext` 自己先按超时结束；这只是防 `:ext` 卡住的兜底）。 */
         const val RESULT_GRACE_MS = 30_000L
+
+        /** prepare 给 `:ext` 的时限比自己的少这么多：留出取目录和 Binder 往返的时间。 */
+        const val PREPARE_MARGIN_MS = 300L
 
         /** 收到第一份策略之前：第三方插件一律当作禁用（与 ApprovalStore 的 fail closed 相同）。 */
         val FAIL_CLOSED: ApprovalPolicy = ApprovalPolicy.DEFAULT.copy(unlistedPluginsEnabled = false)

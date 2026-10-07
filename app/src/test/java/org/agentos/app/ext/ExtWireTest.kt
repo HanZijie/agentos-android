@@ -12,6 +12,8 @@ import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.CatalogTool
 import org.agentos.runtime.ports.ContentPart
+import org.agentos.runtime.ports.SkillCatalog
+import org.agentos.runtime.ports.SkillSummary
 import org.agentos.runtime.ports.ToolCatalog
 import org.agentos.runtime.ports.ToolInvocation
 import org.agentos.runtime.ports.ToolInvocationResult
@@ -70,10 +72,12 @@ class ExtWireTest {
         val policy = ApprovalPolicy.DEFAULT
             .withEnabled(PolicyScope.Plugin("mcptest"), true)
             .withApproval(PolicyScope.Tool("mcptest", "test", "echo"), ApprovalMode.ALWAYS, ToolRisk.WRITE)
-        val text = ExtWire.catalogJson(7, ToolCatalog(3, listOf(echo, wipe)), policy)
+        val skills = SkillCatalog(2, listOf(SkillSummary("notes", "notes", "Take notes", echo.provider), SkillSummary("mcptest:x", "x", "", echo.provider)))
+        val text = ExtWire.catalogJson(7, ToolCatalog(3, listOf(echo, wipe)), policy, skills)
         val d = ExtWire.decodeCatalog(text)
         assertEquals(7, d.version)
         assertEquals(listOf(echo, wipe), d.tools)
+        assertEquals(skills.skills, d.skills)
         assertEquals(policy, d.policy)
         assertEquals(ApprovalMode.ALWAYS, d.policy.resolve(echo.source).approval)
 

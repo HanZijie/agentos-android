@@ -127,6 +127,9 @@ internal enum class SendResult { OK, TOO_LARGE, CLOSED }
  * 单元测试用内存实现。
  */
 internal interface McpPipe {
+    /** 诊断用的通道统计（不含消息内容）；内存实现没有。 */
+    fun stats(): org.json.JSONObject? = null
+
     /** 入站消息，按顺序；管道关闭后先交付已收到的再结束。每条处理完调用 [consumed]。 */
     val incoming: ReceiveChannel<String>
 

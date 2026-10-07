@@ -83,6 +83,7 @@ class ExtRegistry(
         }
         val r = result!!
         registryFile.writeAtomically(r.persisted.toJson())
+        lastGoodMemory = r.persisted
         registryFlow.value = r.registry
         scans++
         lastScanError = null
@@ -139,27 +140,35 @@ class ExtRegistry(
         if (p.status != PluginStatus.SIGNATURE_CHANGED && p.status != PluginStatus.SIGNATURE_UNCONFIRMED) {
             throw ExtError.notNeeded("plugin $id has no unconfirmed signature")
         }
-        val memory = loadMemory() ?: PersistedRegistry()
-        registryFile.writeAtomically(PluginScanLogic.confirmSignature(memory, p.id).toJson())
+        val memory = loadMemory() ?: PersistedRegistry.EMPTY
+        val confirmed = PluginScanLogic.confirmSignature(memory, p.id)
+        registryFile.writeAtomically(confirmed.toJson())
+        lastGoodMemory = confirmed
         rescan()
         return plugin(id)
     }
 
-    /** 读记忆：文件不存在 → 空记忆；读不出来 → null（记忆丢失）。 */
+    /**
+     * 读记忆：文件不存在 → 空记忆（首次运行，[PersistedRegistry.EMPTY]）；读不出来 → 本进程里上一份可用的，没有就 null
+     * （记忆丢失：PluginScanLogic 把所有第三方插件按“签名未确认”处理，**不能**当空记忆，否则等于把当前签名当可信）。
+     */
     private fun loadMemory(): PersistedRegistry? {
         val text = try {
             registryFile.readText()
         } catch (e: Exception) {
             Log.w(TAG, "plugin registry memory unreadable: ${e.javaClass.simpleName}")
-            return null
-        } ?: return PersistedRegistry()
+            return lastGoodMemory
+        } ?: return lastGoodMemory ?: PersistedRegistry.EMPTY
         return try {
-            PersistedRegistry.fromJson(text)
+            PersistedRegistry.fromJson(text).also { lastGoodMemory = it }
         } catch (e: Exception) {
             Log.w(TAG, "plugin registry memory is corrupt: ${e.javaClass.simpleName}")
-            null
+            lastGoodMemory
         }
     }
+
+    /** 本进程里最后一份读到或写出的记忆。 */
+    @Volatile private var lastGoodMemory: PersistedRegistry? = null
 
     // ------------------------------------------------------------------ 给插件页的 JSON（IExtensionHost.listPlugins）
 
@@ -170,7 +179,7 @@ class ExtRegistry(
     fun pluginJson(p: PluginRecord, serverStates: Map<String, ServerView> = emptyMap()): JSONObject {
         val policy = approvals.policy.value
         val entry = p.name?.let { policy.plugins[it]?.entry }
-        val enabled = p.name != null && policy.resolvePluginEnabled(p.name!!)
+        val enabled = p.name != null && policy.pluginEnabled(p.name!!)
         val m = p.manifest
         val versionName = runCatching {
             context.packageManager.getPackageInfo(p.identity.packageName, PackageManager.PackageInfoFlags.of(0)).versionName
@@ -243,7 +252,3 @@ internal fun String?.toApprovalMode(): ApprovalMode? = when (this) {
     "always" -> ApprovalMode.ALWAYS
     else -> null
 }
-
-/** 插件级是否启用：与 [ApprovalPolicy.resolve] 的插件层规则相同（写了按写的，没写按 unlistedPluginsEnabled）。 */
-internal fun ApprovalPolicy.resolvePluginEnabled(plugin: String): Boolean =
-    plugins[plugin]?.entry?.enabled ?: unlistedPluginsEnabled

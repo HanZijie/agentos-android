@@ -39,7 +39,7 @@ import org.agentos.runtime.ports.ToolPort
  * | tools | [ExtensionClient]：`:ext` 的 IExtensionHost 的薄代理（目录、三种结局；C7b） | — |
  * | approvals | [ExtensionClient.approvals]：`:ext` 的用户策略的镜像，收到第一份之前 fail closed（C7b） | — |
  * | consent | [NotOpen.CONSENT]：一律拒绝（UNAVAILABLE） | W16：ConsentCoordinator |
- * | skills | [NotOpen.SKILLS]：目录为空，读取一律“未开放” | W20 |
+ * | skills | [ExtensionClient.skills]：`:ext` 里 ExtensionSkillPort 的代理（C7b） | — |
  * | hooks | [NotOpen.HOOKS]：没有 Hook，NO_OPINION | W22 |
  */
 class HostPortImpl(
@@ -50,8 +50,8 @@ class HostPortImpl(
     override val log: RuntimeLog,
     override val tools: ToolPort = NotOpen.TOOLS,
     override val approvals: ApprovalPolicyPort = ApprovalPolicyPort.DEFAULT,
+    override val skills: SkillPort = NotOpen.SKILLS,
 ) : HostPort {
-    override val skills: SkillPort = NotOpen.SKILLS
     override val hooks: HookPort = NotOpen.HOOKS
     override val consent: ConsentPort = NotOpen.CONSENT
     override val clock: Clock = Clock.SYSTEM

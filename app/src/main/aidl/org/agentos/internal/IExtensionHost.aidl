@@ -28,7 +28,8 @@ import org.agentos.internal.IExtensionCallback;
  *    "servers":[{"name", "service"（完整类名，Binder）或 "url"（https）, "state":"idle"|"connected"|"unreachable"|"disabled",
  *                "error"（可无）, "toolCount"}],
  *    "rejectedServers":[{"name","service","reason":"not_in_package"|"not_exported"|"missing_permission"}],
- *    "toolCount"}
+ *    "toolCount", "skillCount",
+ *    "skillProblems":[{"code","message"}]（ExtensionSkillPort.problems：frontmatter 缺失 / 非法、SKILL.md 读不到等，A10）}
  *   签名变化（signature_changed）或记忆丢失（signature_unconfirmed）时已停用，要用户先 confirmSignature 再启用。
  *
  * 工具（listTools 的一项；getCatalog 的 tools 也是这个形状；目录本身由 core:extensions 的 ExtensionToolHost 生成，A9）：
@@ -42,7 +43,7 @@ import org.agentos.internal.IExtensionCallback;
  * 审批方式参数 mode：ask | always | ""（清除这一层，沿用上一层）。
  */
 interface IExtensionHost {
-    /** 本接口的版本：2（v2 加了 refreshTools）。 */
+    /** 本接口的版本：2（v2 加了 refreshTools、readSkill、setToolApprovalBySource，getCatalog 带 skills）。 */
     int getVersion();
 
     // ---------------------------------------------------------------- 插件管理（设置页，D）
@@ -95,11 +96,12 @@ interface IExtensionHost {
     void unsubscribe(IExtensionCallback callback);
 
     /**
-     * 当前目录：{"version": long, "tools":[工具…], "policy":{ApprovalPolicy.toJson()}, "policyFailClosed": bool}。
+     * 当前目录：{"version": long, "tools":[工具…], "skills":[{"id","name","description","provider"}…], "policy":{ApprovalPolicy.toJson()},
+     *   "policyFailClosed": bool}。skills 是 ExtensionSkillPort 的目录（A10：插件 ready 且插件级启用；name / description 是第三方文本）。
      * tools 只含现在可用的工具（插件 ready、插件 / 服务器 / 工具都启用，连上过至少一次）；Broker 仍按 policy 再查一次，
      * :ext 执行前也再查一次。policyFailClosed = 策略文件读不出来又没有可用的副本：第三方插件一律当作禁用
      * （运行时的镜像要设 unlistedPluginsEnabled=false，toJson 不带这个状态）。
-     * version 在目录或策略任一变化时加一（:ext 重建后从头开始）。只在 onCatalogChanged 之后来取（目录可能较大，不放在单向回调里）。
+     * version 在工具目录、Skill 目录或策略任一变化时加一（:ext 重建后从头开始）。只在 onCatalogChanged 之后来取（目录可能较大，不放在单向回调里）。
      */
     String getCatalog();
 
@@ -126,4 +128,17 @@ interface IExtensionHost {
      * 返回 {"refreshed":[{"pluginId","server"}], "failed":[…], "timedOut": bool}。没刷新完的继续在后台刷新。
      */
     String refreshTools(long timeoutMs, boolean force);
+
+    /**
+     * 读 Skill（ExtensionSkillPort.read，A10）：path 相对 Skill 目录，空串或 null = SKILL.md。返回 {"text", "truncated": bool}（单次最多 64 KiB）。
+     * 错误 code：not_found（没有这个 Skill / 文件、插件已停用）、bad_path（路径不合法、不是文本文件）。内容是第三方文本，不可信。
+     */
+    String readSkill(String skillId, String path);
+
+    /**
+     * 按来源设置一个工具的审批方式（确认框里的“始终允许”写回用，A11 的 ApprovalWriter）：plugin / server / tool 是 ToolSource
+     * （插件名、服务器名、原始工具名），不受 ToolNaming 改名影响。返回更新后的工具 JSON。
+     * 错误 code：not_found（工具不在 :ext 已知的工具里）、bad_mode、high_risk（按 :ext 算的风险等级）、unavailable（策略文件 fail closed）。
+     */
+    String setToolApprovalBySource(String plugin, String server, String tool, String mode);
 }

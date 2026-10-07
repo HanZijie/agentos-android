@@ -84,7 +84,7 @@ class ExtensionHostService : Service() {
                 pendingRescan = host.scope.launch(Dispatchers.IO) {
                     delay(RESCAN_DEBOUNCE_MS)
                     Log.i(TAG, "package change (${intent.action?.substringAfterLast('.')}): rescanning")
-                    host.registry.rescanQuietly()
+                    host.rescanQuietly()
                 }
             }
         }
@@ -137,7 +137,7 @@ class ExtensionHostService : Service() {
         override fun listPlugins(): String = managed { host.pluginsJson() }
 
         override fun setPluginEnabled(pluginId: String?, enabled: Boolean): String = managed {
-            host.registry.setPluginEnabled(pluginId, enabled)
+            host.setPluginEnabled(pluginId, enabled)
             host.pluginJson(pluginId)
         }
 
@@ -158,7 +158,7 @@ class ExtensionHostService : Service() {
         override fun setToolApproval(toolName: String?, mode: String?): String = managed { host.setToolApproval(toolName, mode) }
 
         override fun rescan(): String = guarded {
-            host.registry.rescan()
+            host.rescan()
             host.pluginsJson()
         }
 
@@ -184,6 +184,12 @@ class ExtensionHostService : Service() {
         override fun getDiagnostics(): String = guarded { host.diagnosticsJson(callbacks.registeredCallbackCount) }
 
         override fun refreshTools(timeoutMs: Long, force: Boolean): String = guarded { host.refreshTools(timeoutMs, force) }
+
+        override fun readSkill(skillId: String?, path: String?): String = guarded { host.readSkill(skillId, path) }
+
+        override fun setToolApprovalBySource(plugin: String?, server: String?, tool: String?, mode: String?): String = managed {
+            host.setToolApprovalBySource(plugin, server, tool, mode)
+        }
 
         /** 插件管理：先等启动后的第一次扫描。 */
         private inline fun <T> managed(block: () -> T): T = guarded {
@@ -234,4 +240,5 @@ internal object ExtError {
     fun notNeeded(detail: String) = IllegalStateException("${PREFIX}not_needed: $detail")
     fun highRisk(tool: String) = IllegalArgumentException("${PREFIX}high_risk: $tool is a high-risk tool and cannot be set to always")
     fun unavailable(detail: String) = IllegalStateException("${PREFIX}unavailable: $detail")
+    fun badPath(detail: String) = IllegalArgumentException("${PREFIX}bad_path: $detail")
 }

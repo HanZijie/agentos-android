@@ -70,7 +70,7 @@ class AgentProcess private constructor(val app: Context) {
 
     /** Extension Host（`:ext`）的代理：工具目录、调用、用户策略的镜像（C7b，docs/extensions.md 第 9 节）。 */
     val extensions = ExtensionClient(app, runtimeLog)
-    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals)
+    val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog, tools = extensions, approvals = extensions.approvals, skills = extensions.skills)
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
     val engine: RuntimeEngine = AgentRuntimes.create(hostPort, PiAgentCores.create(app, hostPort))

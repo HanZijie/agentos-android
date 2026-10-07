@@ -12,6 +12,7 @@ What a request streams is decided from the latest real user message (the prompt 
   - a JSON object is a script, the same scripts the channel cases send (tests/device agentCommand):
       chunks (20), chunkChars (0 = "chunk i "), intervalMs (20), burst (1), cjk, bigChunkChars,
       tool: NAME -> round 0 streams the text and ends with a tool_use NAME{} (stop_reason tool_use);
+      toolInput: {...} -> the tool_use input (default {}; C7b: e2e calls of plugin tools with arguments);
                     the next round (after the tool result) streams "after-tool:<result text>".
   - anything else echoes 20 lines "echo[i]: <first 64 chars>\n", 20 ms apart.
 
@@ -184,7 +185,9 @@ class FakeModel:
                         index += 1
                         self._ev("content_block_start", {"index": i, "content_block": {
                             "type": "tool_use", "id": "toolu_%d" % rec["id"], "name": str(script["tool"]), "input": {}}})
-                        self._ev("content_block_delta", {"index": i, "delta": {"type": "input_json_delta", "partial_json": "{}"}})
+                        tool_input = script.get("toolInput") if isinstance(script.get("toolInput"), dict) else {}
+                        self._ev("content_block_delta", {"index": i, "delta": {"type": "input_json_delta",
+                                                                                "partial_json": json.dumps(tool_input)}})
                         self._ev("content_block_stop", {"index": i})
                         stop = "tool_use"
                 self._ev("message_delta", {"delta": {"stop_reason": stop, "stop_sequence": None}, "usage": {"output_tokens": max(1, out)}})
