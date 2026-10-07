@@ -17,16 +17,19 @@ import org.agentos.internal.IExtensionCallback;
  * Broker 每次调用前按它决定可用与确认。策略按插件名记（plugin.json 的 name；注册表保证名字唯一，原来的主人优先，
  * 改名、卸载、签名变化时清掉旧策略）。第三方插件第一次被发现时写入插件级 enabled=false（默认关闭）。
  *
- * 插件（listPlugins 的一项）：
+ * 插件（listPlugins 的一项；setPluginEnabled / confirmSignature / setPluginApproval 的返回值）。键固定、顺序固定、不省略（空值为 null），
+ * D 的插件页依赖这个形状（ExtWire.pluginJson / PLUGIN_KEYS）：
  *   {"id"（PluginRecord.id = "<包名>/<assets 目录>"）, "source":"app", "packageName", "name"（plugin.json 的 name，读不出时为 null）,
- *    "displayName", "description", "versionName", "versionCode",
- *    "signingDigest"（当前签名摘要：SHA-256 小写十六进制；多个签名者时排序后拼接再 SHA-256）,
+ *    "displayName", "description"（或 null）, "versionName"（或 null）, "versionCode",
+ *    "signingDigest"（当前安装包的签名摘要：SHA-256 小写十六进制；多个签名者时排序后拼接再 SHA-256）,
+ *    "trustedSigningDigest"（注册表记住的、上一次确认过的签名摘要，同一种摘要；还没确认过（signature_unconfirmed）时为 null，
+ *      从不是空串；signature_changed 时与 signingDigest 不同，插件页据此显示“之前的签名 / 现在的签名”）,
  *    "status":"ready"|"unavailable"|"signature_changed"|"signature_unconfirmed"（PluginStatus）,
  *    "unavailableReason":"assets_missing"|"manifest_rejected"|"no_usable_server"|"name_conflict"|null,
  *    "builtin": bool, "enabled": bool（插件级是否启用）, "approval":"ask"|"always"|null（插件级审批方式，null = 没设，按 ask）,
  *    "problems":[{"code","message"}]（中文，给插件页显示）, "unsupported":[{"kind","location","detail"}]（PluginManifest.unsupported）,
- *    "servers":[{"name", "service"（完整类名，Binder）或 "url"（https）, "state":"idle"|"connected"|"unreachable"|"disabled",
- *                "error"（可无）, "toolCount"}],
+ *    "servers":[{"name", "service"（完整类名，Binder 服务器；否则 null）, "url"（https，远端服务器；否则 null）,
+ *                "state":"idle"|"connected"|"unreachable"|"disabled", "error"（或 null）, "toolCount"}],
  *    "rejectedServers":[{"name","service","reason":"not_in_package"|"not_exported"|"missing_permission"}],
  *    "toolCount", "skillCount",
  *    "skillProblems":[{"code","message"}]（ExtensionSkillPort.problems：frontmatter 缺失 / 非法、SKILL.md 读不到等，A10）}

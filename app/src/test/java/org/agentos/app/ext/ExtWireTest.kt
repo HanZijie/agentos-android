@@ -1,11 +1,16 @@
 package org.agentos.app.ext
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.agentos.extensions.McpServerDecl
 import org.agentos.extensions.host.KnownTool
+import org.agentos.extensions.registry.PluginIdentity
+import org.agentos.extensions.registry.PluginRecord
+import org.agentos.extensions.registry.PluginStatus
 import org.agentos.runtime.broker.ApprovalMode
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.PolicyScope
@@ -120,6 +125,68 @@ class ExtWireTest {
         val titled = ExtWire.knownToolJson(k.copy(title = "Wipe", enabled = true, approval = ApprovalMode.ALWAYS))
         assertEquals("Wipe", (titled["title"] as JsonPrimitive).content)
         assertEquals("always", (titled["approval"] as JsonPrimitive).content)
+    }
+
+    // ------------------------------------------------------------------ 插件 JSON（插件页）
+
+    private val signerNow = "a".repeat(64)
+    private val signerBefore = "b".repeat(64)
+
+    private fun plugin(status: PluginStatus, trusted: String, servers: List<McpServerDecl> = listOf(McpServerDecl.Binder("test", "org.x.Svc"))) =
+        PluginRecord(
+            id = "org.x/agent-plugin",
+            name = "mcptest",
+            identity = PluginIdentity("org.x", signerNow, 7),
+            trustedSigner = trusted,
+            builtin = false,
+            status = status,
+            servers = servers,
+        )
+
+    private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    @Test
+    fun `plugin json has fixed keys and trustedSigningDigest is the confirmed signer or null`() {
+        val policy = ApprovalPolicy.DEFAULT.withEnabled(PolicyScope.Plugin("mcptest"), false)
+        // 签名变化：现在的与确认过的不同
+        val changed = ExtWire.pluginJson(plugin(PluginStatus.SIGNATURE_CHANGED, signerBefore), policy, null, emptyMap(), 0, emptyList())
+        assertEquals(ExtWire.PLUGIN_KEYS, changed.keys.toList())
+        assertEquals(signerNow, changed.str("signingDigest"))
+        assertEquals(signerBefore, changed.str("trustedSigningDigest"))
+        assertEquals("signature_changed", changed.str("status"))
+        // 记忆丢失后还没确认过（PersistedPlugin.UNCONFIRMED = ""）：null，不是空串
+        val unconfirmed = ExtWire.pluginJson(plugin(PluginStatus.SIGNATURE_UNCONFIRMED, ""), policy, null, emptyMap(), 0, emptyList())
+        assertEquals(JsonNull, unconfirmed["trustedSigningDigest"])
+        assertEquals(ExtWire.PLUGIN_KEYS, unconfirmed.keys.toList())
+        // 正常：确认过的就是现在的
+        val ready = ExtWire.pluginJson(plugin(PluginStatus.READY, signerNow), ApprovalPolicy.DEFAULT, "1.0", emptyMap(), 2, emptyList())
+        assertEquals(signerNow, ready.str("trustedSigningDigest"))
+        assertEquals("1.0", ready.str("versionName"))
+        // 空值写 null，不省略
+        assertEquals(JsonNull, unconfirmed["versionName"])
+        assertEquals(JsonNull, unconfirmed["approval"])
+        assertEquals(JsonNull, unconfirmed["unavailableReason"])
+    }
+
+    @Test
+    fun `plugin json servers have fixed keys, states and tool counts`() {
+        val servers = listOf(McpServerDecl.Binder("test", "org.x.Svc"), McpServerDecl.StreamableHttp("remote", "https://example.org/mcp", emptyList()))
+        val p = plugin(PluginStatus.READY, signerNow, servers)
+        val j = ExtWire.pluginJson(p, ApprovalPolicy.DEFAULT, null, mapOf("test" to ExtWire.ServerView("connected", null, 7)), 2, emptyList())
+        val list = (j["servers"] as JsonArray).map { it as JsonObject }
+        assertTrue(list.all { it.keys.toList() == ExtWire.SERVER_KEYS })
+        assertEquals("org.x.Svc", list[0].str("service"))
+        assertEquals(JsonNull, list[0]["url"])
+        assertEquals("connected", list[0].str("state"))
+        assertEquals(JsonNull, list[1]["service"])
+        assertEquals("https://example.org/mcp", list[1].str("url"))
+        assertEquals("idle", list[1].str("state")) // 没有状态、插件启用且可用：idle
+        assertEquals("7", (j["toolCount"] as JsonPrimitive).content)
+        assertEquals("2", (j["skillCount"] as JsonPrimitive).content)
+        // 停用的插件：没有状态的服务器按 disabled
+        val off = ExtWire.pluginJson(p, ApprovalPolicy.DEFAULT.withEnabled(PolicyScope.Plugin("mcptest"), false), null, emptyMap(), 0, emptyList())
+        assertEquals("disabled", ((off["servers"] as JsonArray)[0] as JsonObject).str("state"))
+        assertEquals("false", (off["enabled"] as JsonPrimitive).content)
     }
 
     @Test

@@ -170,62 +170,12 @@ class ExtRegistry(
     /** 本进程里最后一份读到或写出的记忆。 */
     @Volatile private var lastGoodMemory: PersistedRegistry? = null
 
-    // ------------------------------------------------------------------ 给插件页的 JSON（IExtensionHost.listPlugins）
+    // ------------------------------------------------------------------ 给插件页的 JSON（IExtensionHost.listPlugins，ExtWire.pluginJson）
 
-    /**
-     * 插件 JSON（字段见 IExtensionHost.aidl）。[serverStates] 是“服务器名 → (state, error, toolCount)”，由 Extension Host 的
-     * 连接状态提供（没有时按 idle / disabled 推断）。
-     */
-    fun pluginJson(p: PluginRecord, serverStates: Map<String, ServerView> = emptyMap()): JSONObject {
-        val policy = approvals.policy.value
-        val entry = p.name?.let { policy.plugins[it]?.entry }
-        val enabled = p.name != null && policy.pluginEnabled(p.name!!)
-        val m = p.manifest
-        val versionName = runCatching {
-            context.packageManager.getPackageInfo(p.identity.packageName, PackageManager.PackageInfoFlags.of(0)).versionName
-        }.getOrNull()
-        return JSONObject()
-            .put("id", p.id)
-            .put("source", "app")
-            .put("packageName", p.identity.packageName)
-            .put("name", p.name ?: JSONObject.NULL)
-            .put("displayName", m?.displayName ?: p.name ?: p.identity.packageName)
-            .put("description", m?.description ?: m?.display?.shortDescription ?: JSONObject.NULL)
-            .put("versionName", versionName ?: JSONObject.NULL)
-            .put("versionCode", p.identity.versionCode)
-            .put("signingDigest", p.identity.signerDigest)
-            .put("status", p.status.name.lowercase())
-            .put("unavailableReason", p.unavailableReason?.name?.lowercase() ?: JSONObject.NULL)
-            .put("builtin", p.builtin)
-            .put("enabled", enabled)
-            .put("approval", entry?.approval?.wire ?: JSONObject.NULL)
-            .put("problems", JSONArray(p.problems.map { JSONObject().put("code", it.code).put("message", it.message) }))
-            .put("unsupported", JSONArray(m?.unsupported.orEmpty().map {
-                JSONObject().put("kind", it.kind.name.lowercase()).put("location", it.location).put("detail", it.reason)
-            }))
-            .put("servers", JSONArray(p.servers.map { s ->
-                val v = serverStates[s.name]
-                val state = v?.state ?: when {
-                    p.status != PluginStatus.READY || !enabled -> "disabled"
-                    else -> "idle"
-                }
-                JSONObject().put("name", s.name)
-                    .apply {
-                        when (s) {
-                            is McpServerDecl.Binder -> put("service", s.service)
-                            is McpServerDecl.StreamableHttp -> put("url", s.url)
-                        }
-                    }
-                    .put("state", state).put("error", v?.error ?: JSONObject.NULL).put("toolCount", v?.toolCount ?: 0)
-            }))
-            .put("rejectedServers", JSONArray(p.rejectedServers.map {
-                JSONObject().put("name", it.name).put("service", it.service).put("reason", it.reason.name.lowercase())
-            }))
-            .put("toolCount", serverStates.values.sumOf { it.toolCount })
-    }
-
-    /** 一个服务器在插件页上的状态。 */
-    data class ServerView(val state: String, val error: String?, val toolCount: Int)
+    /** 插件 App 的 versionName（插件 JSON 用）；读不到为 null。 */
+    fun versionName(p: PluginRecord): String? = runCatching {
+        context.packageManager.getPackageInfo(p.identity.packageName, PackageManager.PackageInfoFlags.of(0)).versionName
+    }.getOrNull()
 
     /** 诊断（不含插件内容）。 */
     fun diagnostics(): JSONObject = JSONObject()
