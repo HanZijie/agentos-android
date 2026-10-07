@@ -30,6 +30,7 @@ import org.agentos.app.agent.supervisor.SupervisorStatus
 import org.agentos.app.agent.supervisor.SupervisorStatusReceiver
 import org.agentos.runtime.AgentRuntime
 import org.agentos.runtime.AgentRuntimes
+import org.agentos.runtime.RuntimeConfig
 import org.agentos.runtime.RuntimeEngine
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.pi.ModelCatalog
@@ -66,11 +67,16 @@ class AgentProcess private constructor(val app: Context) {
         catalogSource = { app.assets.open(MODEL_CATALOG_ASSET).bufferedReader().use { ModelCatalog.parse(it.readText()) } },
         log = runtimeLog,
     )
+    /** 自动选会话的 Jev endpoint 和 key（自己的 Keystore 主密钥）；没有 key 时路由回退为新建会话（jev_unconfigured）。 */
+    val jev = JevSources(File(app.filesDir, JEV_DIR), AndroidKeystoreCipher(JevSources.JEV_ALIAS), secrets, runtimeLog)
     val environment = AndroidEnvironment()
     val hostPort = HostPortImpl(store, models, secrets, environment, runtimeLog)
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
-    val engine: RuntimeEngine = AgentRuntimes.create(hostPort, PiAgentCores.create(app, hostPort))
+    val engine: RuntimeEngine = AgentRuntimes.create(
+        hostPort, PiAgentCores.create(app, hostPort),
+        RuntimeConfig(jev = ConfiguredJevProvider(jev, secrets)),
+    )
     val runtime: AgentRuntime = engine
     @Volatile private var engineStarted = false
 
@@ -380,6 +386,7 @@ class AgentProcess private constructor(val app: Context) {
 
         /** BYOK 模型来源（明文部分 + key 的密文），CE 存储 files/ 下。 */
         const val BYOK_DIR = "byok"
+        const val JEV_DIR = "jev"
 
         /** B 的 core/pi-runtime/build.mjs 生成的厂商预设。 */
         const val MODEL_CATALOG_ASSET = "model-catalog.json"

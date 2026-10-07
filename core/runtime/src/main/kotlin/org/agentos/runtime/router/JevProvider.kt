@@ -42,9 +42,10 @@ data class JevChoice(val id: String, val brief: String)
 class JevException(val reason: String, message: String = reason, cause: Throwable? = null) : Exception(message, cause)
 
 data class JevConfig(
-    val endpoint: String = "https://omnilabs.vibeadmin.cn/v1/systemone",
+    // 2026-09-29 整合人：默认端点改为 api.typesafe.ai（omnilabs.vibeadmin.cn 对现有 key 返回 401）；超时 1.5 → 3 秒（真机实测约 0.8 秒）
+    val endpoint: String = "https://api.typesafe.ai/v1/systemone",
     val model: String = "jev-1.13.0",
-    val timeoutMillis: Long = 1_500,
+    val timeoutMillis: Long = 3_000,
 )
 
 /**
