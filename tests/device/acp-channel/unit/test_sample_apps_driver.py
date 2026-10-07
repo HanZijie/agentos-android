@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -372,7 +372,7 @@ class StateAndResetTest(unittest.TestCase):
         self.assertTrue(any("alarm: reset" in l for l in report["summary"]["failures"]), report["summary"]["failures"])
 
     def test_a_calendar_that_ignores_clear_fails_the_setup(self):
-        phone = FakePhone(faults={"calendar-clear-noop"})
+        phone = FakePhone(faults={"calendar-reset-noop"})
         phone.t_event_create({"title": "x", "start": "2026-10-09T10:00:00+08:00"})
         _, _, report = run(phone)
         self.assertIn("setup.reset", failed(report))
@@ -389,6 +389,202 @@ def _alarm_phone_with_data(faults):
     phone = FakePhone(faults=faults)
     phone.t_alarm_create({"time": "05:00", "label": "mine"})
     return phone
+
+
+class CalendarDumpTest(unittest.TestCase):
+    """The calendar is read through its own dump / reset like the other two (no copying of its database), and its single armed reminder alarm is checked."""
+
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def test_the_calendar_is_read_through_its_dump_and_the_database_is_never_copied(self):
+        phone, env, report = run()
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertFalse(hasattr(L.RealAdb, "pull_private"), "the driver has no way to read an app's private files any more")
+        self.assertFalse(hasattr(phone, "pull_private"))
+        self.assertFalse([c for c in phone.log if "run-as" in c or "exec-out" in c])
+        dumps = [c for c in phone.log if "calendar/.debug.DebugReceiver" in c.replace("org.agentos.sample.", "")]
+        self.assertTrue(any("--es cmd dump" in c for c in dumps))
+        self.assertTrue(any("--es cmd reset" in c for c in dumps), "reset, not the old clear")
+        self.assertFalse(any("--es cmd clear" in c for c in dumps))
+
+    def test_the_snapshot_has_the_driver_shape_with_series_ids_and_instants(self):
+        phone = FakePhone()
+        e = phone.t_event_create({"title": "weekly", "start": "2026-10-14T10:00:00+08:00", "end": "2026-10-14T11:00:00+08:00", "recurrence": "weekly",
+                                  "recurrence_until": "2026-11-14T00:00:00+08:00", "reminder_minutes": [10, 60], "location": "A1"})
+        snap = L.CalendarState(phone).snapshot()
+        row = snap["events"][0]
+        self.assertEqual(e["series_id"], row["id"], "id is the series id, which event_update / event_delete take")
+        self.assertIn("@", row["occurrence_id"])
+        self.assertEqual(int(datetime(2026, 10, 14, 10, 0, tzinfo=timezone(timedelta(hours=8))).timestamp() * 1000), row["start_ms"])
+        self.assertEqual(row["start_ms"] + 3600000, row["end_ms"])
+        self.assertEqual("2026-10-14T10:00:00+08:00", row["start"])
+        self.assertEqual([10, 60], row["reminders"])
+        self.assertEqual("weekly", row["recurrence"])
+        self.assertEqual(L.iso_ms("2026-11-14T00:00:00+08:00"), row["until_ms"])
+        self.assertEqual("A1", row["location"])
+        self.assertFalse(row["hidden"])
+        self.assertNotIn("created_at", row, "clocks are left out so unchanged comparisons are stable")
+        self.assertEqual(["日历"], [c["name"] for c in snap["calendars"]])
+        self.assertTrue(snap["calendars"][0]["is_default"])
+        self.assertEqual(1, snap["calendars"][0]["event_count"])
+
+    def test_iso_times_become_instants(self):
+        self.assertEqual(L.iso_ms("2026-10-14T10:00:00+08:00"), L.iso_ms("2026-10-14T02:00:00Z"))
+        self.assertEqual(L.iso_ms("2026-10-14T10:00:00+08:00"), L.iso_ms("2026-10-14T02:00:00+00:00"))
+        self.assertIsNone(L.iso_ms(None))
+
+    def test_every_event_is_read_even_when_the_dump_comes_in_pages(self):
+        phone = FakePhone()
+        for i in range(5):
+            phone.t_event_create({"title": "e%d" % i, "start": "2026-10-%02dT10:00:00+08:00" % (10 + i)})
+        old = L.DUMP_PAGE
+        L.DUMP_PAGE = 2
+        try:
+            snap = L.CalendarState(phone).snapshot()
+        finally:
+            L.DUMP_PAGE = old
+        self.assertEqual(["e%d" % i for i in range(5)], [e["title"] for e in snap["events"]])
+        dumps = [c for c in phone.log if "--es cmd dump" in c and "DebugReceiver" in c]
+        self.assertEqual(3, len(dumps))
+        self.assertTrue(all("--ei limit 2" in c for c in dumps))
+
+    def test_reset_reports_what_the_app_reports(self):
+        phone = FakePhone()
+        phone.t_calendar_create({"name": "extra"})
+        phone.t_event_create({"title": "x", "start": "2026-10-14T10:00:00+08:00", "reminder_minutes": [10]})
+        ok, data = L.CalendarState(phone).reset()
+        self.assertTrue(ok, data)
+        self.assertEqual({"cleared": 1, "calendars_remaining": 1, "remaining_scheduled": 0}, data)
+        self.assertEqual([], L.CalendarState(phone).snapshot()["reminders"])
+        bad, data = L.CalendarState(FakePhone(faults={"calendar-reset-leaves-registered"})).reset()
+        self.assertFalse(bad)
+        self.assertEqual(1, data["remaining_scheduled"])
+
+    def test_setup_reset_checks_the_default_calendar_and_the_armed_alarm(self):
+        phone = FakePhone(faults={"calendar-reset-noop"})
+        phone.t_calendar_create({"name": "extra"})
+        phone.t_event_create({"title": "x", "start": "2026-10-14T10:00:00+08:00", "reminder_minutes": [10]})
+        _, _, report = run(phone)
+        self.assertIn("setup.reset", failed(report))
+        names = [c["name"] for c in self.step(report, "setup.reset")["checks"] if not c["ok"]]
+        self.assertTrue(any("calendar: reset" in n for n in names), names)   # calendars_remaining is 2, not 1
+        self.assertTrue(any("only the default calendar" in n for n in names), names)
+
+    def test_the_reminder_steps_exist_and_a_healthy_run_passes_them(self):
+        phone, env, report = run()
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        for sid in ("calendar.create_event", "calendar.update_event", "calendar.update_reminder", "calendar.create_earlier", "calendar.delete_earlier", "calendar.delete_event"):
+            step = self.step(report, sid)
+            self.assertTrue(step["ok"], (sid, [c for c in step["checks"] if not c["ok"]]))
+        names = [c["name"] for c in self.step(report, "calendar.create_event")["checks"]]
+        self.assertTrue(any("fires at 2026-10-17T09:50:00+08:00" in n for n in names), names)
+        self.assertTrue(any("registered with the system AlarmManager" in n for n in names))
+        self.assertTrue(any("exactly one reminder alarm is armed" in n for n in names))
+        moved = [c["name"] for c in self.step(report, "calendar.update_reminder")["checks"]]
+        self.assertTrue(any("fires at 2026-10-17T09:30:00+08:00" in n for n in moved), moved)
+        earlier = [c["name"] for c in self.step(report, "calendar.create_earlier")["checks"]]
+        self.assertTrue(any("fires at 2026-10-16T13:45:00+08:00" in n for n in earlier), earlier)
+        gone = [c["name"] for c in self.step(report, "calendar.delete_event")["checks"]]
+        self.assertTrue(any("no reminder alarm of the deleted event" in n for n in gone))
+        self.assertTrue(any("nothing is armed" in n for n in gone), "the apps started empty: nothing at all is armed after the last delete")
+
+    def test_the_single_armed_alarm_moves_to_the_earlier_event_and_back(self):
+        phone, env, report = run()
+        self.assertTrue(report["ok"])
+        # the fake phone's own history of what was armed: S1 (10 min), S1 (30 min), the earlier event, S1 again, nothing
+        armed_ids = []
+        # replay the same calls directly on a fresh phone to see the sequence
+        p = FakePhone()
+        s1 = p.t_event_create({"title": "s1", "start": "2026-10-17T10:00:00+08:00", "recurrence": "weekly", "reminder_minutes": [30, 5]})["series_id"]
+        p._sync_armed(force=True)
+        self.assertEqual((s1, 30), (p.armed["series"], p.armed["minutes_before"]))
+        e2 = p.t_event_create({"title": "e2", "start": "2026-10-16T14:00:00+08:00", "reminder_minutes": [15]})["series_id"]
+        p._sync_armed(force=True)
+        self.assertEqual((e2, 15), (p.armed["series"], p.armed["minutes_before"]))
+        p.t_event_delete({"id": e2})
+        p._sync_armed(force=True)
+        self.assertEqual(s1, p.armed["series"])
+        p.t_event_delete({"id": s1})
+        p._sync_armed(force=True)
+        self.assertIsNone(p.armed)
+
+    def test_a_dump_read_right_after_a_change_may_still_show_the_old_alarm_and_the_driver_waits_for_it(self):
+        phone = FakePhone()
+        phone.t_event_create({"title": "x", "start": "2026-10-17T10:00:00+08:00", "reminder_minutes": [10]})
+        first = L.CalendarState(phone).snapshot()["reminders"]
+        second = L.CalendarState(phone).snapshot()["reminders"]
+        self.assertEqual([], first, "the 250 ms debounce: the first read after the change shows nothing yet")
+        self.assertEqual(1, len(second))
+        # ... and the driver's check re-reads instead of failing on the first read
+        phone2 = FakePhone()
+        phone2.enabled = {s.package: True for s in L.SAMPLES.values()}
+        phone2.consent_mode = "allow"
+        phone2.t_event_create({"title": "x", "start": "2026-10-17T10:00:00+08:00", "reminder_minutes": [10]})
+        ctx = L.Context(phone2, L.ExtensionDebug(phone2), L.ConsentDebug(phone2), None, date(2026, 10, 7), "+08:00", "r1", exclusive=True)
+        fire = ctx.epoch_ms(date(2026, 10, 17), "10:00") - 600000
+        checks = S.reminder_checks(ctx, phone2.q("calendar.db", "SELECT id FROM events")[0]["id"], fire, 10)
+        self.assertTrue(all(c.ok for c in checks), [c for c in checks if not c.ok])
+
+    def test_an_app_that_never_arms_the_reminder_fails_the_create_step_with_expected_and_actual(self):
+        _, _, report = run(FakePhone(faults={"reminder-never-armed"}))
+        self.assertIn("calendar.create_event", failed(report))
+        line = next(l for l in report["summary"]["failures"] if l.startswith("FAIL calendar.create_event"))
+        self.assertIn("exactly one reminder alarm is armed", line)
+        self.assertIn("expected 1", line)
+        self.assertIn("actual 0", line)
+
+    def test_a_reminder_that_is_recorded_but_not_registered_with_alarmmanager_fails(self):
+        _, _, report = run(FakePhone(faults={"reminder-not-registered"}))
+        self.assertIn("calendar.create_event", failed(report))
+        bad = [c["name"] for c in self.step(report, "calendar.create_event")["checks"] if not c["ok"]]
+        self.assertTrue(any("registered with the system AlarmManager" in n for n in bad), bad)
+
+    def test_two_armed_alarms_fail_the_single_alarm_rule(self):
+        _, _, report = run(FakePhone(faults={"two-armed"}))
+        bad = [c for c in self.step(report, "calendar.create_event")["checks"] if not c["ok"]]
+        self.assertTrue(any("exactly one" in c["name"] and c["expected"] == 1 and c["actual"] == 2 for c in bad), bad)
+
+    def test_a_delete_that_leaves_the_alarm_armed_fails_the_delete_steps(self):
+        _, _, report = run(FakePhone(faults={"delete-keeps-armed"}))
+        self.assertIn("calendar.delete_earlier", failed(report))
+        self.assertIn("calendar.delete_event", failed(report))
+        gone = [c for c in self.step(report, "calendar.delete_event")["checks"] if not c["ok"]]
+        # the alarm that stayed armed is the earlier (already deleted) event's: caught as an orphan and as "something is still armed"
+        self.assertTrue(any("belongs to an event that still exists" in c["name"] and c["actual"] for c in gone), gone)
+        self.assertTrue(any("nothing is armed" in c["name"] and c["actual"] for c in gone), gone)
+        earlier = [c for c in self.step(report, "calendar.delete_earlier")["checks"] if not c["ok"]]
+        self.assertTrue(any("belongs to this event" in c["name"] for c in earlier), earlier)
+
+    def test_a_reminder_that_was_not_moved_by_event_update_fails(self):
+        phone = FakePhone()
+        original = phone.t_event_update
+        phone.t_event_update = lambda a: (original({k: v for k, v in a.items() if k != "reminder_minutes"}))   # the app ignores reminder_minutes
+        _, _, report = run(phone)
+        self.assertIn("calendar.update_reminder", failed(report))
+        bad = [c["name"] for c in self.step(report, "calendar.update_reminder")["checks"] if not c["ok"]]
+        self.assertTrue(any("reminder_minutes are now [30, 5]" in n for n in bad), bad)
+
+    def test_when_the_apps_did_not_start_empty_an_earlier_reminder_of_another_event_may_hold_the_slot(self):
+        phone = FakePhone()
+        phone.t_event_create({"title": "mine", "start": "2026-10-08T09:00:00+08:00", "reminder_minutes": [10]})   # earlier than anything the run creates
+        phone._sync_armed(force=True)
+        _, _, report = run(phone, reset=False)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        names = [c["name"] for c in self.step(report, "calendar.create_event")["checks"]]
+        self.assertTrue(any("another event's earlier reminder holds the single slot" in n for n in names), names)
+        self.assertEqual(["mine"], [r["title"] for r in phone.q("calendar.db", "SELECT title FROM events")], "only this run's events were removed")
+
+    def test_the_live_event_must_have_its_15_minute_reminder_armed(self):
+        plan = LiveRunTest().plan()
+        env = FakeEnv(FakePhone(), live_plan=plan)
+        report = E.run_acceptance(env, E.Options(live=True), log=lambda m: None)
+        step = self.step(report, "live.calendar")
+        self.assertTrue(step["ok"], step["checks"])
+        self.assertTrue(any("live reminder: fires at 2026-10-14T14:45:00+08:00" in c["name"] for c in step["checks"]), [c["name"] for c in step["checks"]])
+        plan["下周三下午 3 点和王总开会，提前 15 分钟提醒"] = lambda ph: [("mcp__calendar__calendar__event_create", {"title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [10]})]
+        report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=plan), E.Options(live=True), log=lambda m: None)
+        self.assertIn("live.calendar", failed(report))
 
 
 class ModelSourceTest(unittest.TestCase):

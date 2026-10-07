@@ -10,6 +10,7 @@ found and removed (cleanup()) even after a failed run.
 """
 import json
 import os
+import time
 from datetime import datetime
 
 import sample_apps_lib as L
@@ -79,6 +80,64 @@ def not_registered(a, id):
                  sched is None or not sched["registered"], sched)
 
 
+MINUTE_MS = 60_000
+
+
+def _armed_checks(ctx, armed, series_id, fire_ms, minutes_before, title, label):
+    """What the calendar's single armed reminder alarm must look like (see [reminder_checks])."""
+    out = [eq("%s: exactly one reminder alarm is armed (the app arms only the next reminder)" % label, 1, len(armed))]
+    a0 = armed[0] if armed else None
+    mine = a0 is not None and a0["series_id"] == series_id
+    expected_at = ctx.iso_from_ms(fire_ms)
+    if ctx.exclusive or mine:
+        out.append(truth("%s: the armed reminder belongs to this event" % label, "series %s" % series_id, mine, a0 and a0["series_id"]))
+    if mine:
+        out += [truth("%s: fires at %s" % (label, expected_at), expected_at, a0["fire_at_ms"] == fire_ms, a0["fire_at"]),
+                eq("%s: minutes before" % label, minutes_before, a0["minutes_before"])]
+        if title is not None:
+            out.append(eq("%s: the armed reminder shows the event's current title" % label, title, a0["title"]))
+    elif not ctx.exclusive:
+        # the apps were not empty at the start: an earlier reminder of someone else's event may hold the single slot
+        out.append(truth("%s: another event's earlier reminder holds the single slot" % label, "fire_at before %s" % expected_at,
+                         a0 is not None and a0["fire_at_ms"] < fire_ms, a0))
+    out.append(truth("%s: the armed reminder is registered with the system AlarmManager" % label, "registered true", bool(a0 and a0["registered"]), a0))
+    return out
+
+
+def reminder_checks(ctx, series_id, fire_ms, minutes_before, title=None, label="reminder", timeout=5.0):
+    """After an event was created or changed through MCP: the calendar's single armed reminder alarm is the next reminder of the event
+    (`reminders_scheduled`: fire_at, minutes_before, title, registered = measured against AlarmManager).
+
+    The app re-arms it with a 250 ms debounce after a data change, so this re-reads the dump for up to `timeout` seconds until it matches
+    (a first read that still shows the old alarm is not a failure); what is returned is the last read. When the apps did not start empty
+    (--no-reset) an earlier reminder of another event may hold the slot: then it must be earlier than this event's."""
+    deadline = time.time() + timeout * L.SLEEP_SCALE
+    while True:
+        out = _armed_checks(ctx, ctx.state("calendar")["reminders"], series_id, fire_ms, minutes_before, title, label)
+        if all(c.ok for c in out) or time.time() >= deadline:
+            return out
+        time.sleep(0.25 * L.SLEEP_SCALE)
+
+
+def reminder_gone(ctx, series_id, label="reminder", timeout=5.0):
+    """After an event was deleted: no registered reminder alarm of it is left (absent from `reminders_scheduled`, or registered false);
+    when the apps started empty, nothing at all is armed."""
+    deadline = time.time() + timeout * L.SLEEP_SCALE
+    while True:
+        snap = ctx.state("calendar")
+        live = [r for r in snap["reminders"] if r["registered"]]
+        mine = [r for r in live if r["series_id"] == series_id]
+        existing = {e["id"] for e in snap["events"]}
+        orphans = [r for r in live if r["series_id"] not in existing]
+        out = [truth("%s: no reminder alarm of the deleted event is armed any more" % label, "absent from reminders_scheduled, or registered false", not mine, mine),
+               truth("%s: every armed reminder alarm belongs to an event that still exists" % label, "no armed reminder of a deleted event", not orphans, orphans)]
+        if ctx.exclusive:
+            out.append(truth("%s: nothing is armed (the deleted event was the last one with a reminder)" % label, "no registered reminder alarm", not live, live))
+        if all(c.ok for c in out) or time.time() >= deadline:
+            return out
+        time.sleep(0.25 * L.SLEEP_SCALE)
+
+
 def unchanged(sample_key, name):
     def verify(before, after, turn, ctx):
         return [eq("%s data unchanged" % name, before[sample_key], after[sample_key])]
@@ -144,8 +203,12 @@ def setup_reset(ctx):
     out = []
     for r in L.reset_apps(ctx.adb):
         out.append(truth("%s: reset" % r["app"], "the app reports it is empty" + (" and nothing is registered with AlarmManager" if r["app"] == "alarm" else ""), r["ok"], r["detail"]))
-    snap = {"alarm": len(ctx.state("alarm")["alarms"]), "notes": len(ctx.state("notes")["notes"]), "calendar events": len(ctx.state("calendar")["events"])}
+    cal = ctx.state("calendar")
+    snap = {"alarm": len(ctx.state("alarm")["alarms"]), "notes": len(ctx.state("notes")["notes"]), "calendar events": len(cal["events"])}
     out.append(truth("the three apps are empty after the reset", "0 alarms, 0 notes, 0 events", not any(snap.values()), snap))
+    out.append(truth("calendar: only the default calendar is left and no reminder alarm is armed", "1 default calendar, no registered reminder",
+                     len(cal["calendars"]) == 1 and cal["calendars"][0]["is_default"] and not any(r["registered"] for r in cal["reminders"]),
+                     {"calendars": [(c["name"], c["is_default"]) for c in cal["calendars"]], "reminders": cal["reminders"]}))
     return out
 
 
@@ -332,7 +395,8 @@ def calendar_steps(ctx):
     def v_event(b, a, t, c):
         row = find(a["events"], var(c.vars, "event_id"))
         return fields("event", row, title=mark + " 周会", calendar_id=c.vars["cal_id"], location="A1", recurrence="weekly", reminders=[10], all_day=False,
-                      start_utc=c.epoch_ms(d, "10:00"), end_utc=c.epoch_ms(d, "11:00")) + [eq("one event more", len(b["events"]) + 1, len(a["events"]))]
+                      start_ms=c.epoch_ms(d, "10:00"), end_ms=c.epoch_ms(d, "11:00")) + [eq("one event more", len(b["events"]) + 1, len(a["events"]))] \
+            + reminder_checks(c, c.vars["event_id"], c.epoch_ms(d, "10:00") - 10 * MINUTE_MS, 10, title=mark + " 周会", label="create")
 
     S.append(Step("calendar.create_event", "calendar", "event_create: weekly 10:00-11:00 with a reminder, in the new calendar",
                   lambda v: [Call("calendar", "event_create", {"title": mark + " 周会", "start": ctx.local(d, "10:00"), "end": ctx.local(d, "11:00"), "calendar_id": var(v, "cal_id"),
@@ -370,15 +434,47 @@ def calendar_steps(ctx):
     S.append(Step("calendar.free_slots", "calendar", "free_slots on the day: the 10:00-11:00 event blocks its hour",
                   [Call("calendar", "free_slots", {"date": d.isoformat(), "duration_minutes": 60})], verify=v_free))
 
-    S.append(Step("calendar.update_event", "calendar", "event_update: new title and place (series stays weekly)",
+    S.append(Step("calendar.update_event", "calendar", "event_update: new title and place (series stays weekly, reminder alarm stays armed)",
                   lambda v: [Call("calendar", "event_update", {"id": var(v, "event_id"), "title": mark + " 周会(改)", "location": "B2"})],
                   verify=lambda b, a, t, c: fields("event", find(a["events"], c.vars["event_id"]), title=mark + " 周会(改)", location="B2", recurrence="weekly", reminders=[10],
-                                                    start_utc=c.epoch_ms(d, "10:00"))))
+                                                    start_ms=c.epoch_ms(d, "10:00"))
+                  + reminder_checks(c, c.vars["event_id"], c.epoch_ms(d, "10:00") - 10 * MINUTE_MS, 10, title=mark + " 周会(改)", label="update")))
 
-    S.append(Step("calendar.delete_event", "calendar", "event_delete (high risk)",
+    def v_update_reminder(b, a, t, c):
+        row = find(a["events"], c.vars["event_id"])
+        shown = row and sorted(row["reminders"])
+        return [truth("event: reminder_minutes are now [30, 5]", "[5, 30]", shown == [5, 30], row and row["reminders"])] \
+            + reminder_checks(c, c.vars["event_id"], c.epoch_ms(d, "10:00") - 30 * MINUTE_MS, 30, title=mark + " 周会(改)", label="update reminder")
+
+    S.append(Step("calendar.update_reminder", "calendar", "event_update reminder_minutes [30, 5]: the armed alarm moves to 30 minutes before",
+                  lambda v: [Call("calendar", "event_update", {"id": var(v, "event_id"), "reminder_minutes": [30, 5]})], verify=v_update_reminder))
+
+    d9 = ctx.day(9)
+
+    def v_earlier(b, a, t, c):
+        row = find(a["events"], var(c.vars, "event2_id"))
+        return fields("event", row, title=mark + " 提前一天", calendar_id=c.vars["cal_id"], reminders=[15], recurrence="none", start_ms=c.epoch_ms(d9, "14:00")) \
+            + [eq("one event more", len(b["events"]) + 1, len(a["events"]))] \
+            + reminder_checks(c, c.vars["event2_id"], c.epoch_ms(d9, "14:00") - 15 * MINUTE_MS, 15, title=mark + " 提前一天", label="earlier event")
+
+    S.append(Step("calendar.create_earlier", "calendar", "event_create a one-off event a day earlier: it takes the single armed reminder alarm",
+                  lambda v: [Call("calendar", "event_create", {"title": mark + " 提前一天", "start": ctx.local(d9, "14:00"), "end": ctx.local(d9, "15:00"),
+                                                               "calendar_id": var(v, "cal_id"), "reminder_minutes": [15]})],
+                  capture=lambda tools, c: {"event2_id": series_of(tools[0].json())}, verify=v_earlier))
+
+    def v_delete_earlier(b, a, t, c):
+        return [truth("the earlier event is gone", "no row", find(a["events"], c.vars["event2_id"]) is None, None),
+                eq("one event less", len(b["events"]) - 1, len(a["events"]))] \
+            + reminder_checks(c, c.vars["event_id"], c.epoch_ms(d, "10:00") - 30 * MINUTE_MS, 30, title=mark + " 周会(改)", label="after deleting the earlier event")
+
+    S.append(Step("calendar.delete_earlier", "calendar", "event_delete the earlier event (high risk): the alarm goes back to the weekly series",
+                  lambda v: [Call("calendar", "event_delete", {"id": var(v, "event2_id")})], verify=v_delete_earlier))
+
+    S.append(Step("calendar.delete_event", "calendar", "event_delete (high risk): its reminder alarm is gone",
                   lambda v: [Call("calendar", "event_delete", {"id": var(v, "event_id")})],
                   verify=lambda b, a, t, c: [truth("the event row is gone", "no row", find(a["events"], c.vars["event_id"]) is None, None),
-                                             eq("one event less", len(b["events"]) - 1, len(a["events"]))]))
+                                             eq("one event less", len(b["events"]) - 1, len(a["events"]))]
+                  + reminder_gone(c, c.vars["event_id"], label="delete")))
 
     S.append(Step("calendar.delete_calendar", "calendar", "calendar_delete (high risk)",
                   lambda v: [Call("calendar", "calendar_delete", {"id": var(v, "cal_id")})],
@@ -539,12 +635,13 @@ def live_cases(ctx, tell_date=False):
         hit = [e for e in new if "王总" in e["title"] or "王总" in (e["description"] or "")]
         starts = []
         for e in hit:
-            local = datetime.fromtimestamp(e["start_utc"] / 1000, tz=datetime.fromisoformat(c.local(c.today, "00:00")).tzinfo)
+            local = datetime.fromtimestamp(e["start_ms"] / 1000, tz=datetime.fromisoformat(c.local(c.today, "00:00")).tzinfo)
             starts.append(local.strftime("%Y-%m-%d %H:%M"))
         right_time = any(s[11:] == "15:00" and s[:10] in wed for s in starts)
         return [truth("a new event mentions 王总", "one new event with 王总 in its title", bool(hit), [e["title"] for e in new]),
                 truth("it starts next Wednesday 15:00 (next ISO week, or the next Wednesday after today)", "date in %s, 15:00" % sorted(wed), right_time, starts),
-                truth("it has a 15 minute reminder", "reminders contains 15", any(15 in e["reminders"] for e in hit), [e["reminders"] for e in hit])]
+                truth("it has a 15 minute reminder", "reminders contains 15", any(15 in e["reminders"] for e in hit), [e["reminders"] for e in hit])] \
+            + (reminder_checks(c, hit[0]["id"], hit[0]["start_ms"] - 15 * MINUTE_MS, 15, label="live reminder") if hit and 15 in hit[0]["reminders"] else [])
 
     def v_note(b, a, t, c):
         known = {y["id"] for y in b["notes"]}

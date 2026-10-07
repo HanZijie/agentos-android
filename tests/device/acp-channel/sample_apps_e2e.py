@@ -78,7 +78,7 @@ def run_acceptance(env, opts, log=log_line):
         env.prepare_device(opts)
         env.open_desktop(opts)      # first: its scenario puts the loopback fake model endpoint on the phone
         env.ensure_model(opts)      # then the model (the real one last)
-        ctx = L.Context(env.adb, env.ext, env.consent, None, today, offset, run_id, log=log, gateway=env.gateway)
+        ctx = L.Context(env.adb, env.ext, env.consent, None, today, offset, run_id, log=log, gateway=env.gateway, exclusive=opts.reset)
         record(S.run_check_step("setup.model", "the phone's model source is the intended one", S.setup_model(opts.live, opts.tunnel), ctx))
         if opts.reset:
             record(S.run_check_step("setup.reset", "the three apps start empty (debug reset)", S.setup_reset, ctx))
