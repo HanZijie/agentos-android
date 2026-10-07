@@ -15,6 +15,7 @@ from fake_world import FakeEnv, FakePhone  # noqa: E402
 
 
 S.WAIT_SCALE = 0.02
+L.SLEEP_SCALE = 0.02
 
 
 def run(phone=None, **opt):
@@ -39,7 +40,7 @@ class ScriptedRunTest(unittest.TestCase):
                        "calendar.free_slots", "calendar.delete_calendar", "notes.trash_again", "notes.delete", "alarm.denied", "notes.plugin_off", "calendar.plugin_on"):
             self.assertIn(expect, ids)
         self.assertGreaterEqual(len(ids), 45)
-        self.assertEqual(["prepare", "model:fake", "session", "finish"], env.events)
+        self.assertEqual(["prepare", "desktop", "model:fake", "session", "finish"], env.events, "desktop access first, the model after it")
 
     def test_every_step_has_checks_and_every_tool_step_has_its_turn(self):
         _, _, report = run()
@@ -54,7 +55,8 @@ class ScriptedRunTest(unittest.TestCase):
         self.assertEqual([], phone.q("alarms.db", "SELECT * FROM alarms"))
         self.assertEqual(["cal-default"], [r["id"] for r in phone.q("calendar.db", "SELECT id FROM calendars")])
         self.assertEqual([], phone.q("calendar.db", "SELECT * FROM events"))
-        self.assertEqual([], phone.q("notes.db", "SELECT * FROM notes WHERE status != 2 AND content LIKE '%e2e-%'") and ["x"])
+        self.assertEqual([], phone.q("notes.db", "SELECT * FROM notes"), "the final reset leaves the notes app empty")
+        self.assertEqual({}, phone.orphans)
         self.assertEqual("off", phone.consent_mode)
         self.assertFalse(any(phone.enabled.values()), "plugins are switched off again at the end")
 
@@ -66,7 +68,9 @@ class ScriptedRunTest(unittest.TestCase):
             self.assertTrue(any("unchanged" in c["name"] or "stays" in c["name"] or "active" in c["name"] for c in step["checks"]) or step["id"].endswith("unknown_id"), sid)
         denied = next(s for s in report["steps"] if s["id"] == "alarm.denied")
         self.assertIn("tool_denied", denied["turn"]["tools"][0]["result"])
-        self.assertEqual("ALLOW_ONCE", phone.consent_log[-1]["answeredWith"], "the last request of the run is the HIGH note_delete, allowed once")
+        high = [e for e in phone.consent_log if e["risk"] == "HIGH"]
+        self.assertTrue(high)
+        self.assertEqual({"ALLOW_ONCE"}, {e["answeredWith"] for e in high}, "HIGH requests are allowed once, never remembered")
 
     def test_the_catalog_check_reports_risk_per_tool(self):
         _, _, report = run()
@@ -187,16 +191,24 @@ class FailureReportingTest(unittest.TestCase):
         phone, env, report = run(FakePhone(faults={"risk-read"}))
         self.assertIn("setup.catalog", failed(report))
 
-    def test_unreadable_app_database_is_a_driver_error_not_a_pass(self):
-        phone, env, report = run(FakePhone(faults={"no-db-notes"}))
+    def test_a_failing_app_dump_stops_the_run_at_the_reset_check(self):
+        phone, env, report = run(FakePhone(faults={"dump-fails-notes"}))
+        self.assertFalse(report["ok"])
+        self.assertIn("setup.reset", failed(report))
+        reset = next(s for s in report["steps"] if s["id"] == "setup.reset")
+        self.assertIn("notes dump failed", reset["error"])
+        self.assertTrue(all(not s["sample"] for s in report["steps"]), "no app step ran on an unreadable app")
+
+    def test_a_failing_app_dump_is_a_driver_error_not_a_pass(self):
+        phone, env, report = run(FakePhone(faults={"dump-fails-notes"}), reset=False)
         self.assertFalse(report["ok"])
         notes_steps = [s for s in report["steps"] if s["sample"] == "notes"]
         self.assertTrue(notes_steps)
         self.assertTrue(all(not s["ok"] for s in notes_steps))
-        self.assertTrue(any("cannot read databases/notes.db" in (s["error"] or "") for s in notes_steps))
-        self.assertTrue(all("cannot read databases/notes.db" in (s["error"] or "") or "needs '" in (s["error"] or "") for s in notes_steps))
+        self.assertTrue(any("notes dump failed" in (s["error"] or "") for s in notes_steps))
+        self.assertTrue(all("notes dump failed" in (s["error"] or "") or "needs '" in (s["error"] or "") for s in notes_steps))
         alarm = [s for s in report["steps"] if s["sample"] == "alarm"]
-        self.assertTrue(all(s["ok"] for s in alarm), "an unreadable notes database does not spoil the alarm results")
+        self.assertTrue(all(s["ok"] for s in alarm), "an unreadable notes app does not spoil the alarm results")
 
     def test_leftovers_of_a_failed_run_are_cleaned_up(self):
         phone = FakePhone()
@@ -239,6 +251,187 @@ class FailureReportingTest(unittest.TestCase):
         self.assertTrue(report["ok"])
 
 
+class StateAndResetTest(unittest.TestCase):
+    """The apps' own dump / reset are the source of truth (a real phone has no sqlite3); alarms are checked against AlarmManager."""
+
+    def test_alarm_registration_is_checked_at_every_step(self):
+        _, _, report = run()
+        names = lambda sid: [c["name"] for c in next(s for s in report["steps"] if s["id"] == sid)["checks"]]  # noqa: E731
+        self.assertTrue(any("registered with the system AlarmManager for 07:15" in n for n in names("alarm.create")))
+        self.assertTrue(any("for 08:30" in n for n in names("alarm.update")))
+        self.assertTrue(any("no longer registered" in n for n in names("alarm.switch_off")))
+        self.assertTrue(any("registered" in n and "08:30" in n for n in names("alarm.switch_on")))
+        self.assertTrue(any("no longer registered" in n for n in names("alarm.delete")))
+
+    def test_an_alarm_that_is_stored_but_not_set_in_the_system_fails_the_create_step(self):
+        _, _, report = run(FakePhone(faults={"alarm-not-registered"}))
+        self.assertIn("alarm.create", failed(report))
+        line = next(l for l in report["summary"]["failures"] if l.startswith("FAIL alarm.create"))
+        self.assertIn("AlarmManager", line)
+
+    def test_a_deleted_alarm_that_stays_registered_fails_the_delete_step(self):
+        _, _, report = run(FakePhone(faults={"delete-keeps-registration"}))
+        self.assertEqual({"alarm.delete"}, {i for i in failed(report) if i.startswith("alarm.")})
+
+    def test_a_switched_off_alarm_that_stays_registered_fails_the_switch_off_step(self):
+        _, _, report = run(FakePhone(faults={"switch-off-keeps-registration"}))
+        self.assertIn("alarm.switch_off", failed(report))
+
+    def test_every_dump_is_read_page_by_page(self):
+        old = L.DUMP_PAGE
+        L.DUMP_PAGE = 1
+        phone = FakePhone()
+        for i in range(3):
+            phone.t_note_create({"content": "mine %d" % i})   # already there (--no-reset): every notes dump needs several pages
+            phone.t_alarm_create({"time": "05:0%d" % i, "label": "mine"})
+        try:
+            phone, env, report = run(phone, reset=False)
+        finally:
+            L.DUMP_PAGE = old
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        dumps = [c for c in phone.log if "--es cmd dump" in c]
+        self.assertTrue(any("--ei offset 2 " in c for c in dumps), "later pages were requested")
+        self.assertTrue(all("--ei limit 1" in c for c in dumps))
+
+    def test_paging_reads_all_rows(self):
+        phone = FakePhone()
+        for i in range(7):
+            phone.t_note_create({"content": "n%d" % i})
+        old = L.DUMP_PAGE
+        L.DUMP_PAGE = 3
+        try:
+            snap = L.NotesState(phone).snapshot()
+        finally:
+            L.DUMP_PAGE = old
+        self.assertEqual(["n%d" % i for i in range(7)], [n["content"] for n in snap["notes"]])
+
+    def test_a_dump_that_does_not_advance_is_an_error_not_an_endless_loop(self):
+        phone = FakePhone(faults={"dump-stuck"})
+        for i in range(4):
+            phone.t_note_create({"content": "n%d" % i})
+        old = L.DUMP_PAGE
+        L.DUMP_PAGE = 2
+        try:
+            with self.assertRaises(L.StateReadError) as cm:
+                L.NotesState(phone).snapshot()
+        finally:
+            L.DUMP_PAGE = old
+        self.assertIn("does not advance", str(cm.exception))
+
+    def test_note_status_comes_from_the_archived_and_trashed_flags(self):
+        phone = FakePhone()
+        a = phone.t_note_create({"content": "a"})
+        b = phone.t_note_create({"content": "b"})
+        phone.t_note_trash({"id": b["id"]})
+        phone.q("notes.db", "UPDATE notes SET status = 1 WHERE id = ?", a["id"])
+        self.assertEqual({"a": "archived", "b": "trashed"}, {n["content"]: n["status"] for n in L.NotesState(phone).snapshot()["notes"]})
+
+    def test_int_extras_are_sent_as_int_and_long_extras_as_long(self):
+        self.assertEqual("--ei offset 5", L._extra("offset", 5))
+        self.assertEqual("--el timeoutMs 15000", L._extra("timeoutMs", L.LongExtra(15000)))
+        self.assertEqual("--ez absent true", L._extra("absent", True))
+        self.assertEqual("--es cmd dump", L._extra("cmd", "dump"))
+
+    def test_the_run_starts_and_ends_with_a_reset_of_the_three_apps(self):
+        phone = FakePhone()
+        phone.t_alarm_create({"time": "05:00", "label": "mine"})
+        phone.t_note_create({"content": "mine"})
+        phone.t_calendar_create({"name": "mine"})
+        phone.t_event_create({"title": "mine", "start": "2026-10-09T10:00:00+08:00"})
+        _, _, report = run(phone)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        ids = [s["id"] for s in report["steps"]]
+        self.assertEqual("setup.reset", ids[1])
+        self.assertEqual("teardown.reset", ids[-1])
+        self.assertEqual([], phone.q("alarms.db", "SELECT * FROM alarms"))
+        self.assertEqual([], phone.q("notes.db", "SELECT * FROM notes"))
+        self.assertEqual([], phone.q("calendar.db", "SELECT * FROM events"))
+        self.assertEqual(["cal-default"], [r["id"] for r in phone.q("calendar.db", "SELECT id FROM calendars")])
+
+    def test_no_reset_keeps_the_data_that_was_there_and_removes_only_this_runs(self):
+        phone = FakePhone()
+        phone.t_alarm_create({"time": "05:00", "label": "mine"})
+        n = phone.t_note_create({"content": "mine"})
+        _, _, report = run(phone, reset=False)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        ids = [s["id"] for s in report["steps"]]
+        self.assertNotIn("setup.reset", ids)
+        self.assertNotIn("teardown.reset", ids)
+        self.assertEqual(["mine"], [r["label"] for r in phone.q("alarms.db", "SELECT label FROM alarms")])
+        self.assertEqual(["mine"], [r["content"] for r in phone.q("notes.db", "SELECT content FROM notes")])
+
+    def test_keep_data_removes_nothing(self):
+        phone = FakePhone(faults={"alarm-forgets-write"})
+        report = E.run_acceptance(FakeEnv(phone), E.Options(keep_data=True), log=lambda m: None)
+        self.assertNotIn("teardown.reset", [s["id"] for s in report["steps"]])
+        self.assertIsNone(report["leftovers"])
+
+    def test_a_reset_that_does_not_clear_the_system_alarms_fails_the_setup(self):
+        _, _, report = run(FakePhone(faults={"reset-leaves-registered"}, ) if False else _alarm_phone_with_data(faults={"reset-leaves-registered"}))
+        self.assertIn("setup.reset", failed(report))
+        self.assertTrue(any("alarm: reset" in l for l in report["summary"]["failures"]), report["summary"]["failures"])
+
+    def test_a_calendar_that_ignores_clear_fails_the_setup(self):
+        phone = FakePhone(faults={"calendar-clear-noop"})
+        phone.t_event_create({"title": "x", "start": "2026-10-09T10:00:00+08:00"})
+        _, _, report = run(phone)
+        self.assertIn("setup.reset", failed(report))
+
+    def test_alarm_and_notes_are_never_read_by_copying_their_databases(self):
+        # FakePhone.pull_private raises AssertionError for them: a whole healthy run proves the driver does not do it
+        phone, env, report = run()
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertTrue(any("--es cmd dump" in c and "DebugToolReceiver" in c for c in phone.log))
+        self.assertTrue(any("--es cmd dump" in c and "DebugCallReceiver" in c for c in phone.log))
+
+
+def _alarm_phone_with_data(faults):
+    phone = FakePhone(faults=faults)
+    phone.t_alarm_create({"time": "05:00", "label": "mine"})
+    return phone
+
+
+class ModelSourceTest(unittest.TestCase):
+    def test_the_model_source_is_checked_before_anything_is_asked(self):
+        _, env, report = run()
+        step = next(s for s in report["steps"] if s["id"] == "setup.model")
+        self.assertTrue(step["ok"])
+        self.assertEqual("http://127.0.0.1:18787", step["checks"][1]["actual"]["modelBaseUrl"])
+        self.assertEqual("setup.model", report["steps"][0]["id"])
+
+    def test_live_wants_the_real_minimax_preset(self):
+        phone = FakePhone()
+        env = FakeEnv(phone, live_plan=LiveRunTest().plan())
+        report = E.run_acceptance(env, E.Options(live=True), log=lambda m: None)
+        step = next(s for s in report["steps"] if s["id"] == "setup.model")
+        self.assertTrue(step["ok"], step["checks"])
+        shown = next(c["actual"] for c in step["checks"] if "REAL MiniMax" in c["name"])
+        self.assertEqual({"modelUsable": True, "modelBaseUrl": "https://api.minimaxi.com/anthropic", "modelId": "MiniMax-M3"}, shown)
+        self.assertEqual(["prepare", "desktop", "model:live", "session", "finish"], env.events, "the real model is configured after the desktop access")
+
+    def test_a_model_source_that_was_put_back_to_the_loopback_fake_stops_the_live_run(self):
+        phone = FakePhone(faults={"model-reset-to-fake"})
+        report = E.run_acceptance(FakeEnv(phone, live_plan=LiveRunTest().plan()), E.Options(live=True), log=lambda m: None)
+        self.assertIn("setup.model", failed(report))
+        self.assertTrue(all(not s["sample"] for s in report["steps"]), "no prompt was sent to the wrong model")
+        line = next(l for l in report["summary"]["failures"] if l.startswith("FAIL setup.model"))
+        self.assertIn("api.minimaxi.com", line)
+        self.assertEqual([], phone.consent_log)
+
+    def test_tunnel_mode_expects_the_loopback_endpoint(self):
+        report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=LiveRunTest().plan()), E.Options(live=True, tunnel=True), log=lambda m: None)
+        step = next(s for s in report["steps"] if s["id"] == "setup.model")
+        self.assertTrue(step["ok"], step["checks"])
+        self.assertTrue(any("tunnelled" in c["name"] for c in step["checks"]))
+
+    def test_a_fake_run_refuses_a_phone_that_still_has_a_real_model(self):
+        phone = FakePhone()
+        env = FakeEnv(phone)
+        env.ensure_model = lambda opts: setattr(phone, "model", {"modelUsable": True, "modelBaseUrl": "https://api.minimaxi.com/anthropic", "modelId": "MiniMax-M3"})
+        report = E.run_acceptance(env, E.Options(), log=lambda m: None)
+        self.assertIn("setup.model", failed(report))
+
+
 class LiveRunTest(unittest.TestCase):
     def plan(self):
         d = date(2026, 10, 14)  # next Wednesday
@@ -268,6 +461,32 @@ class LiveRunTest(unittest.TestCase):
         self.assertEqual({"live.alarm"}, failed(report))
         line = next(l for l in report["summary"]["failures"] if l.startswith("FAIL live.alarm"))
         self.assertIn("07:00", line)
+
+    def test_the_verdict_is_the_app_state_not_a_fixed_tool_sequence(self):
+        plan = self.plan()
+        # the model looks first, hits an error, retries: different sequence, same result
+        plan["记一条关于新品发布的备忘，打上工作标签"] = lambda ph: [
+            ("mcp__notes__notes__note_list", {}), ("mcp__notes__notes__note_get", {"id": "nope"}), ("mcp__notes__notes__note_search", {"query": "新品发布"}),
+            ("mcp__notes__notes__note_create", {"content": "新品发布备忘", "tags": ["工作"]})]
+        report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=plan), E.Options(live=True), log=lambda m: None)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        notes = next(s for s in report["steps"] if s["id"] == "live.notes")
+        self.assertEqual(4, len(notes["toolSequence"]))
+        self.assertEqual(1, len(notes["failedCalls"]), "the failed call is recorded as information")
+        self.assertEqual("mcp__notes__notes__note_get", notes["failedCalls"][0]["name"])
+
+    def test_the_prompts_are_the_natural_ones_and_the_date_is_only_added_on_request(self):
+        phone = FakePhone()
+        env = FakeEnv(phone, live_plan=self.plan())
+        E.run_acceptance(env, E.Options(live=True), log=lambda m: None)
+        self.assertEqual(["明早 7 点叫我起床", "下周三下午 3 点和王总开会，提前 15 分钟提醒", "记一条关于新品发布的备忘，打上工作标签"], [t for _, t in env.bridge.prompts])
+        env2 = FakeEnv(FakePhone(), live_plan={})
+        E.run_acceptance(env2, E.Options(live=True, tell_date=True), log=lambda m: None)
+        self.assertTrue(all(t.startswith("今天是 2026-10-07（设备时区 UTC+08:00）。") for _, t in env2.bridge.prompts), env2.bridge.prompts)
+
+    def test_the_alarm_must_really_be_set_in_the_system(self):
+        report = E.run_acceptance(FakeEnv(FakePhone(faults={"alarm-not-registered"}), live_plan=self.plan()), E.Options(live=True), log=lambda m: None)
+        self.assertIn("live.alarm", failed(report))
 
     def test_a_model_that_calls_no_tool_fails(self):
         plan = self.plan()
