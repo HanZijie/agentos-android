@@ -9,6 +9,7 @@ import android.os.RemoteCallbackList
 import android.util.Log
 import org.agentos.internal.IExtensionCallback
 import org.agentos.internal.IExtensionHost
+import org.agentos.runtime.broker.ApprovalPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -31,10 +32,19 @@ class ExtensionHostService : Service() {
             throw ExtError.notFound(pluginId)
         }
 
+        override fun setPluginApproval(pluginId: String?, mode: String?): String = guarded {
+            ExtError.checkMode(mode)
+            throw ExtError.notFound(pluginId)
+        }
+
         override fun listTools(pluginId: String?): String = guarded { throw ExtError.notFound(pluginId) }
 
+        override fun setToolEnabled(toolName: String?, enabled: Boolean): String = guarded {
+            throw ExtError.notFound(toolName)
+        }
+
         override fun setToolApproval(toolName: String?, mode: String?): String = guarded {
-            if (mode !in ExtError.APPROVAL_MODES) throw ExtError.badMode(mode)
+            ExtError.checkMode(mode)
             throw ExtError.notFound(toolName)
         }
 
@@ -51,7 +61,8 @@ class ExtensionHostService : Service() {
         }
 
         override fun getCatalog(): String = guarded {
-            JSONObject().put("version", CATALOG_VERSION).put("tools", JSONArray()).toString()
+            JSONObject().put("version", CATALOG_VERSION).put("tools", JSONArray())
+                .put("policy", JSONObject(ApprovalPolicy.DEFAULT.toJson())).toString()
         }
 
         override fun callTool(callId: String?, requestJson: String?, callback: IExtensionCallback?): Boolean = guarded { false }
@@ -99,11 +110,16 @@ class ExtensionHostService : Service() {
 /** IExtensionHost 的错误（message 形如 agentos.ext.<code>: <说明>）。 */
 internal object ExtError {
     const val PREFIX = "agentos.ext."
-    val APPROVAL_MODES = setOf("ask", "always_allow", "disabled")
+    /** ApprovalMode 的 wire 值（core/runtime 的 ApprovalPolicy），"" 表示清除这一层。 */
+    val APPROVAL_MODES = setOf("ask", "always", "")
+
+    fun checkMode(mode: String?) {
+        if (mode == null || mode !in APPROVAL_MODES) throw badMode(mode)
+    }
 
     fun notFound(what: String?) = IllegalArgumentException("${PREFIX}not_found: no such plugin or tool: $what")
-    fun badMode(mode: String?) = IllegalArgumentException("${PREFIX}bad_mode: approval mode must be one of $APPROVAL_MODES, got $mode")
+    fun badMode(mode: String?) = IllegalArgumentException("${PREFIX}bad_mode: approval mode must be ask, always or \"\" (clear), got $mode")
     fun invalid(detail: String) = IllegalStateException("${PREFIX}invalid: $detail")
-    fun highRisk(tool: String) = IllegalArgumentException("${PREFIX}high_risk: $tool is a high-risk tool and cannot be always allowed")
+    fun highRisk(tool: String) = IllegalArgumentException("${PREFIX}high_risk: $tool is a high-risk tool and cannot be set to always")
     fun unavailable(detail: String) = IllegalStateException("${PREFIX}unavailable: $detail")
 }
