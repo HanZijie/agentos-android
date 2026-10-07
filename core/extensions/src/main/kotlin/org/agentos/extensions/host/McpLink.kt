@@ -122,7 +122,7 @@ class TimedOut(val timeoutMillis: Long) : McpLinkException("no response within $
 }
 
 /** 服务端回了 JSON-RPC 错误。[code] 是 JSON-RPC 的 error.code。 */
-class ServerError(val code: Int, message: String) : McpLinkException("MCP error $code: $message") {
+class ServerError(val code: Int, val detail: String) : McpLinkException("MCP error $code: $detail") {
     override val mayHaveBeenSent: Boolean get() = true
 }
 

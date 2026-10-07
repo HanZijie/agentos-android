@@ -15,6 +15,7 @@ dependencies {
     // 记忆丢失的测试用真实的 CapabilityBroker + FakeHostPort 看“模型能看到哪些工具”
     testImplementation(testFixtures(project(":core:runtime")))
     testImplementation(libs.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // Agent Plugins 1.0 的 schema 固定副本（core/protocol/agent-plugins-1.0/）随模块打包，运行时不联网拉取。
