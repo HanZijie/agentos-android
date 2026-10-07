@@ -52,6 +52,12 @@ internal class TaskRunner(
 ) {
     private val writes = Channel<Write>(Channel.UNLIMITED)
     private val fenced = AtomicBoolean(false)
+    private val cancelSignal = CompletableDeferred<Unit>()
+
+    /** 用户取消了这个任务：等待确认的工具调用撤回确认（见 [ToolContext.cancelRequested]）。 */
+    fun requestCancel() {
+        cancelSignal.complete(Unit)
+    }
 
     /** 当前是否在执行工具（取消时区分 phase）。 */
     @Volatile var inTool: Boolean = false
@@ -75,7 +81,7 @@ internal class TaskRunner(
     /** 执行这一轮，返回 Agent core 的结局。事件在返回前全部提交。 */
     suspend fun run(input: TurnInput): TurnOutcome = coroutineScope {
         val writerJob = launch { writer() }
-        val ctx = ToolContext(sessionId, taskId, toolContextCaller) { block ->
+        val ctx = ToolContext(sessionId, taskId, toolContextCaller, cancelSignal) { block ->
             val ack = CompletableDeferred<Unit>()
             if (writes.trySend(Write.Commit(block, ack)).isSuccess) ack.await()
         }

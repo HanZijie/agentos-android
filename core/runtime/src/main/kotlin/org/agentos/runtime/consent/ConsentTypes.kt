@@ -133,11 +133,16 @@ interface ConsentSurface {
  * 不抛异常：失败（策略文件读不出来、fail closed、IPC 失败）返回 [ApprovalWriteResult.Failed]。
  */
 interface ApprovalWriter {
+    /** 能不能写。为 false 时确认界面不提供“始终允许”（提供一个必定失败的选项没有意义）。 */
+    val available: Boolean get() = true
+
     suspend fun setAlways(source: ToolSource, risk: ToolRisk): ApprovalWriteResult
 
     companion object {
         /** 不能写（没有接上用户策略）。 */
         val UNAVAILABLE: ApprovalWriter = object : ApprovalWriter {
+            override val available: Boolean get() = false
+
             override suspend fun setAlways(source: ToolSource, risk: ToolRisk) = ApprovalWriteResult.Failed("not available")
         }
     }
