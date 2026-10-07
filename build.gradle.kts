@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm) apply false
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.serialization) apply false
+    alias(libs.plugins.kotlin.compose) apply false
 }
 
 // ---- 工具链检查：版本锁定在 gradle/libs.versions.toml ----

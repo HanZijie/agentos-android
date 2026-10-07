@@ -448,8 +448,18 @@ def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
         step("foregroundServiceWhileOn", samples and all(x.get("fgService") and (x.get("procState") or 99) <= 4 for x in samples),
              {"procStates": sorted({x.get("procState") for x in samples}), "oomAdj": sorted({x.get("oomAdj") for x in samples})})
 
-        # 通知上的“关闭”
-        tapped, tap_path = tap_off_in_shade(adb)
+        # 通知上的“关闭”。AGENTOS_NO_UI_TAP=1（真机上只允许 adb、不点屏幕时）：不点通知栏，改用调试入口关开关，
+        # 走同一个 setEnabled(false)；这一步记为 offViaAdb，不冒充“通过通知关闭”
+        no_tap = os.environ.get("AGENTOS_NO_UI_TAP") == "1"
+        off_step = "offViaAdb" if no_tap else "offViaNotification"
+        if no_tap:
+            tapped, tap_path = True, "adb debug receiver (AGENTOS_NO_UI_TAP=1)"
+            if with_bridge:
+                debug_op(adb, "disable")
+            else:
+                R.run_one(adb, "c6-off-noui", R.INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
+        else:
+            tapped, tap_path = tap_off_in_shade(adb)
         t_off = time.time()
         if bridge:
             try:
@@ -471,7 +481,7 @@ def run_desktop(adb, idle_sec=60, with_bridge=True, log=print):
         # 开关状态：debug 包问 debug 入口；releaseTest 经 inapp（它会 bind :agent，所以放在反向对照之后）
         if with_bridge:
             st = debug_op(adb, "status")
-            step("offViaNotification", bool(tapped) and st.get("enabled") is False and st.get("listening") is False,
+            step(off_step, bool(tapped) and st.get("enabled") is False and st.get("listening") is False,
                  {"tapped": tapped, "path": tap_path, "enabled": st.get("enabled"), "pairings": len(st.get("pairings", []))})
         # 反向对照：关掉之后没有别的东西让进程保持解冻（点通知按钮给 App 30 秒临时白名单，之后应当被冻结）
         frozen_at = None
