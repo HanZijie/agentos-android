@@ -56,10 +56,10 @@ class ManualClock(start: Long = 1_700_000_000_000L) : Clock {
 }
 
 /** 内存里的工具目录：测试注册工具实现，或让某个工具返回 NotDispatched / Unknown。 */
-class FakeToolPort : ToolPort {
+open class FakeToolPort : ToolPort {
     private val impls = mutableMapOf<String, suspend (ToolInvocation) -> ToolInvocationResult>()
     private val _catalog = MutableStateFlow(ToolCatalog.EMPTY)
-    override val catalog: StateFlow<ToolCatalog> = _catalog
+    override val catalog: StateFlow<ToolCatalog> get() = _catalog
 
     /** 按发生顺序记录的调用。 */
     val invocations: MutableList<ToolInvocation> = Collections.synchronizedList(mutableListOf())
