@@ -98,6 +98,9 @@ data class ApprovalPolicy(
         )
     }
 
+    /** 这个插件整体是否启用（只看 plugin 级设置；服务器、工具级的禁用不影响插件的 Skills）。 */
+    fun pluginEnabled(plugin: String): Boolean = plugins[plugin]?.entry?.enabled ?: unlistedPluginsEnabled
+
     /** 设置（[enabled] 为 null 表示清除，沿用上一层）。 */
     fun withEnabled(scope: PolicyScope, enabled: Boolean?): ApprovalPolicy = update(scope) { it.copy(enabled = enabled) }
 
