@@ -62,8 +62,9 @@ agentos-android/
 │   │   ├── build.mjs                                [W3] ← agenriod runtime/build.mjs：esbuild 打成单文件，输出到 app/src/main/assets/pi-agent.js；同时从 pi-ai 的模型目录导出 model-catalog.json，供设置页的厂商预设使用
 │   │   └── test/                                    [W3] 用假宿主对打包结果做契约测试，Node 和 QuickJS 各跑一遍
 │   └── extensions/                                  # 扩展的纯逻辑（Kotlin/JVM）
-│       ├── ManifestReader.kt                        [W14] plugin.json、mcp.json、extensions."org.agentos"
-│       ├── ToolNaming.kt                            [W14]
+│       ├── ManifestReader.kt                        [W14] plugin.json、mcp.json、extensions."org.agentos"（A7 已完成）
+│       ├── ToolNaming.kt                            [W14]（A7 已完成）
+│       ├── registry/{PluginScanLogic,PersistedRegistry,ApprovalStore}.kt   [W14] 插件注册表的纯 JVM 部分：发现结果 → 注册表与事件（签名变化、卸载、升级、第三方默认关闭）、记忆文件、用户策略的原子持久化与 fail closed（A8 已完成）；依赖 core:runtime 的 ApprovalPolicy
 │       ├── PackageValidator.kt                      [W18]
 │       ├── hooks/{HookMatcher,DecisionMerger}.kt    [W22]
 │       └── src/test/
@@ -94,10 +95,10 @@ agentos-android/
 │       │   └── supervisor/{SupervisorStatusReceiver,SupervisorStatus,SupervisorStatusStore}.kt   [W7] 接收 root 监督进程的状态广播（signature 权限保护），状态文件 key=value 与 toJson()；[W11] safe mode
 │       ├── ext/                                     # Extension Host，:ext 进程（设计见 docs/extensions.md）
 │       │   ├── ExtensionHostService.kt              [W14] IExtensionHost 的实现
-│       │   ├── registry/AppPluginScanner.kt         [W14] ← AgentManagerService.java 的发现与签名校验
+│       │   ├── registry/AppPluginScanner.kt         [W14] 薄适配层：PackageManager → `InstalledAppView`（queryIntentServices、createPackageContext 读 assets、签名摘要、监听包变化），调 `PluginScanLogic`，保存结果并执行 `Revoke` 事件 ← AgentManagerService.java
 │       │   ├── registry/{PackageImporter,PluginStore}.kt   [W18]
 │       │   ├── registry/UserMcpConfig.kt            [W19]
-│       │   ├── policy/ApprovalStore.kt              [W14] 用户策略的持久化（读写 `ApprovalPolicy.toJson/fromJson` 的文件；读失败时不回到默认）和插件页的读写操作。`ApprovalPolicy` 本身在 core/runtime 的 broker/（Broker 要读），A7 已完成
+│       │   ├── policy/                              [W14] 只剩策略文件的路径与接线（`ApprovalStore` 在 core/extensions，覆盖 HostPortImpl.approvals）和插件页的读写操作。`ApprovalPolicy` 本身在 core/runtime 的 broker/（Broker 要读），A7 已完成
 │       │   ├── policy/TrustStore.kt                 [W22] Hook 信任审核（按内容哈希）
 │       │   ├── mcp/{McpClientManager,ToolCatalog}.kt   [W15] 连接管理、工具目录
 │       │   ├── mcp/HttpMcpClient.kt                 [W19] 远端 Streamable HTTP，凭据用 Keystore 加密保存
@@ -459,7 +460,8 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] 把 Agent Plugins 1.0 的 schema 副本放进 `core/protocol/agent-plugins-1.0/`（A7）
 - [x] `core/extensions/`：`ManifestReader`（含 `extensions."org.agentos"`）、`ToolNaming`（A7，30 项测试，含三个示例 App 的全部工具名）
 - [x] `ApprovalPolicy`（A7，在 core/runtime 的 broker/，Broker 已按它决定可用与确认）
-- [ ] `AppPluginScanner`（检查 Service 属于本包、已导出、要求 `BIND_MCP_SERVICE`）、`ApprovalStore`（持久化）
+- [x] 插件注册表的纯 JVM 部分：`PluginScanLogic`、`PersistedRegistry`、`ApprovalStore`（A8：33 项注册表测试 + ApprovalStore 的坏文件、原子写、备份、fail closed 测试；core:extensions 共 63 项）
+- [ ] `AppPluginScanner`（Android 薄适配层：PackageManager → `InstalledAppView`，保存结果，执行 `Revoke`）
 - [ ] 设置页：插件管理（启用、禁用、审批方式）
 - [ ] 测试：清单解析与校验、工具命名
 
