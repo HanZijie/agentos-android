@@ -11,3 +11,11 @@ dependencies {
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.junit4)
 }
+
+// Agent Plugins 1.0 的 schema 固定副本（core/protocol/agent-plugins-1.0/）随模块打包，运行时不联网拉取。
+// 资源路径：org/agentos/extensions/agent-plugins-1.0/{plugin,mcp}.schema.json。ManifestReaderSchemaTest 用它核对手写的校验规则。
+tasks.named<ProcessResources>("processResources") {
+    from(rootProject.layout.projectDirectory.dir("core/protocol/agent-plugins-1.0")) {
+        into("org/agentos/extensions/agent-plugins-1.0")
+    }
+}
