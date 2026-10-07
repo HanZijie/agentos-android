@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -128,8 +127,8 @@ class ConsentEndToEndTest {
         return runBlocking {
             rt.start()
             try {
-                withTimeout(20_000) {
-                    while (extHost.catalog.value.tools.isEmpty()) delay(10)
+                withTimeout(E2e.TEST_MILLIS) {
+                    E2e.awaitUntil("the tool catalog to list the notes tools", { "serverStates=${extHost.serverStates.value}" }) { extHost.catalog.value.tools.isNotEmpty() }
                     block(rt)
                 }
             } finally {
@@ -167,7 +166,7 @@ class ConsentEndToEndTest {
             assertEquals(order, types.filter { it in order })
             assertEquals("user", events.single { it.eventType == EventTypes.CONSENT_RESOLVED }.payload["reason"]!!.jsonPrimitive.content)
             assertEquals("ok:note_create", events.single { it.eventType == EventTypes.TOOL_EXECUTION_END }.resultText())
-            delay(100)
+            E2e.awaitUntil("the surface to be told the request is resolved", { "pending=${coordinator.pending.value.size}" }) { user.resolutions.isNotEmpty() }
             assertTrue(coordinator.pending.value.isEmpty())
             assertEquals(ConsentEnd.ANSWERED, user.resolutions.single().second.end)
         }
@@ -198,7 +197,7 @@ class ConsentEndToEndTest {
             val text = events.single { it.eventType == EventTypes.TOOL_EXECUTION_END }.resultText()
             assertTrue(text.startsWith("[agentos:tool_denied]") && "did not respond" in text, text)
             assertEquals("timeout", events.single { it.eventType == EventTypes.CONSENT_RESOLVED }.payload["reason"]!!.jsonPrimitive.content)
-            delay(100)
+            E2e.awaitUntil("the surface to be told the request timed out", { "pending=${coordinator.pending.value.size}" }) { user.resolutions.isNotEmpty() }
             assertTrue(coordinator.pending.value.isEmpty())
             assertEquals(ConsentEnd.TIMED_OUT, user.resolutions.single().second.end)
         }
@@ -209,11 +208,10 @@ class ConsentEndToEndTest {
         run("mcp__notes__notes__note_create") { rt ->
             val s = rt.engine.createSession(TestRuntime.APP, null)
             val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
-            while (coordinator.pending.value.isEmpty()) delay(10)
+            E2e.awaitUntil("the confirmation to be pending") { coordinator.pending.value.isNotEmpty() }
             rt.engine.cancel(TestRuntime.APP, s.id)
             rt.engine.awaitTask(t.id)
-            val deadline = System.currentTimeMillis() + 5_000
-            while (user.resolutions.isEmpty() && System.currentTimeMillis() < deadline) delay(10)
+            E2e.awaitUntil("the surface to be told the request was cancelled") { user.resolutions.isNotEmpty() }
             assertTrue(coordinator.pending.value.isEmpty(), "the pending list is empty again")
             assertEquals(ConsentEnd.CANCELLED, user.resolutions.single().second.end)
             assertTrue(server.calls.isEmpty())
@@ -244,7 +242,7 @@ class ConsentEndToEndTest {
             val (state, _) = rt.turn()
             assertEquals(TaskState.COMPLETED, state)
             assertEquals(1, server.calls.size, "the user said yes: this call went through")
-            delay(100)
+            E2e.awaitUntil("the surface to be told the request is resolved") { user.resolutions.isNotEmpty() }
             val notice = assertNotNull(user.resolutions.single().second.notice)
             assertTrue("没能保存" in notice, notice)
 
@@ -276,7 +274,7 @@ class ConsentEndToEndTest {
         run("mcp__notes__notes__note_create") { rt ->
             // 宿主已经连上并缓存了目录：App 发出“工具变了”的通知，宿主重新列出
             server.toolsChanged()
-            while (extHost.catalog.value.tools.none { it.title?.startsWith("note_create\n") == true }) delay(10)
+            E2e.awaitUntil("the host to list the tool with the hostile title", { "titles=${extHost.catalog.value.tools.map { it.title }}" }) { extHost.catalog.value.tools.any { it.title?.startsWith("note_create\n") == true } }
             rt.turn()
             val v = user.shown.single()
             assertTrue('\n' !in v.title && '\u202E' !in v.title && '\n' !in v.toolDisplayName, v.title)

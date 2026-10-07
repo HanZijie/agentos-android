@@ -15,9 +15,18 @@ paged with `next_offset`, null = last page; `--es cmd reset` clears the app):
            dump  -> {"notes":[{id,title,content,tags,color,pinned,archived,trashed,created_at,updated_at,trashed_at,...}] (all, incl. archived and trash),
                      "tags":[{name,count}],"total","offset","count","next_offset"}
            reset -> {"ok":true,"deleted":N}
-  calendar org.agentos.sample.calendar/.debug.DebugReceiver  (the dump is not on main yet: until it is, the state is read by copying `calendar.db` with
-           `run-as <pkg> cat` (no sqlite3 needed on the phone) and reading the copy on the computer; reset = the existing `--es cmd clear`).
-           Switch [CalendarState] to the dump when it lands: one class, one `snapshot` method.
+  calendar org.agentos.sample.calendar/.debug.DebugReceiver
+           dump  -> {"calendars":[{id,name,color,visible,is_default,event_count}],
+                     "events":[{id (occurrence id), series_id, calendar_id, calendar_name, title, start, end (ISO-8601 with offset; all-day: local midnight and
+                                23:59:59), all_day, location, description, color, reminder_minutes:[int], recurrence (wire string), recurrence_until (ISO | null),
+                                timezone, hidden, created_at, updated_at}] (one row per series, its first occurrence, sorted by start then id),
+                     "reminders_scheduled":[{id (occurrence id), title, minutes_before, fire_at, registered}]  -- the ONE reminder alarm the app has handed to
+                                AlarmManager (registered = FLAG_NO_CREATE probe), "timezone","total","offset","limit","count","next_offset"}
+                    limit: default 50, max 200
+           reset -> {"cleared": <events>, "calendars_remaining", "remaining_scheduled": 0|1}   (deletes every event and every non-default calendar and
+                    reschedules synchronously: no polling needed). `--es cmd clear` still exists (logcat only, not used here).
+          The calendar keeps exactly one reminder alarm armed: the earliest upcoming reminder of all events. It is rescheduled with a 250 ms debounce after
+          a data change, so the checks on it re-read the dump for a few seconds instead of trusting the first read.
 The state readers return plain dicts (the driver's own shape, below), so the scenarios do not depend on the apps' JSON names.
 
 The AgentOS debug receivers (main, app/src/debug; shapes checked against the code, A12 follow-up):
@@ -40,9 +49,6 @@ import json
 import os
 import re
 import shlex
-import sqlite3
-import subprocess
-import tempfile
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -59,8 +65,8 @@ class DriverError(Exception):
 
 
 class Sample:
-    def __init__(self, name, package, db, tools, receiver):
-        self.name, self.package, self.db, self.tools, self.receiver = name, package, db, tools, receiver
+    def __init__(self, name, package, tools, receiver):
+        self.name, self.package, self.tools, self.receiver = name, package, tools, receiver
 
     @property
     def component(self):
@@ -77,14 +83,14 @@ class Sample:
 
 # docs/sample-apps.md section 4 (the minimum lists; the apps may offer more)
 SAMPLES = {
-    "alarm": Sample("alarm", "org.agentos.sample.alarm", "alarms.db",
+    "alarm": Sample("alarm", "org.agentos.sample.alarm",
                     ["alarm_list", "alarm_get", "alarm_create", "alarm_update", "alarm_set_enabled", "alarm_delete", "alarm_next", "alarm_dismiss"],
                     ".debug.DebugToolReceiver"),
-    "calendar": Sample("calendar", "org.agentos.sample.calendar", "calendar.db",
+    "calendar": Sample("calendar", "org.agentos.sample.calendar",
                        ["calendar_list", "calendar_create", "calendar_delete", "event_list", "event_get", "event_create", "event_update",
                         "event_delete", "event_search", "agenda_today", "free_slots"],
                        ".debug.DebugReceiver"),
-    "notes": Sample("notes", "org.agentos.sample.notes", "notes.db",
+    "notes": Sample("notes", "org.agentos.sample.notes",
                     ["note_list", "note_get", "note_create", "note_update", "note_append", "note_search", "note_trash", "note_restore", "note_delete", "tag_list"],
                     ".debug.DebugCallReceiver"),
 }
@@ -111,7 +117,8 @@ def shq(value):
 
 
 class RealAdb:
-    """run.Adb plus the two things this driver needs: raw bytes (exec-out) and a convenience for the app's private files."""
+    """run.Adb under the name the driver uses (shell, run, prop). It has no way to read an app's private files: the state of the apps comes from
+    their debug dump receivers (a real phone has no sqlite3 and `run-as` is not needed)."""
 
     def __init__(self, base):
         self.base = base
@@ -125,11 +132,6 @@ class RealAdb:
 
     def prop(self, name):
         return self.base.prop(name)
-
-    def pull_private(self, package, relpath):
-        """Bytes of a file in a debuggable app's private directory, or None when it cannot be read."""
-        p = subprocess.run([self.adb, "-s", self.serial, "exec-out", "run-as", package, "cat", relpath], capture_output=True, timeout=120)
-        return p.stdout if p.returncode == 0 and p.stdout else None
 
 
 class LongExtra(int):
@@ -317,82 +319,46 @@ class NotesState:
         return code == 1 and data.get("ok") is True, data
 
 
-def _open_copy(adb, sample):
-    """Calendar only (until its dump lands): copy databases/<db> (and -wal / -shm when there are any) to a temp dir and open the copy."""
-    tmp = tempfile.mkdtemp(prefix="e2e-db-")
-    main = adb.pull_private(sample.package, "databases/" + sample.db)
-    if not main:
-        raise StateReadError("cannot read databases/%s of %s (is the debug build installed, and has the app been started once?)" % (sample.db, sample.package))
-    path = os.path.join(tmp, sample.db)
-    with open(path, "wb") as f:
-        f.write(main)
-    for suffix in ("-wal", "-shm"):
-        extra = adb.pull_private(sample.package, "databases/" + sample.db + suffix)
-        if extra:
-            with open(path + suffix, "wb") as f:
-                f.write(extra)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return tmp, conn
-
-
-class _Db:
-    def __init__(self, adb, sample):
-        self.adb, self.sample = adb, sample
-
-    def __enter__(self):
-        self.tmp, self.conn = _open_copy(self.adb, self.sample)
-        return self.conn
-
-    def __exit__(self, *exc):
-        conn = getattr(self, "conn", None)
-        if conn is not None:
-            conn.close()
-        tmp = getattr(self, "tmp", None)
-        if tmp:
-            for n in os.listdir(tmp):
-                os.remove(os.path.join(tmp, n))
-            os.rmdir(tmp)
-
-
-def _ints(text):
-    """The reminders column: '10,60' or '[10,60]' or ''."""
-    t = (text or "").strip()
-    if not t:
-        return []
-    if t.startswith("["):
-        return [int(x) for x in json.loads(t)]
-    return [int(x) for x in t.split(",") if x.strip()]
+def iso_ms(text):
+    """ISO-8601 with an offset ("2026-10-17T10:00:00+08:00", also "...Z") -> epoch milliseconds; None for null."""
+    if text is None:
+        return None
+    return int(datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp() * 1000)
 
 
 class CalendarState:
-    """Calendar: database copy for now (see the module docstring); reset = the app's `cmd clear` (its result goes to logcat only, so the
-    outcome is read back from the state: no events and only the default calendar)."""
+    """Calendar from the app's dump. `events`: one row per series (`id` is the series id: event_update / event_delete take it, the dump's own `id` is the
+    first occurrence's id and is kept as `occurrence_id`); times are ISO strings from the app, and `start_ms` / `end_ms` / `until_ms` are the same
+    instants as epoch milliseconds so the checks compare instants, not formatting. `reminders` is the app's `reminders_scheduled`: the single armed
+    reminder alarm, `registered` measured against AlarmManager. Clocks (created_at / updated_at) are left out so that "unchanged" comparisons are stable."""
     sample = SAMPLES["calendar"]
 
     def __init__(self, adb):
         self.adb = adb
 
     def snapshot(self):
-        with _Db(self.adb, self.sample) as c:
-            cals = c.execute("SELECT id, name, visible, is_default FROM calendars").fetchall()
-            evs = c.execute("SELECT id, calendar_id, title, description, location, all_day, start_utc, end_utc, tz, reminders, recurrence, recurrence_until FROM events").fetchall()
-        return {"calendars": [{"id": r["id"], "name": r["name"], "visible": bool(r["visible"]), "is_default": bool(r["is_default"])} for r in cals],
-                "events": [{"id": r["id"], "calendar_id": r["calendar_id"], "title": r["title"], "description": r["description"], "location": r["location"],
-                            "all_day": bool(r["all_day"]), "start_utc": r["start_utc"], "end_utc": r["end_utc"], "tz": r["tz"],
-                            "reminders": _ints(r["reminders"]), "recurrence": r["recurrence"], "recurrence_until": r["recurrence_until"]} for r in evs]}
+        d = dump_pages(self.adb, self.sample, "events")
+        events = []
+        for e in d["events"]:
+            events.append({"id": str(e.get("series_id") or str(e["id"]).split("@")[0]), "occurrence_id": e["id"], "calendar_id": e["calendar_id"], "title": e["title"],
+                           "description": e.get("description") or "", "location": e.get("location") or "", "all_day": bool(e.get("all_day")),
+                           "start": e["start"], "end": e["end"], "start_ms": iso_ms(e["start"]), "end_ms": iso_ms(e["end"]),
+                           "reminders": list(e.get("reminder_minutes") or []), "recurrence": e.get("recurrence"),
+                           "recurrence_until": e.get("recurrence_until"), "until_ms": iso_ms(e.get("recurrence_until")),
+                           "timezone": e.get("timezone"), "hidden": bool(e.get("hidden"))})
+        reminders = []
+        for r in d.get("reminders_scheduled") or []:
+            reminders.append({"id": r["id"], "series_id": str(r["id"]).split("@")[0], "title": r.get("title"), "minutes_before": r.get("minutes_before"),
+                              "fire_at": r.get("fire_at"), "fire_at_ms": iso_ms(r.get("fire_at")), "registered": bool(r.get("registered"))})
+        return {"calendars": [{"id": c["id"], "name": c["name"], "visible": bool(c.get("visible")), "is_default": bool(c.get("is_default")),
+                               "event_count": c.get("event_count")} for c in d.get("calendars") or []],
+                "events": events, "reminders": reminders, "timezone": d.get("timezone")}
 
     def reset(self):
-        out = self.adb.sh("am broadcast -f 32 -n %s --es cmd clear" % self.sample.component, check=False, timeout=60)
-        # the app clears on a worker thread: wait until the state shows it (the clear has no result data to wait for)
-        deadline = time.time() + 15 * SLEEP_SCALE
-        snap = None
-        while time.time() < deadline:
-            snap = self.snapshot()
-            if not snap["events"] and all(c["is_default"] for c in snap["calendars"]):
-                return True, {"cleared": True, "calendars": len(snap["calendars"])}
-            time.sleep(0.5 * SLEEP_SCALE)
-        return False, {"cleared": False, "events": len(snap["events"]), "calendars": len(snap["calendars"]), "broadcast": out.strip()[:120]}
+        code, data = broadcast(self.adb, self.sample.component, {"cmd": "reset"})
+        # every event and every non-default calendar is gone (only the default calendar is left) and no reminder alarm is armed any more
+        ok = code == 1 and data.get("remaining_scheduled") == 0 and data.get("calendars_remaining") == 1
+        return ok, data
 
 
 SLEEP_SCALE = 1.0  # unit tests shrink the waits
@@ -572,8 +538,10 @@ class Step:
 class Context:
     """Everything a step needs: the device pieces, the variables captured by earlier steps, the dates."""
 
-    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print, gateway=None):
+    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print, gateway=None, exclusive=False):
         self.adb, self.ext, self.consent, self.session, self.gateway = adb, ext, consent, session, gateway
+        # the apps were reset before the run: what is in them is this run's data only (the calendar's single armed alarm is then one of this run's events)
+        self.exclusive = exclusive
         self.today, self.tz_offset, self.run_id, self.log = today, tz_offset, run_id, log
         self.vars = {}
         self.consent_seen = set()   # requestIds already in ConsentDebugReceiver `recent` before this run asked anything
@@ -605,12 +573,18 @@ class Context:
         """ISO-8601 local date-time with the device's offset."""
         return "%sT%s:00%s" % (d.isoformat(), hhmm, self.tz_offset)
 
-    def epoch_ms(self, d, hhmm):
-        h, m = (int(x) for x in hhmm.split(":"))
+    def tz(self):
         sign = -1 if self.tz_offset.startswith("-") else 1
         oh, om = (int(x) for x in self.tz_offset[1:].split(":"))
-        tz = timezone(sign * timedelta(hours=oh, minutes=om))
-        return int(datetime(d.year, d.month, d.day, h, m, tzinfo=tz).timestamp() * 1000)
+        return timezone(sign * timedelta(hours=oh, minutes=om))
+
+    def epoch_ms(self, d, hhmm):
+        h, m = (int(x) for x in hhmm.split(":"))
+        return int(datetime(d.year, d.month, d.day, h, m, tzinfo=self.tz()).timestamp() * 1000)
+
+    def iso_from_ms(self, ms):
+        """An instant as ISO-8601 in the device's offset (what the apps print)."""
+        return datetime.fromtimestamp(ms / 1000, tz=self.tz()).isoformat()
 
     def package(self, sample):
         return SAMPLES[sample].package

@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -14,6 +13,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import org.agentos.extensions.host.E2e
 import org.agentos.extensions.registry.InstalledAppView
 import org.agentos.extensions.registry.PersistedRegistry
 import org.agentos.extensions.registry.PluginAssets
@@ -99,8 +99,8 @@ class SkillsEndToEndTest {
         return runBlocking {
             rt.start()
             try {
-                withTimeout(15_000) {
-                    while (skills.catalog.value.skills.isEmpty()) delay(10)
+                withTimeout(E2e.TEST_MILLIS) {
+                    E2e.awaitUntil("the skill catalog to list the skills") { skills.catalog.value.skills.isNotEmpty() }
                     block(rt)
                 }
             } finally {
@@ -137,7 +137,8 @@ class SkillsEndToEndTest {
     fun `a disabled plugin disappears from the next task's prompt and from read_skill`() {
         policy.update { it.withEnabled(PolicyScope.Plugin("notes"), false) }
         run(buildJsonObject { put("name", "notes") }) { rt ->
-            delay(100)
+            // the policy change reaches the skill catalog asynchronously: wait until the plugin's skill has left it
+            E2e.awaitUntil("the notes skill to leave the catalog", { "skills=${skills.catalog.value.skills.map { it.name }}" }) { skills.catalog.value.skills.none { it.provider == "notes" } }
             val events = rt.turn()
             val cfg = rt.core!!.configs.single()
             assertFalse(cfg.systemPrompt.contains("\"name\":\"notes\""))

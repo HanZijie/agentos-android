@@ -450,7 +450,7 @@ class CalendarTools(
         if (repo.calendar(id) == null) throw ToolError("Calendar not found: $id")
     }
 
-    private fun calendarJson(c: CalendarInfo): JsonObject = buildJsonObject {
+    internal fun calendarJson(c: CalendarInfo): JsonObject = buildJsonObject {
         put("id", c.id)
         put("name", c.name)
         put("color", Palette.format(c.color))
