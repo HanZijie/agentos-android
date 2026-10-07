@@ -26,6 +26,19 @@
             </intent-filter>
         </activity>
 
+        <!-- Binder MCP 服务（docs/extensions.md 4.1）：AgentOS 按 PLUGIN action 发现，读取 assets/agent-plugin，经 BIND_MCP_SERVICE（signature，只有 AgentOS 持有）连接 -->
+        <service
+            android:name=".agent.CalendarMcpService"
+            android:exported="true"
+            android:permission="org.agentos.permission.BIND_MCP_SERVICE">
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.PLUGIN" />
+            </intent-filter>
+            <meta-data
+                android:name="org.agentos.plugin.assets"
+                android:value="agent-plugin" />
+        </service>
+
         <!-- AlarmManager 触发：发提醒通知并排下一条 -->
         <receiver
             android:name=".reminder.ReminderReceiver"

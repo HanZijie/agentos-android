@@ -29,6 +29,8 @@ android {
 }
 
 dependencies {
+    // C7a：McpBinderService（导出 Binder MCP 服务）；调试自测入口用 McpBinderClient
+    implementation(project(":sdk:plugin-sdk"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

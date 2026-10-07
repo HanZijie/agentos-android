@@ -62,6 +62,8 @@ object CalendarGraph {
 class CalendarApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // 只有主进程做提醒和数据：debug 的 :selftest 进程（MCP 自测客户端）不能再排一份闹钟
+        if (Application.getProcessName() != packageName) return
         ReminderNotifications.ensureChannel(this)
         // 进程起来（开机后、被提醒唤起、被 MCP 唤起）就把提醒排好，并补发刚错过的
         Thread {
