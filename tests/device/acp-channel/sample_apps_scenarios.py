@@ -9,6 +9,7 @@ Data written by a run carries the marker `e2e-<run id>` (alarm label, calendar a
 found and removed (cleanup()) even after a failed run.
 """
 import json
+import os
 from datetime import datetime
 
 import sample_apps_lib as L
@@ -63,6 +64,21 @@ def fields(what, row, **expect):
     return [eq("%s: %s" % (what, k), want, row.get(k)) for k, want in expect.items()]
 
 
+def registered(a, id, at=None):
+    """The alarm is really set in the system: the app's dump measures it against AlarmManager (PendingIntent FLAG_NO_CREATE)."""
+    sched = (a.get("scheduled") or {}).get(id)
+    ok = bool(sched and sched["registered"] and (at is None or ("T%s" % at) in (sched["fire_at"] or "")))
+    what = "alarm %s is registered with the system AlarmManager%s" % (id, " for %s" % at if at else "")
+    return truth(what, "scheduled[].registered true" + (", fire_at at %s" % at if at else ""), ok, sched)
+
+
+def not_registered(a, id):
+    """Switched off / deleted: no longer set in the system (absent from `scheduled`, or registered false)."""
+    sched = (a.get("scheduled") or {}).get(id)
+    return truth("alarm %s is no longer registered with the system AlarmManager" % id, "absent from scheduled, or registered false",
+                 sched is None or not sched["registered"], sched)
+
+
 def unchanged(sample_key, name):
     def verify(before, after, turn, ctx):
         return [eq("%s data unchanged" % name, before[sample_key], after[sample_key])]
@@ -95,6 +111,42 @@ def run_check_step(id, title, fn, ctx):
     ok = error is None and bool(checks) and all(c.ok for c in checks)
     return {"id": id, "sample": None, "title": title, "ok": ok, "ms": round((time.time() - t0) * 1000), "error": error,
             "checks": [c.to_json() for c in checks], "turn": None}
+
+
+LIVE_MODEL_ID = "MiniMax-M3"
+LIVE_BASE_URL = "https://api.minimaxi.com"
+FAKE_BASE_URL = "http://127.0.0.1:18787"
+
+
+def setup_model(live, tunnel=False):
+    """The phone's model source is what this run claims it is (read through DesktopGatewayDebugReceiver `status`; no key in it).
+    Scenarios whose names do not start with live- / byok- run `ensureTestModel` first and put the loopback fake endpoint back, so the
+    real model has to be configured last and checked right before the first prompt."""
+    def fn(ctx):
+        st = ctx.model_status()
+        shown = {k: st.get(k) for k in ("modelUsable", "modelBaseUrl", "modelId")}
+        out = [eq("the model source is usable", True, st.get("modelUsable") is True)]
+        if live and not tunnel:
+            want = os.environ.get("LIVE_MODEL", LIVE_MODEL_ID)
+            out.append(truth("the model source is the REAL MiniMax endpoint (not the loopback fake)", "baseUrl starts with %s, modelId %s" % (LIVE_BASE_URL, want),
+                             str(st.get("modelBaseUrl") or "").startswith(LIVE_BASE_URL) and st.get("modelId") == want, shown))
+        elif live:
+            out.append(truth("the model source is the loopback endpoint that is tunnelled to the real MiniMax (the real key never reaches the phone)",
+                             "baseUrl %s" % FAKE_BASE_URL, st.get("modelBaseUrl") == FAKE_BASE_URL, shown))
+        else:
+            out.append(truth("the model source is the fake model endpoint", "baseUrl %s" % FAKE_BASE_URL, st.get("modelBaseUrl") == FAKE_BASE_URL, shown))
+        return out
+    return fn
+
+
+def setup_reset(ctx):
+    """Start from empty apps: the debug `reset` of the three sample apps (everything in them is removed), then read the state back."""
+    out = []
+    for r in L.reset_apps(ctx.adb):
+        out.append(truth("%s: reset" % r["app"], "the app reports it is empty" + (" and nothing is registered with AlarmManager" if r["app"] == "alarm" else ""), r["ok"], r["detail"]))
+    snap = {"alarm": len(ctx.state("alarm")["alarms"]), "notes": len(ctx.state("notes")["notes"]), "calendar events": len(ctx.state("calendar")["events"])}
+    out.append(truth("the three apps are empty after the reset", "0 alarms, 0 notes, 0 events", not any(snap.values()), snap))
+    return out
 
 
 def setup_discover(allow_enabled):
@@ -152,7 +204,8 @@ def alarm_steps(ctx):
 
     def v_create(b, a, t, c):
         row = find(a["alarms"], var(c.vars, "alarm_id"))
-        return fields("alarm", row, time="07:15", label=mark, days=["mon", "tue"], enabled=True) + [eq("one alarm more", len(b["alarms"]) + 1, len(a["alarms"]))]
+        return fields("alarm", row, time="07:15", label=mark, days=["mon", "tue"], enabled=True) + [eq("one alarm more", len(b["alarms"]) + 1, len(a["alarms"])),
+                                                                                                   registered(a, c.vars["alarm_id"], "07:15")]
 
     S.append(Step("alarm.create", "alarm", "alarm_create: a 07:15 alarm on Mon+Tue",
                   [Call("alarm", "alarm_create", {"time": "07:15", "label": mark, "days": ["mon", "tue"]})],
@@ -161,18 +214,19 @@ def alarm_steps(ctx):
     def v_list(b, a, t, c):
         r = t.tools[0].json() or {}
         ids = [x.get("id") for x in r.get("alarms", [])]
-        return [eq("alarm_list count equals the rows in alarms.db", len(a["alarms"]), r.get("count")),
+        return [eq("alarm_list count equals the alarms in the app's dump", len(a["alarms"]), r.get("count")),
                 truth("the new alarm is in the list", "id %s in %s" % (c.vars["alarm_id"], ids), c.vars["alarm_id"] in ids, ids)]
 
     S.append(Step("alarm.list", "alarm", "alarm_list sees it", [Call("alarm", "alarm_list")], verify=v_list))
 
     S.append(Step("alarm.update", "alarm", "alarm_update: 08:30, new label (days stay)",
                   lambda v: [Call("alarm", "alarm_update", {"id": var(v, "alarm_id"), "time": "08:30", "label": mark + "-b"})],
-                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), time="08:30", label=mark + "-b", days=["mon", "tue"], enabled=True)))
+                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), time="08:30", label=mark + "-b", days=["mon", "tue"], enabled=True)
+                  + [registered(a, c.vars["alarm_id"], "08:30")]))
 
     S.append(Step("alarm.switch_off", "alarm", "alarm_set_enabled false",
                   lambda v: [Call("alarm", "alarm_set_enabled", {"id": var(v, "alarm_id"), "enabled": False})],
-                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=False, time="08:30")))
+                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=False, time="08:30") + [not_registered(a, c.vars["alarm_id"])]))
 
     def v_next_off(b, a, t, c):
         r = t.tools[0].json()
@@ -183,7 +237,7 @@ def alarm_steps(ctx):
 
     S.append(Step("alarm.switch_on", "alarm", "alarm_set_enabled true",
                   lambda v: [Call("alarm", "alarm_set_enabled", {"id": var(v, "alarm_id"), "enabled": True})],
-                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=True)
+                  verify=lambda b, a, t, c: fields("alarm", find(a["alarms"], c.vars["alarm_id"]), enabled=True) + [registered(a, c.vars["alarm_id"], "08:30")]
                   + [eq("alarm_set_enabled was asked once in this session: 'allow for the session' made the second call go through unasked", 1,
                         len(c.asked(L.model_name("alarm", "alarm_set_enabled"))))]))
 
@@ -205,8 +259,8 @@ def alarm_steps(ctx):
 
     S.append(Step("alarm.delete", "alarm", "alarm_delete (high risk: confirmed by the auto-consent)",
                   lambda v: [Call("alarm", "alarm_delete", {"id": var(v, "alarm_id")})],
-                  verify=lambda b, a, t, c: [truth("the alarm is gone from alarms.db", "no row with id %s" % c.vars["alarm_id"], find(a["alarms"], c.vars["alarm_id"]) is None, None),
-                                             eq("one alarm less", len(b["alarms"]) - 1, len(a["alarms"]))]))
+                  verify=lambda b, a, t, c: [truth("the alarm is gone from the app's dump", "no alarm with id %s" % c.vars["alarm_id"], find(a["alarms"], c.vars["alarm_id"]) is None, None),
+                                             eq("one alarm less", len(b["alarms"]) - 1, len(a["alarms"])), not_registered(a, c.vars["alarm_id"])]))
 
     # ---- failure paths
     S.append(Step("alarm.err.missing_time", "alarm", "alarm_create without time: error to the model, nothing written",
@@ -390,7 +444,7 @@ def notes_steps(ctx):
 
     S.append(Step("notes.delete", "notes", "note_delete from the trash is permanent (high risk)",
                   lambda v: [Call("notes", "note_delete", {"id": var(v, "note_id")})],
-                  verify=lambda b, a, t, c: [truth("the note row is gone", "no row", find(a["notes"], c.vars["note_id"]) is None, None),
+                  verify=lambda b, a, t, c: [truth("the note is gone from the app's dump", "no row", find(a["notes"], c.vars["note_id"]) is None, None),
                                              eq("one note less", len(b["notes"]) - 1, len(a["notes"]))]))
 
     # ---- failure paths
@@ -448,8 +502,13 @@ def cleanup(ctx, timeout=90):
 # ---------------------------------------------------------------------- live (real model, natural language)
 
 class LiveCase:
-    def __init__(self, id, sample, prompt, verify):
-        self.id, self.sample, self.prompt, self.verify = id, sample, prompt, verify
+    def __init__(self, id, sample, prompt, verify, preface=""):
+        self.id, self.sample, self.prompt, self.verify, self.preface = id, sample, prompt, verify, preface
+
+    @property
+    def text(self):
+        """What is sent: the natural-language prompt, with the date in front when the run was started with --tell-date."""
+        return self.preface + self.prompt
 
 
 def next_weekday(today, weekday, next_week):
@@ -462,12 +521,16 @@ def next_weekday(today, weekday, next_week):
     return today + timedelta(days=delta)
 
 
-def live_cases(ctx):
+def live_cases(ctx, tell_date=False):
+    preface = "今天是 %s（设备时区 UTC%s）。" % (ctx.today.isoformat(), ctx.tz_offset) if tell_date else ""
+
     def v_alarm(b, a, t, c):
         new = [x for x in a["alarms"] if x["id"] not in {y["id"] for y in b["alarms"]}]
         ours = [x for x in new if x["time"] == "07:00"]
         return [truth("an alarm at 07:00 was created", "one new alarm with time 07:00", bool(ours), new),
-                truth("it is enabled and one-time (no repeat days), for 'tomorrow morning'", "enabled, days []", bool(ours) and ours[0]["enabled"] and ours[0]["days"] == [], ours)]
+                truth("it is enabled and one-time (no repeat days), for 'tomorrow morning'", "enabled, days []", bool(ours) and ours[0]["enabled"] and ours[0]["days"] == [], ours),
+                truth("it is really set in the system (AlarmManager), at 07:00", "scheduled[].registered true, fire_at at 07:00",
+                      bool(ours) and registered(a, ours[0]["id"], "07:00").ok, (a.get("scheduled") or {}).get(ours[0]["id"]) if ours else None)]
 
     def v_event(b, a, t, c):
         known = {y["id"] for y in b["events"]}
@@ -490,9 +553,9 @@ def live_cases(ctx):
         return [truth("a new note about 新品发布", "one new note mentioning it", bool(hit), [n["title"] for n in new]),
                 truth("tagged 工作", "tags contains 工作", any("工作" in n["tags"] for n in hit), [n["tags"] for n in hit])]
 
-    return [LiveCase("live.alarm", "alarm", "明早 7 点叫我起床", v_alarm),
-            LiveCase("live.calendar", "calendar", "下周三下午 3 点和王总开会，提前 15 分钟提醒", v_event),
-            LiveCase("live.notes", "notes", "记一条关于新品发布的备忘，打上工作标签", v_note)]
+    return [LiveCase("live.alarm", "alarm", "明早 7 点叫我起床", v_alarm, preface),
+            LiveCase("live.calendar", "calendar", "下周三下午 3 点和王总开会，提前 15 分钟提醒", v_event, preface),
+            LiveCase("live.notes", "notes", "记一条关于新品发布的备忘，打上工作标签", v_note, preface)]
 
 
 def run_live_case(case, ctx, timeout=240):
@@ -502,18 +565,18 @@ def run_live_case(case, ctx, timeout=240):
     checks, turn, error = [], None, None
     try:
         before = ctx.state(case.sample)
-        turn = ctx.session.prompt(case.prompt, timeout)
+        turn = ctx.session.prompt(case.text, timeout)
         after = ctx.state(case.sample)
+        # The model chooses its own way (it may look first: note_search before note_create, event_list before event_create, or retry after an error):
+        # the verdict is the app state, not a fixed tool sequence. The sequence and the failed calls are recorded as information.
         checks.append(eq("turn ends normally", "end_turn", turn.stop_reason if not turn.timeout else "timeout"))
-        checks.append(truth("the model called at least one tool", ">= 1 tool call", bool(turn.tools), [t.name for t in turn.tools]))
-        checks.append(truth("no tool call was refused", "no failed call", all(t.status == "completed" for t in turn.tools),
-                            [(t.name, t.status) for t in turn.tools if t.status != "completed"]))
         checks += case.verify(before, after, turn, ctx)
     except Exception as e:  # noqa: BLE001
         error = "%s: %s" % (type(e).__name__, e)
     ok = error is None and bool(checks) and all(c.ok for c in checks)
-    r = {"id": case.id, "sample": case.sample, "title": case.prompt, "ok": ok, "ms": round((time.time() - t0) * 1000), "error": error,
+    r = {"id": case.id, "sample": case.sample, "title": case.text, "ok": ok, "ms": round((time.time() - t0) * 1000), "error": error,
          "checks": [c.to_json() for c in checks], "turn": turn.to_json() if turn else None}
     if turn:
         r["toolSequence"] = [{"name": t.name, "status": t.status} for t in turn.tools]
+        r["failedCalls"] = [{"name": t.name, "result": t.text[:200]} for t in turn.tools if t.status != "completed"]
     return r
