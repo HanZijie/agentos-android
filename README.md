@@ -14,14 +14,21 @@ Agent 运行时是 AgentOS App 里的一个独立进程 `:agent`：外层是 Kot
 
 ## 演示
 
-| 对话与确认（约 2 分钟） | 执行结果（10 秒） |
+一句话，跨三个 App 办完事。真机录屏，左边是下指令和过程，右边是结果。
+
+| 在 AgentOS 里说一句话 | 三个 App 里的结果 |
 |:---:|:---:|
-| <video src="docs/assets/demo.mp4" controls muted playsinline width="300"></video> | <video src="docs/assets/demo2.mp4" controls muted playsinline width="300"></video> |
+| <img src="docs/assets/demo.gif" width="300" alt="在 AgentOS 里输入指令，确认工具调用，查看设置和插件管理"> | <img src="docs/assets/demo2.gif" width="300" alt="日历、闹钟、备忘录里出现了对应的日程、闹钟和备忘"> |
 
-两段都是真机录屏，无声。浏览器不能内嵌播放时，直接打开 [demo.mp4](docs/assets/demo.mp4) 和 [demo2.mp4](docs/assets/demo2.mp4)。
+**左：** 输入的指令是：
 
-- **左：对话与确认。** 在 AgentOS 里用一句话让 Agent 同时操作三个示例 App：写备忘录、查日历并创建日程、提前半小时设闹钟（调用 `note_create`、`calendar_list`、`event_create`、`alarm_create`）。需要确认的写操作先弹确认框，列出工具名、来源插件和参数；后半段是设置页（模型与 key、安全等级）和插件管理（已发现的插件）。
-- **右：执行结果。** 回到桌面依次打开三个示例 App 核对：日历里下周四 15:00 的「需求评审会」、闹钟 14:30 的「需求评审会提醒」、备忘录「下周工作备忘」（写三个 PRD、周四下午 3 点开评审会、评审会前半小时闹钟提醒）。
+> 给我设置一个备忘录，记录一下下周我需要写三个 prd，并且在下周四下午 3 点需要开需求评审会。在需求评审会之前，提前半个小时设置闹钟提醒我参会
+
+Agent 通过 MCP 依次调用备忘录、日历、闹钟三个示例 App 的工具。需要确认的调用会先弹确认框，列出工具名、来源插件和参数。录屏后半段是设置页（模型与 key、安全等级）和插件管理（已发现的插件）。动图里打字部分加速了 4 倍，其余 2 倍，点发送前后是原速。
+
+**右：** 周四 15:00 的日程「需求评审会」，14:30 的闹钟「需求评审会提醒」，以及备忘录「下周工作备忘」，都是上面那一句话产生的。
+
+没加速的完整录屏（720p）：[demo.mp4](docs/assets/demo.mp4)、[demo2.mp4](docs/assets/demo2.mp4)。
 
 ## 用户怎么用
 
