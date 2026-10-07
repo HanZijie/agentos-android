@@ -381,6 +381,7 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 | `callTool` / `cancelTool` / `onToolResult` | 双向 | 工具调用、取消（转成 MCP 的取消通知）、结果。每个受理的调用恰好回调一次，结局是 completed / not_dispatched / unknown；失败时 `error` 是 core:runtime 的 `ErrorInfo`（code 用 `ErrorCode.wire`） |
 | `readSkill(skillId, path)` | 请求 / 响应 | 读取 Skill 正文或附带文件（由 `ExtensionSkillPort` 提供，路径规则见第 6 节） |
 | `refreshTools` | 请求 / 响应 | 给 `ToolPort.prepare` 用 |
+| `listTools(pluginId)`、`setToolEnabled`、`setToolApproval` | 请求 / 响应 | 给插件页：一个插件的全部已知工具（含被策略禁用的）和单个工具的开关、审批方式。返回值（含 `setToolApprovalBySource`）是 `ExtensionToolHost.knownTools` 的 JSON，键固定、顺序固定、不省略：`name`、`pluginId`、`source{plugin,server,tool}`、`title`（没有为 null，截到 128 字符）、`description`（截到 1,024 字符，可能为空串）、`inputSchema`、`risk`（read / write / high）、`enabled`、`approval`（ask / always）、`mayAlwaysAllow`（高风险为 false，设 always 报 `high_risk`）。插件已启用但还没有已知工具时先等一次 `refreshNow`（最多 10 秒）；插件已停用时不为显示而连接，返回已知的部分，`:ext` 重建后启用一次之前返回 `[]`，插件页显示“启用后可查看工具”，不显示“0 个工具”。`getCatalog` 的工具形状不变，只给 `:agent` 用 |
 | `setToolApprovalBySource` | 请求 / 响应 | 给 `ApprovalWriter` 用（确认框里的“始终允许”写回 `:ext` 的 `ApprovalStore`） |
 | `getPolicyStatus` / `resetPolicy` | 请求 / 响应 | 给插件页：策略文件损坏时的提示（正在用上一份、备份还是 fail closed）和重置 |
 | `ToolPort.prepare(timeoutMillis)` | 运行时内部 | 每个任务开始时、构造工具声明之前调一次，等工具目录刷新（默认最多 2 秒，超时或失败只记日志、任务照常开始）；`ExtensionToolHost.prepare` 就是 `refreshNow` |
