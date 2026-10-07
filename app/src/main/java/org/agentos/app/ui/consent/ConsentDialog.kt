@@ -72,9 +72,20 @@ class ConsentDialog private constructor(
         dialog = null
     }
 
+    /**
+     * 倒计时每秒只在文字真的变了时才更新：每次 setText 都会发无障碍事件，UI Automator 的 dump 要等界面连续 1 秒没有事件，
+     * 每 250 ms 刷一次的话 adb 驱动的测试永远等不到“空闲”，点不到按钮。同时标成不重要（读屏用户不会每秒被打断；剩余时间
+     * 在对话框弹出时已经读过一次，超时按拒绝）。
+     */
+    private var lastCountdown = ""
+
     private fun tick() {
-        countdown.text = ConsentLabels.countdown(card.deadlineMillis, System.currentTimeMillis())
-        handler.postDelayed(::tick, 250)
+        val text = ConsentLabels.countdown(card.deadlineMillis, System.currentTimeMillis())
+        if (text != lastCountdown) {
+            lastCountdown = text
+            countdown.text = text
+        }
+        handler.postDelayed(::tick, 500)
     }
 
     private fun build(): View {
@@ -89,7 +100,7 @@ class ConsentDialog private constructor(
         )
         val column = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(16), dp(20), dp(8))
+            setPadding(dp(20), dp(16), dp(20), dp(20))
         }
         // 风险标签：色块 + 文字（不只靠颜色）
         column.addView(
@@ -138,7 +149,10 @@ class ConsentDialog private constructor(
                 setPadding(0, dp(12), 0, dp(2))
             })
         }
-        countdown = Ui.text(activity, 12f, R.color.ui_text_secondary).apply { setPadding(0, dp(10), 0, dp(6)) }
+        countdown = Ui.text(activity, 12f, R.color.ui_text_secondary).apply {
+            setPadding(0, dp(10), 0, dp(6))
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO // 每秒变化，不向无障碍服务发事件
+        }
         column.addView(countdown)
 
         // 选项：允许类在上，拒绝在最下面；高风险的“允许”是灰色次要样式，拒绝是主按钮
@@ -159,14 +173,14 @@ class ConsentDialog private constructor(
                 minHeight = dp(46)
                 isEnabled = false // 刚弹出时忽略触摸
                 alpha = 0.5f
-                isFocusableInTouchMode = true
+                // 不要 isFocusableInTouchMode：触摸模式下它会让第一次点击只拿焦点、不触发 onClick（两次才生效）
                 setOnClickListener { choose(o.choice) }
             }
             buttons += b
             if (isDeny) denyButton = b
             column.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
         }
-        denyButton?.requestFocus() // 默认焦点在“拒绝”
+        denyButton?.requestFocus() // 默认焦点在“拒绝”（键盘 / 方向键 / 读屏导航时落在它上面）
         return ScrollView(activity).apply { addView(column) }
     }
 
