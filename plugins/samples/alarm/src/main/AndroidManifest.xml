@@ -49,6 +49,22 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!--
+          Binder MCP 服务（docs/extensions.md 4.1）：AgentOS 用 queryIntentServices(PLUGIN) 发现它，
+          读 assets/agent-plugin/ 里的插件包；只有持有 BIND_MCP_SERVICE（signature，AgentOS 独有）的调用方才能 bind。
+        -->
+        <service
+            android:name=".agent.AlarmMcpService"
+            android:exported="true"
+            android:permission="org.agentos.permission.BIND_MCP_SERVICE">
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.PLUGIN" />
+            </intent-filter>
+            <meta-data
+                android:name="org.agentos.plugin.assets"
+                android:value="agent-plugin" />
+        </service>
+
         <receiver
             android:name=".ring.AlarmReceiver"
             android:exported="false" />

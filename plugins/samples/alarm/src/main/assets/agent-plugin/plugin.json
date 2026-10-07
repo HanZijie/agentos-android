@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "alarm",
+  "version": "1.0.0",
+  "description": "Set, change, switch and remove real alarms on this phone, and see when the next one rings.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "闹钟"
+      }
+    },
+    "org.agentos": {
+      "mcpServers": {
+        "alarm": {
+          "service": "org.agentos.sample.alarm.agent.AlarmMcpService"
+        }
+      }
+    }
+  }
+}

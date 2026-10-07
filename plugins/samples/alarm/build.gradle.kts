@@ -18,6 +18,17 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // R8 下的设备验证：与 release 相同的混淆 / 压缩规则，用调试证书签名，带 debug 的自测入口（src/debug 的接收器）。
+        // 只用于测试，不发布：./gradlew :plugins:samples:alarm:assembleReleaseTest
+        create("releaseTest") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
+    }
+    sourceSets.getByName("releaseTest") {
+        java.srcDir("src/debug/java")
+        manifest.srcFile("src/debug/AndroidManifest.xml")
     }
     buildFeatures {
         compose = true
@@ -43,6 +54,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    // MCP 服务：McpBinderService（工具注册）；debug 自测入口用 McpBinderClient。R8 规则由 SDK 的 consumer-rules.pro 带过来
+    implementation(project(":sdk:plugin-sdk"))
 
     testImplementation(libs.junit4)
     testImplementation(libs.kotlinx.coroutines.test)

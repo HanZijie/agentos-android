@@ -35,7 +35,12 @@ class AlarmGraph private constructor(context: Context) {
 class AlarmApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // 只在主进程装配仓库：其他进程（debug 的 :selftest）各持一份缓存会互相覆盖数据库
+        if (getProcessName() != packageName) return
         AlarmNotifications.ensureChannels(this)
-        AlarmGraph.get(this)
+        val repository = AlarmGraph.get(this).repository
+        // 兜底：用户在设置里“强行停止”App 后，系统会清掉它登记的全部闹钟；下次进程启动（打开 App、AgentOS 经 MCP 唤起）时补登记。
+        // 已登记的闹钟重复登记是幂等的（同一个 PendingIntent 会被替换）
+        Thread { runCatching { repository.rescheduleAll(detectMissed = false) } }.start()
     }
 }
