@@ -56,18 +56,19 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 
 ## 三之三、示例 App 与 MCP（闹钟、日历、备忘录，Pixel 8，API 35，2026-10-07）
 
-三个独立 App 在 `plugins/samples/{alarm,calendar,notes}/`：Compose 界面（亮暗主题、中英文）、各自带 `McpBinderService`（`BIND_MCP_SERVICE`，signature 级权限，不开 HTTP 端口）、`plugin.json` 和 `SKILL.md`。工具数 9 / 12 / 10，共 31 个，增删改查齐全，名字与必填参数见 [sample-apps.md](sample-apps.md)。每个 App 的 debug 构建带 `dump` / `reset` 接收器，验收驱动靠它读状态、复位（真机没有 `sqlite3`）；日历的 `dump` / `reset` 还没提交，驱动暂时把 `calendar.db` 拷到电脑上读。
+三个独立 App 在 `plugins/samples/{alarm,calendar,notes}/`：Compose 界面（亮暗主题、中英文）、各自带 `McpBinderService`（`BIND_MCP_SERVICE`，signature 级权限，不开 HTTP 端口）、`plugin.json` 和 `SKILL.md`。工具数 9 / 12 / 10，共 31 个，增删改查齐全，名字与必填参数见 [sample-apps.md](sample-apps.md)。每个 App 的 debug 构建带 `dump` / `reset` 接收器，验收驱动靠它读状态、复位（真机没有 `sqlite3`）；三个 App 的 `dump` 都分页、只读，日历的 `dump` 带 `reminders_scheduled`（`AlarmManager` 实测登记，最多一项：最早的未触发提醒）。
 
 | 项目 | 结果 |
 |---|---|
 | 三个 App 被发现、默认关闭、启用后目录 31 个工具 | 通过（delete 为 HIGH，其余 WRITE） |
-| 脚本模式 `sample_apps_e2e.py`（假模型按脚本调工具，经 Broker 与确认） | **55/55**：增删改查、闹钟启停、错误参数（缺字段、非法时间、未知 id）、拒绝后不执行、插件关 / 开后目录变化、每个 App 的审计；闹钟用 `AlarmManager` 的登记状态（dump 里的 `registered`）核对，不只看数据库 |
+| 脚本模式 `sample_apps_e2e.py`（假模型按脚本调工具，经 Broker 与确认） | **58/58**：增删改查、闹钟启停、错误参数（缺字段、非法时间、未知 id）、拒绝后不执行、插件关 / 开后目录变化、每个 App 的审计；闹钟、日历的提醒都用 `AlarmManager` 的登记状态（dump 里的 `registered`）核对：创建、改提醒、再建更早的日程、删除之后，系统里只剩应有的那一个闹钟 |
 | `--live`，真实 `minimax-cn` / `MiniMax-M3`，手机直连 `https://api.minimaxi.com/anthropic` | **13/13**：“明早 7 点叫我起床”→ `alarm_create` 07:00、已登记到系统；“下周三下午 3 点和王总开会，提前 15 分钟提醒”→ `event_create` 2026-10-14 15:00 +08:00、提醒 15 分钟；“记一条关于新品发布的备忘，打上工作标签”→ 先 `tag_list` 再 `note_create`、标签“工作” |
 | 自然语言多步（`sample_apps_live_nl.py`，同样真实 M3 直连） | 21/21：闹钟建 → 改 → 删，备忘录先搜再建并追加，日历先查再建（3 号会议室、提醒） |
 | 直接经 `ExtensionDebugReceiver` 的 MCP 增删改查（`sample_apps_mcp_crud.py`） | 36/36 |
 | 假模型 + 确认协调器全链路（`sample_apps_consent_e2e.py`） | 15/15：HIGH 只有“允许一次 / 拒绝”，拒绝在新会话里仍然生效 |
-| 单测 | 日历 93 项，合入 main 后重跑 0 失败 |
+| 单测 | 日历 99 项（含 `dump` 5 项），`core:extensions` 168 项，合入 main 后重跑 0 失败 |
 | key 泄漏扫描 | `--live` 的 14358 行 logcat 与结果文件命中 0 次 |
+| main 全量回归（`e4b98fc`：`clean test lint assembleDebug assembleRelease :app:assembleReleaseTest`） | 1575 项测试，0 失败、0 错误、跳过 1 项；lint 通过；release 包的 dex 里没有 `ConsentDebugReceiver`、`ExtensionDebugReceiver`、`DesktopGatewayDebugReceiver`、`JevDebugReceiver`；仓库里两把 key 命中 0 次 |
 
 **没做 / 限制**：
 - **release 构建里需要确认的调用仍一律拒绝**（D5.2 真实确认界面未合入）。上面所有写操作都是 debug 构建的 `ConsentDebugReceiver` 放行的；这一步完成前，真实用户还不能用这三个 App。
