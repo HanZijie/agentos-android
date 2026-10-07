@@ -6,10 +6,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.agentos.sample.calendar.data.CalendarException
 import org.agentos.sample.calendar.data.CalendarInfo
@@ -59,17 +59,34 @@ class CalendarTools(
         }
     }
 
+    private companion object {
+        const val DEFAULT_LIMIT = 50
+        const val MAX_LIMIT = 200
+
+        /** free_slots 里忙碌清单的预算（线上成本）。 */
+        const val BUSY_BUDGET = 15_000
+    }
+
     private val zone: ZoneId get() = repo.zone
 
     // ---- 日历 ----
 
     private val calendarList = tool(
         "calendar_list",
-        "List all calendars: id, name, color (#RRGGBB), visible flag (whether the app UI shows it), is_default and event_count.",
-        objectSchema(properties = emptyList()),
+        "List calendars: id, name, color (#RRGGBB), visible flag (whether the app UI shows it), is_default and event_count. " +
+            "Returns `total`; when `truncated` is true call again with offset = `next_offset`.",
+        objectSchema(
+            properties = listOf(
+                "limit" to intProp("Max items to return, default and maximum 200.", 1, MAX_LIMIT),
+                "offset" to intProp("Number of calendars to skip, for paging. Default 0.", 0),
+            ),
+        ),
         readOnly,
-    ) {
-        buildJsonObject { putJsonArray("calendars") { repo.calendars.value.forEach { add(calendarJson(it)) } } }
+    ) { a ->
+        val limit = limit(a, MAX_LIMIT)
+        val offset = offset(a)
+        val all = repo.calendars.value
+        paged("calendars", all.drop(offset).take(limit).map { calendarJson(it) }, all.size, offset, limit) { }
     }
 
     private val calendarCreate = tool(
@@ -128,14 +145,16 @@ class CalendarTools(
             "All times are ISO-8601 with UTC offset; input without an offset is read in the device time zone (see `timezone` in the result). " +
             "`from` defaults to the start of today and `to` to from + 30 days; a date-only `to` includes that whole day. " +
             "All-day events start at 00:00 of their first day and end at 23:59:59 of their last day. Events of hidden calendars are included. " +
-            "`query` keeps only events whose title, location or description contains it (case-insensitive).",
+            "`query` keeps only events whose title, location or description contains it (case-insensitive). " +
+            "The result carries `total`; a page is also cut early to fit the message size limit, so when `truncated` is true call again with offset = `next_offset` to read on.",
         objectSchema(
             properties = listOf(
                 "from" to stringProp("Range start, ISO-8601 (e.g. 2026-10-08T00:00:00+08:00) or a date."),
                 "to" to stringProp("Range end (exclusive), ISO-8601 or a date (inclusive of that day)."),
                 "calendar_id" to stringProp("Only events of this calendar."),
                 "query" to stringProp("Substring filter."),
-                "limit" to intProp("Max items to return, default 50, max 200.", 1, 200),
+                "limit" to intProp("Max items to return, default 50, max 200.", 1, MAX_LIMIT),
+                "offset" to intProp("Number of events to skip, for paging. Default 0.", 0),
             ),
         ),
         readOnly,
@@ -144,9 +163,10 @@ class CalendarTools(
         val to = a.string("to")?.let { boundary(it, "to", isEnd = true) } ?: Instant.ofEpochMilli(from).atZone(zone).plusDays(30).toInstant().toEpochMilli()
         if (to <= from) throw ToolError("'to' must be after 'from'")
         val calendarId = a.string("calendar_id")?.also { requireCalendar(it) }
-        val limit = limit(a)
+        val limit = limit(a, DEFAULT_LIMIT)
+        val offset = offset(a)
         val all = repo.occurrences(from, to, calendarId = calendarId, query = a.string("query"))
-        eventsResult(all, limit) {
+        eventsResult(all, limit, offset) {
             put("from", IsoTime.format(from, zone))
             put("to", IsoTime.format(to, zone))
         }
@@ -270,23 +290,36 @@ class CalendarTools(
 
     private val eventSearch = tool(
         "event_search",
-        "Search events by case-insensitive substring in title, location or description, across all time. One result per event series: the next upcoming occurrence, or the last one if none is upcoming. Upcoming results come first (soonest first), then past ones (most recent first).",
+        "Search events by case-insensitive substring in title, location or description, across all time. One result per event series: the next upcoming occurrence, or the last one if none is upcoming. Upcoming results come first (soonest first), then past ones (most recent first). " +
+            "The result carries `total`; when `truncated` is true call again with offset = `next_offset` to read on.",
         objectSchema(
             listOf("query"),
-            listOf("query" to stringProp("Text to look for."), "limit" to intProp("Max items to return, default 50, max 200.", 1, 200)),
+            listOf(
+                "query" to stringProp("Text to look for."),
+                "limit" to intProp("Max items to return, default 50, max 200.", 1, MAX_LIMIT),
+                "offset" to intProp("Number of results to skip, for paging. Default 0.", 0),
+            ),
         ),
         readOnly,
     ) { a ->
         val q = a.string("query", required = true)!!
-        val limit = limit(a)
+        val limit = limit(a, DEFAULT_LIMIT)
+        val offset = offset(a)
         val found = repo.search(q, limit = Int.MAX_VALUE)
-        eventsResult(found, limit) { put("query", q) }
+        eventsResult(found, limit, offset) { put("query", q) }
     }
 
     private val agendaToday = tool(
         "agenda_today",
-        "Today's events in the device time zone, ordered by start time (all-day events first). Recurring events are expanded. Includes today's date and time zone in the result.",
-        objectSchema(properties = listOf("calendar_id" to stringProp("Only events of this calendar."))),
+        "Today's events in the device time zone, ordered by start time (all-day events first). Recurring events are expanded. Includes today's date and time zone in the result. " +
+            "Returns up to 200 events per call; when `truncated` is true call again with offset = `next_offset`.",
+        objectSchema(
+            properties = listOf(
+                "calendar_id" to stringProp("Only events of this calendar."),
+                "limit" to intProp("Max items to return, default and maximum 200.", 1, MAX_LIMIT),
+                "offset" to intProp("Number of events to skip, for paging. Default 0.", 0),
+            ),
+        ),
         readOnly,
     ) { a ->
         val calendarId = a.string("calendar_id")?.also { requireCalendar(it) }
@@ -294,14 +327,15 @@ class CalendarTools(
         val from = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val to = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         val list = repo.occurrences(from, to, calendarId = calendarId)
-        eventsResult(list, Int.MAX_VALUE) { put("date", today.toString()) }
+        eventsResult(list, limit(a, MAX_LIMIT), offset(a)) { put("date", today.toString()) }
     }
 
     private val freeSlots = tool(
         "free_slots",
         "Find free time slots on one day. `date` is YYYY-MM-DD in the device time zone; the working window is day_start..day_end (HH:mm, default 09:00..18:00; day_end may be 24:00). " +
             "Busy time comes from all timed events of all calendars, including expanded recurring events and events crossing midnight; all-day events are ignored unless include_all_day=true. " +
-            "Returns the slots that are at least duration_minutes long, plus the busy intervals that were considered.",
+            "Returns the slots that are at least duration_minutes long (`total` slots; when `truncated` is true call again with offset = `next_offset`), " +
+            "plus the busy intervals that were considered (`busy_total`; the list is shortened if very long, `busy_truncated`).",
         objectSchema(
             listOf("date", "duration_minutes"),
             listOf(
@@ -311,6 +345,7 @@ class CalendarTools(
                 "day_end" to stringProp("Window end, HH:mm, default 18:00 (24:00 allowed)."),
                 "calendar_id" to stringProp("Only consider events of this calendar."),
                 "include_all_day" to boolProp("Treat all-day events as busy all day. Default false."),
+                "offset" to intProp("Number of slots to skip, for paging. Default 0.", 0),
             ),
         ),
         readOnly,
@@ -330,7 +365,25 @@ class CalendarTools(
         val busyOcc = repo.occurrences(winStart, winEnd, calendarId = calendarId).filter { includeAllDay || !it.allDay }
         val spans = busyOcc.map { FreeSlots.Span(it.startMs, it.endMs) }
         val slots = FreeSlots.compute(spans, winStart, winEnd, minutes * 60_000L)
-        buildJsonObject {
+        val offset = offset(a)
+        val busyItems = busyOcc.map {
+            buildJsonObject {
+                put("id", it.id)
+                put("title", it.series.title)
+                put("start", IsoTime.format(it.startMs, zone))
+                put("end", IsoTime.format(it.endMs, zone))
+            }
+        }
+        // 忙碌清单只是说明，给它最多 ~15,000 的预算；时段（真正的答案）用剩下的分页
+        val busyKept = WireSize.fit(busyItems.asSequence().map { WireSize.payload(it) }, 0, BUSY_BUDGET).coerceAtMost(busyItems.size)
+        val slotItems = slots.map {
+            buildJsonObject {
+                put("start", IsoTime.format(it.start, zone))
+                put("end", IsoTime.format(it.end, zone))
+                put("minutes", ((it.end - it.start) / 60_000L).toInt())
+            }
+        }
+        paged("slots", slotItems.drop(offset), slotItems.size, offset, Int.MAX_VALUE) {
             put("date", date.toString())
             put("timezone", zone.id)
             put("duration_minutes", minutes)
@@ -338,29 +391,9 @@ class CalendarTools(
                 put("start", IsoTime.format(winStart, zone))
                 put("end", IsoTime.format(winEnd, zone))
             }
-            putJsonArray("slots") {
-                slots.forEach {
-                    add(
-                        buildJsonObject {
-                            put("start", IsoTime.format(it.start, zone))
-                            put("end", IsoTime.format(it.end, zone))
-                            put("minutes", ((it.end - it.start) / 60_000L).toInt())
-                        },
-                    )
-                }
-            }
-            putJsonArray("busy") {
-                busyOcc.forEach {
-                    add(
-                        buildJsonObject {
-                            put("id", it.id)
-                            put("title", it.series.title)
-                            put("start", IsoTime.format(it.startMs, zone))
-                            put("end", IsoTime.format(it.endMs, zone))
-                        },
-                    )
-                }
-            }
+            put("busy_total", busyItems.size)
+            put("busy_truncated", busyKept < busyItems.size)
+            put("busy", JsonArray(busyItems.take(busyKept)))
         }
     }
 
@@ -379,10 +412,16 @@ class CalendarTools(
         return lt.hour * 60 + lt.minute
     }
 
-    private fun limit(a: Args): Int {
-        val l = a.int("limit") ?: 50
+    private fun limit(a: Args, default: Int): Int {
+        val l = a.int("limit") ?: default
         if (l < 1) throw ToolError("limit must be at least 1")
-        return minOf(l, 200)
+        return minOf(l, MAX_LIMIT)
+    }
+
+    private fun offset(a: Args): Int {
+        val o = a.int("offset") ?: 0
+        if (o < 0) throw ToolError("offset must not be negative")
+        return o
     }
 
     private fun boundary(text: String, param: String, isEnd: Boolean): Long {
@@ -420,13 +459,34 @@ class CalendarTools(
         put("event_count", repo.eventCount(c.id))
     }
 
-    private fun eventsResult(all: List<Occurrence>, limit: Int, extra: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject {
-        extra()
-        put("timezone", zone.id)
-        val shown = all.take(limit)
-        put("count", shown.size)
-        put("truncated", all.size > shown.size)
-        put("events", JsonArray(shown.map { eventJson(it) }))
+    private fun eventsResult(all: List<Occurrence>, limit: Int, offset: Int, extra: JsonObjectBuilder.() -> Unit): JsonObject =
+        paged("events", all.drop(offset).take(limit).map { eventJson(it) }, all.size, offset, limit) {
+            extra()
+            put("timezone", zone.id)
+        }
+
+    /**
+     * 列表类结果的统一分页外壳：[page] 是已按 offset / limit 取出的这一页，再按线上真实成本（[WireSize]）在数组元素边界上
+     * 截到 65,536 字符以内。`total` 是全部条数，`count` 是这次返回的条数，还有剩余时 `truncated=true` 并给 `next_offset`。
+     */
+    private fun paged(name: String, page: List<JsonObject>, total: Int, offset: Int, limit: Int, head: JsonObjectBuilder.() -> Unit): JsonObject {
+        fun build(items: List<JsonObject>): JsonObject {
+            val more = offset + items.size < total
+            return buildJsonObject {
+                head()
+                put("total", total)
+                put("offset", offset)
+                if (limit != Int.MAX_VALUE) put("limit", limit)
+                put("count", items.size)
+                put("truncated", more)
+                if (more) put("next_offset", offset + items.size)
+                put(name, JsonArray(items))
+            }
+        }
+        // 数组以外的部分（含 head 里可能很长的回显）按空数组的成本算，再留 40 给 count / next_offset 的位数
+        val base = WireSize.payload(build(emptyList())) + 40
+        val keep = WireSize.fit(page.asSequence().map { WireSize.payload(it) }, base)
+        return build(page.take(keep))
     }
 
     internal fun eventJson(o: Occurrence): JsonObject {
