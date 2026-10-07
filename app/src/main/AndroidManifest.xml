@@ -26,6 +26,22 @@
         android:name="org.agentos.permission.SEND_SUPERVISOR_STATUS"
         android:protectionLevel="signature" />
 
+    <!--
+      W14/W15（C7）：插件 App 的 MCP 服务要求这个权限（docs/extensions.md 4.1）。signature：只有 AgentOS 自己持有，
+      所以插件 App 不需要和 AgentOS 同一个证书，而其他 App bind 不了它们的 MCP 服务。
+    -->
+    <permission
+        android:name="org.agentos.permission.BIND_MCP_SERVICE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="org.agentos.permission.BIND_MCP_SERVICE" />
+
+    <!-- W14（C7）：Android 11 起要声明才能看到带插件的 App（queryIntentServices、createPackageContext） -->
+    <queries>
+        <intent>
+            <action android:name="org.agentos.intent.action.PLUGIN" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:label="AgentOS"
@@ -63,6 +79,15 @@
             android:name=".agent.AgentControlService"
             android:exported="false"
             android:process=":agent" />
+
+        <!--
+          ================= W14/W15（C7）：Extension Host（:ext 进程） =================
+          IExtensionHost：运行时（:agent）与插件管理页（主进程）用。不导出，服务端再校验调用方 UID。
+        -->
+        <service
+            android:name=".ext.ExtensionHostService"
+            android:exported="false"
+            android:process=":ext" />
 
         <!-- ================= W7：root 监督进程的状态广播 ================= -->
 
