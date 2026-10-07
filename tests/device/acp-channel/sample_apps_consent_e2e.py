@@ -115,7 +115,8 @@ try:
         check("consent request recorded for alarm_delete as HIGH with source line", bool(deletes) and deletes[-1]["risk"] == "HIGH" and bool(deletes[-1]["source"]), deletes[-1] if deletes else recent[-2:])
         check("HIGH request offered no ALLOW_FOR_SESSION / ALWAYS_ALLOW", bool(deletes) and not ({"ALLOW_FOR_SESSION", "ALWAYS_ALLOW"} & set(deletes[-1]["options"])), deletes[-1]["options"] if deletes else "")
         creates = [e for e in recent if e["tool"].endswith("alarm_create")]
-        check("WRITE request never offered ALWAYS_ALLOW (no ApprovalWriter yet)", bool(creates) and "ALWAYS_ALLOW" not in creates[-1]["options"], creates[-1]["options"] if creates else "")
+        # 真实 ApprovalWriter 接上后（C7b），带 source 的 WRITE 请求提供“始终允许”；自动应答从不选它（测试不改用户策略）
+        check("WRITE request offers ALWAYS_ALLOW but the auto-responder never picked it", bool(creates) and "ALWAYS_ALLOW" in creates[-1]["options"] and creates[-1]["answeredWith"] != "ALWAYS_ALLOW", creates[-1] if creates else "")
 
         # ---- 拒绝：deny 之后写工具不执行
         consent("deny")
