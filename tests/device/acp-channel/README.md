@@ -154,3 +154,17 @@ python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --l
 目录读取不能只读一次（`await_catalog`）：启用插件之后，三个插件的工具是**一个插件接着一个插件**出现的（真机上出现过：`setup.enable` 返回 539 毫秒后 `setup.catalog` 读到的目录里一个备忘录工具都没有）。所以 `setup.enable`、`setup.catalog`、`*.plugin_off`、`*.plugin_on` 都先等：每一轮读完整的目录，还缺什么就在 App 里等下一次目录变化（`wait_catalog`，每轮最多 5 秒），一共最多 30 秒；全部文档要求的 29 个工具都在才继续（停用时是它们都不在）。超时不抛异常，检查里点名还缺哪些工具（按插件分组，用工具自己的名字）和等了多久，例如 `{"missing": {"notes": ["note_trash"]}, "waitedMs": 30012}`；缺了工具时整个运行停在 setup，不会在不完整的目录上去跑 App 步骤。`setup.enable` 原来只检查“目录不空”，现在检查全部 29 个工具都在。
 
 `--live` 的三条 prompt 在 `sample_apps_scenarios.LIVE_PROMPTS` 里，句子里带着检查需要的全部事实：模型缺了信息会先反问，这是合理的模型行为，不是 App 的问题，不该算失败。闹钟：“帮我设一个明天早上 7 点的闹钟，叫我起床，只响这一次。”（检查：07:00、启用、没有重复日、系统里真的排了）；日历：“下周三下午 3 点到 4 点和王总开会，地点在 3 号会议室，提前 15 分钟提醒我。”（检查：含“王总”、下周三 15:00、15 分钟提醒、提醒闹钟排上了）；备忘录：“帮我记一条备忘：新品发布会要准备三件事——演示稿、嘉宾名单、物料清单。打上“工作”标签。”（检查：新备忘提到“新品发布”、带“工作”标签）。检查本身没变，仍然只看 App 状态。`--no-reset` 且 App 里已有一条关于“新品发布”的备忘时，模型可能追加到那一条而不是新建，检查会判失败：默认的 reset 之后不会有这种情况。
+
+## 把真实 key 填进手机上的 AgentOS 设置（`configure_real_keys.py`、`verify_real_config.py`）
+
+和 `sample_apps_e2e.py --live`、`jev_real_autoselect.py` 不同，这两个脚本**填完之后不清除**：MiniMax 国内站 key 进模型设置（`minimax-cn` / `MiniMax-M3`），Jev key 进 Jev 设置。走的是设置页同一条存储路径（`IAgentControl.setModelSource`、`JevSources.set`，写进 Keystore），用 debug 包的入口驱动，不点界面。
+
+```bash
+set -a; . .secrets/minimax.env; . .secrets/jev.env; set +a
+python3 tests/device/acp-channel/configure_real_keys.py <序列号>   # 填入；key 只从环境变量读，只经 stdin 进设备，不回显
+python3 tests/device/acp-channel/verify_real_config.py <序列号>    # 不读任何 key：真实 M3 一轮对话 + Jev 一次选会话，开关电脑端接入但不动 key
+```
+
+- 顺序：先 Jev，**最后**配模型来源。名字不以 `live-` / `byok-` 开头的场景（如 `desktop-access`）会先把模型来源改回回环假端点，所以配完之后不要再跑它们；`verify_real_config.py` 只用调试接收器开接入。
+- 要清掉：`live-model-clear` 场景和 `JevDebugReceiver --es op clear`（`sample_apps_e2e.py --live`、`jev_real_autoselect.py` 收尾时会这样做）。
+- 只有 debug 包有这些入口；release 包里没有。
