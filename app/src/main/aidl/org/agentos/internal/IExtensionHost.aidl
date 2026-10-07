@@ -12,23 +12,35 @@ import org.agentos.internal.IExtensionCallback;
  *   code 见各方法；Binder 只能把这两类异常原样传回调用方，其他异常在服务端换成 "agentos.ext.internal: <类型>"。
  * - 都会读写文件或 bind 别的 App，不要在主线程调用。
  *
- * 插件（listPlugins 的一项）：
- *   {"id"（= 包名，App 内嵌插件）, "source":"app", "packageName", "name"（plugin.json 的 name）, "displayName",
- *    "description", "versionName", "versionCode", "signingDigest"（证书 SHA-256，小写十六进制，多签名时逗号分隔）,
- *    "enabled": bool, "state", "problems":[string], "unsupported":[string],
- *    "servers":[{"name", "service"（完整类名）, "state", "error"（可无）, "toolCount"}],
- *    "toolCount", "updatedAtMs"}
- *   state：ok（可用）| disabled（用户没启用）| invalid（插件包或 Service 校验不通过，见 problems）|
- *          signature_changed（签名变了，已停用，需要用户重新启用）| unavailable（启用了但连不上，见 servers[].error）
- *   第三方插件默认关闭（enabled=false）。
+ * 插件注册表与用户策略都用 A 车道的纯逻辑（core:extensions 的 PluginScanLogic / ApprovalStore，core:runtime 的
+ * ApprovalPolicy、RiskPolicy）：Extension Host 是唯一的写入方，策略随目录一起交给运行时（getCatalog 的 "policy"），
+ * Broker 每次调用前按它决定可用与确认。策略按插件名记（plugin.json 的 name；注册表保证名字唯一，原来的主人优先，
+ * 改名、卸载、签名变化时清掉旧策略）。第三方插件第一次被发现时写入插件级 enabled=false（默认关闭）。
  *
- * 工具（listTools 的一项、目录里的一项）：
- *   {"name"（交给模型的名字，mcp__<插件>__<服务器>__<工具>，见 extensions.md 5.3）, "pluginId", "server",
- *    "toolName"（服务器上的原名）, "title"（可无）, "description", "inputSchema":{…},
+ * 插件（listPlugins 的一项）：
+ *   {"id"（PluginRecord.id = "<包名>/<assets 目录>"）, "source":"app", "packageName", "name"（plugin.json 的 name，读不出时为 null）,
+ *    "displayName", "description", "versionName", "versionCode",
+ *    "signingDigest"（当前签名摘要：SHA-256 小写十六进制；多个签名者时排序后拼接再 SHA-256）,
+ *    "status":"ready"|"unavailable"|"signature_changed"|"signature_unconfirmed"（PluginStatus）,
+ *    "unavailableReason":"assets_missing"|"manifest_rejected"|"no_usable_server"|"name_conflict"|null,
+ *    "builtin": bool, "enabled": bool（插件级是否启用）, "approval":"ask"|"always"|null（插件级审批方式，null = 没设，按 ask）,
+ *    "problems":[{"code","message"}]（中文，给插件页显示）, "unsupported":[{"kind","location","detail"}]（PluginManifest.unsupported）,
+ *    "servers":[{"name", "service"（完整类名，Binder）或 "url"（https）, "state":"idle"|"connected"|"unreachable"|"disabled",
+ *                "error"（可无）, "toolCount"}],
+ *    "rejectedServers":[{"name","service","reason":"not_in_package"|"not_exported"|"missing_permission"}],
+ *    "toolCount"}
+ *   签名变化（signature_changed）或记忆丢失（signature_unconfirmed）时已停用，要用户先 confirmSignature 再启用。
+ *
+ * 工具（listTools 的一项；getCatalog 的 tools 也是这个形状）：
+ *   {"name"（交给模型的名字，ToolNaming：mcp__<插件名>__<服务器>__<工具>，见 extensions.md 5.3）, "pluginId",
+ *    "source":{"plugin"（插件名）, "server", "tool"（服务器报告的原始工具名）}, "provider"（插件名）,
+ *    "title"（可无）, "description", "inputSchema":{…},
  *    "annotations":{"readOnlyHint","destructiveHint","idempotentHint","openWorldHint"}（只列出服务器给了的）,
- *    "risk":"read"|"write"|"high"（RiskPolicy：默认 write，destructiveHint=true 升 high，readOnlyHint 不降级）,
- *    "approval":"ask"|"always_allow"|"disabled"}
+ *    "risk":"read"|"write"|"high"（RiskPolicy.effectiveRisk：默认 write，destructiveHint=true 升 high，readOnlyHint 不降级）,
+ *    "enabled": bool, "approval":"ask"|"always"（ApprovalPolicy.resolve 的结果）, "mayAlwaysAllow": bool（RiskPolicy.mayAlwaysAllow）}
  *   描述、schema、注解都来自第三方，是不可信输入。
+ *
+ * 审批方式参数 mode：ask | always | ""（清除这一层，沿用上一层）。
  */
 interface IExtensionHost {
     /** 本接口的版本：1。 */
@@ -40,19 +52,30 @@ interface IExtensionHost {
     String listPlugins();
 
     /**
-     * 启用或停用一个插件，返回更新后的插件 JSON。停用：立即从目录移除、关闭连接、取消进行中的调用。
-     * 启用不会马上 bind；第一次用到工具时才连接（工具列表在启用后由后台拉取一次，结果见 listTools）。
-     * 错误 code：not_found、invalid（插件包或 Service 校验不通过，不能启用）。
+     * 启用或停用一个插件（插件级 enabled），返回更新后的插件 JSON。停用：立即从目录移除、关闭连接、取消进行中的调用。
+     * 启用后在后台连接一次拉取工具（结果见 listTools），之后第一次用到工具时才再连接。
+     * 错误 code：not_found、not_ready（status 不是 ready：不可用，或签名变化 / 未确认，要先 confirmSignature）。
      */
     String setPluginEnabled(String pluginId, boolean enabled);
 
-    /** 一个插件的全部工具（含 approval=disabled 的），JSON 数组。还没连接过时会连接一次去拉取。错误 code：not_found、unavailable。 */
+    /**
+     * 确认插件的当前签名（status 为 signature_changed / signature_unconfirmed 时），返回更新后的插件 JSON：恢复可用，但仍然停用。
+     * 错误 code：not_found、not_needed（签名没有待确认的变化）。
+     */
+    String confirmSignature(String pluginId);
+
+    /** 插件级审批方式（这个插件下没有单独设置的工具都按它），返回更新后的插件 JSON。错误 code：not_found、bad_mode。 */
+    String setPluginApproval(String pluginId, String mode);
+
+    /** 一个插件的全部工具（含被禁用的），JSON 数组。插件已启用但还没连接过时会连接一次去拉取。错误 code：not_found、unavailable。 */
     String listTools(String pluginId);
 
+    /** 启用或禁用一个工具（toolName 为目录里的名字），返回更新后的工具 JSON。错误 code：not_found。 */
+    String setToolEnabled(String toolName, boolean enabled);
+
     /**
-     * 设置一个工具的审批方式（toolName 为目录里的名字），返回更新后的工具 JSON。
-     * mode：ask（每次确认，默认）| always_allow（始终允许；risk=high 的工具不允许）| disabled（不进目录）。
-     * 错误 code：not_found、bad_mode、high_risk（high 工具不能 always_allow）。
+     * 设置一个工具的审批方式，返回更新后的工具 JSON。
+     * 错误 code：not_found、bad_mode、high_risk（risk=high 的工具不能设为 always）。
      */
     String setToolApproval(String toolName, String mode);
 
@@ -62,7 +85,7 @@ interface IExtensionHost {
     // ---------------------------------------------------------------- 运行时（:agent）
 
     /**
-     * 订阅目录变化：立即回调一次 onCatalogChanged，之后每次变化（启用 / 停用 / list_changed / 卸载）再回调。
+     * 订阅目录变化：立即回调一次 onCatalogChanged，之后每次变化（启用 / 停用、策略改动、list_changed、安装 / 卸载）再回调。
      * 同一个回调重复订阅无效；回调方进程死亡时自动退订。
      */
     void subscribe(IExtensionCallback callback);
@@ -70,21 +93,22 @@ interface IExtensionHost {
     void unsubscribe(IExtensionCallback callback);
 
     /**
-     * 当前目录：{"version": long, "tools":[工具…]}，只含已启用插件里 approval ≠ disabled 的工具。
+     * 当前目录：{"version": long, "tools":[工具…], "policy":{ApprovalPolicy.toJson()}}。
+     * tools 只含插件级启用的插件里的工具（工具级禁用的也在里面，由 Broker 按 policy 过滤）。
      * 只在 onCatalogChanged 之后来取（目录可能较大，不放在单向回调里）。
      */
     String getCatalog();
 
     /**
      * 发起一次工具调用。立即返回：true = 已受理，结果稍后经 callback.onToolResult(callId, …) 交回（恰好一次）；
-     * false = 没有受理（工具不在目录里、callId 重复），这时不会有回调，调用确定没有发出。
+     * false = 没有受理（工具不在目录里或已禁用、callId 重复），这时不会有回调，调用确定没有发出。
      * requestJson：{"name"（目录里的名字）, "arguments":{…}, "timeoutMs": long（0 = 不限）,
      *   "sessionId", "taskId", "toolCallId"（只用于诊断和审计）}
      * 受理之后如果 :ext 进程死亡，运行时按“结果未知”处理（已受理的调用可能已经发给插件）。
      */
     boolean callTool(String callId, String requestJson, IExtensionCallback callback);
 
-    /** 取消一个进行中的调用：转成 MCP 的 notifications/cancelled；之后仍会有一次 onToolResult（outcome 多半是 unknown）。 */
+    /** 取消一个进行中的调用：转成 MCP 的 notifications/cancelled；之后仍会有一次 onToolResult。 */
     void cancelTool(String callId);
 
     /** 诊断 JSON：各插件、各服务器的连接状态与计数（不含参数和结果内容）。 */

@@ -3,7 +3,7 @@
 package org.agentos.internal;
 
 oneway interface IExtensionCallback {
-    /** 目录变了（version 单调递增）。收到后调用 IExtensionHost.getCatalog() 取完整目录。 */
+    /** 目录或用户策略变了（version 单调递增）。收到后调用 IExtensionHost.getCatalog() 取完整目录和策略。 */
     void onCatalogChanged(long version);
 
     /**

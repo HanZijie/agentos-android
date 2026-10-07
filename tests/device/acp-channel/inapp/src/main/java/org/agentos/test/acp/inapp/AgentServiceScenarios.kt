@@ -153,14 +153,14 @@ class AgentServiceScenarios(
                 val catalog = JSONObject(call("getCatalog") as String)
                 val accepted = call("callTool", "c7a-1", JSONObject().put("name", "mcp__x__y__z").toString(), null) as Boolean
                 val notFound = errorOf { call("setPluginEnabled", "org.example.none", true) }
-                val badMode = errorOf { call("setToolApproval", "mcp__x__y__z", "sometimes") }
+                val badMode = errorOf { call("setToolApproval", "mcp__x__y__z", "always_allow") }
                 val diag = JSONObject(call("getDiagnostics") as String)
                 val extPid = ctx.getSystemService(ActivityManager::class.java).runningAppProcesses
                     ?.firstOrNull { it.processName == "${TestIds.APP_PKG}:ext" }?.pid
                 val checks = JSONObject()
                     .put("version", version == 1)
                     .put("noPluginsYet", plugins.length() == 0)
-                    .put("emptyCatalog", catalog.optJSONArray("tools")?.length() == 0)
+                    .put("emptyCatalog", catalog.optJSONArray("tools")?.length() == 0 && catalog.optJSONObject("policy")?.optInt("version") == 1)
                     .put("callNotAccepted", !accepted)
                     .put("notFoundCode", notFound?.startsWith("IllegalArgumentException: agentos.ext.not_found") == true)
                     .put("badModeCode", badMode?.startsWith("IllegalArgumentException: agentos.ext.bad_mode") == true)
