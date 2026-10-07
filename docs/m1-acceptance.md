@@ -52,7 +52,7 @@ M1 的目标：一个 zip 跑通对话。代码项已经全部进 main。**现�
 
 **没做**：KernelSU；API 36 / 37 真机；灭屏 30 分钟与 24 小时驻留；真机上的 `run-android.sh` 冷启动 / 内存数值；Play Protect 界面观察（S1 M8）；首次引导、设置页填 key、通知栏点“关闭”、界面里的真实对话（都要点界面）。
 
-**Jev**：用户给的 Jev key 对默认端点 `https://omnilabs.vibeadmin.cn/v1/systemone` 返回 401 `Invalid API key.`；同一把 key 用 `https://api.typesafe.ai/v1/systemone` 返回 200（Bearer 头，请求体同 `HttpJevProvider`，约 0.8 s，选中了请求里的会话，confidence 0.92）。决定：默认端点改为 `api.typesafe.ai`，仍可配置；手机上的 App 当时没有 Jev 接线（`RuntimeConfig.jev` 没传值），由 D5.1 补上后再在真机上用真 key 测一次。
+**Jev**：用户给的 Jev key 对原默认端点 `omnilabs.vibeadmin.cn` 返回 401，对 `https://api.typesafe.ai/v1/systemone` 返回 200；默认端点已改为后者（可配置），HTTP 超时 3 秒，路由等待 3.5 秒。**2026-10-07 真机实测通过**（Pixel 8，WLAN 直连，Jev key 经 stdin 写入、只显示首尾 4 位，真实 minimax-cn / MiniMax-M3）：三个互不相关的会话（东京三日游、Kotlin 协程取消、红烧肉），带问题的 `autoSelect` 全部选回对应会话，不相关的问题得到新会话；每次选择约 1.0–1.6 秒；两把 key 在日志和结果里 0 命中。已知现象：`session_info_update` 里的 `selection` 通知比请求晚一拍到达（SDK 0.30.1），客户端要以返回的 sessionId 为准。脚本 `tests/device/acp-channel/jev_real_autoselect.py`。
 
 ## 四、已验证的用户流程（Pixel_8a，用 MiniMax 国内平台真实 key）
 
