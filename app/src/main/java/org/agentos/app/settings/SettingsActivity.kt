@@ -154,6 +154,13 @@ class SettingsActivity : Activity() {
             addView(Ui.buttons(context, *actions.toTypedArray()))
         })
 
+        // ---- plugins (D5.3): the list itself lives in PluginsActivity
+        column.addView(Ui.sectionTitle(this, "插件"))
+        column.addView(Ui.card(this).apply {
+            addView(Ui.paragraph(context, "其他 App 提供给 AgentOS 的工具。第三方插件默认关闭，启用前会说明风险。"))
+            addView(Ui.buttons(context, "插件管理" to { startActivity(Intent(context, org.agentos.app.settings.plugins.PluginsActivity::class.java)) }))
+        })
+
         // ---- security level (principle 6): "rooted" only when the root supervisor reported this boot
         val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
             .takeIf { it >= 0 }
