@@ -26,7 +26,10 @@ import org.agentos.runtime.ports.ModelSpec
 import org.agentos.runtime.ports.RuntimeLog
 import org.agentos.runtime.ports.SafeModeState
 import org.agentos.runtime.ports.SecretPort
+import org.agentos.runtime.ports.SkillCatalog
+import org.agentos.runtime.ports.SkillContent
 import org.agentos.runtime.ports.SkillPort
+import org.agentos.runtime.ports.SkillSummary
 import org.agentos.runtime.ports.StoragePort
 import org.agentos.runtime.ports.ToolCatalog
 import org.agentos.runtime.ports.ToolInvocation
@@ -98,6 +101,34 @@ open class FakeToolPort : ToolPort {
     }
 }
 
+/** 内存里的 Skill：测试注册 Skill（id → 内容和附属文件），读取时路径不在里面就抛 NoSuchElementException。 */
+open class FakeSkillPort : SkillPort {
+    private val flow = MutableStateFlow(SkillCatalog.EMPTY)
+    private val files = mutableMapOf<String, Map<String, String>>()
+    override val catalog: StateFlow<SkillCatalog> get() = flow
+
+    /** 读这些 Skill 时报告“已截断”。 */
+    val truncated: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
+
+    /** 注册一个 Skill：[files] 的键是相对 Skill 目录的路径，`SKILL.md` 必须有。 */
+    fun register(id: String, description: String, provider: String = "fake", files: Map<String, String>) {
+        this.files[id] = files
+        flow.value = SkillCatalog(flow.value.version + 1, flow.value.skills.filter { it.id != id } + SkillSummary(id, id.substringAfter(':'), description, provider))
+    }
+
+    fun unregister(id: String) {
+        files.remove(id)
+        flow.value = SkillCatalog(flow.value.version + 1, flow.value.skills.filter { it.id != id })
+    }
+
+    override suspend fun read(skillId: String, path: String?): SkillContent {
+        val skill = files[skillId] ?: throw NoSuchElementException("unknown skill: $skillId")
+        val rel = if (path.isNullOrEmpty()) "SKILL.md" else path
+        require(!rel.startsWith("/") && ".." !in rel.split('/')) { "invalid path" }
+        return SkillContent(skill[rel] ?: throw NoSuchElementException("no such file in skill $skillId: $rel"), skillId in truncated)
+    }
+}
+
 /** 内存里的用户工具策略：测试直接改 [policy]。 */
 class FakeApprovalPolicyPort(initial: ApprovalPolicy = ApprovalPolicy.DEFAULT) : ApprovalPolicyPort {
     private val flow = MutableStateFlow(initial)
@@ -146,7 +177,7 @@ class FakeHostPort(
     override val consent: FakeConsentPort = FakeConsentPort(),
     override val hooks: FakeHookPort = FakeHookPort(),
     override val approvals: FakeApprovalPolicyPort = FakeApprovalPolicyPort(),
-    override val skills: SkillPort = SkillPort.NONE,
+    override val skills: FakeSkillPort = FakeSkillPort(),
     override val clock: ManualClock = ManualClock(),
     override val log: CollectingLog = CollectingLog(),
     databaseFile: File = Files.createTempDirectory("agentos-store").resolve("agent.db").toFile(),

@@ -589,6 +589,20 @@ class ExtensionToolHostTest {
     }
 
     @Test
+    fun `prepare is refreshNow, so a task starting right after boot sees the tools`() = runTest {
+        val w = threeApps(this)
+        w.connector.server(notesPkg, "notes").connectDelayMillis = 1_500
+        val host = w.host(ExtensionHostConfig(connectTimeoutMillis = 60_000))
+        runCurrent()
+        assertTrue(host.catalog.value.tools.none { it.provider == pluginId(notesPkg) }, "notes is still connecting")
+        val preparing = async { host.prepare(2_000) }
+        advanceTimeBy(1_501)
+        runCurrent()
+        preparing.await()
+        assertEquals(Samples.notes.size, host.catalog.value.tools.count { it.provider == pluginId(notesPkg) })
+    }
+
+    @Test
     fun `closing the host closes every connection`() = runTest {
         val w = threeApps(this)
         val host = w.host()

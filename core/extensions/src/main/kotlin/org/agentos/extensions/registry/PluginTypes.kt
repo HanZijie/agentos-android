@@ -117,6 +117,7 @@ data class PluginProblem(val code: String, val message: String)
  *   **只有 [PluginStatus.READY] 时才可以使用**，用 [activeServers]
  * @property rejectedServers 被拒绝的 Binder 服务器与原因
  * @property manifestErrors 清单校验失败的全部错误
+ * @property skillFiles 插件包里 `skills/` 下的全部文件（相对插件根的路径）。Skill 只能读这里列出的文件（ExtensionSkillPort）
  * @property problems 给插件页显示的全部问题（不可用原因、被拒绝的服务器、清单里“不支持的部分”）
  */
 data class PluginRecord(
@@ -132,6 +133,7 @@ data class PluginRecord(
     val rejectedServers: List<RejectedServer> = emptyList(),
     val manifestErrors: List<ManifestError> = emptyList(),
     val problems: List<PluginProblem> = emptyList(),
+    val skillFiles: List<String> = emptyList(),
 ) {
     val activeServers: List<McpServerDecl> get() = if (status == PluginStatus.READY) servers else emptyList()
 }
