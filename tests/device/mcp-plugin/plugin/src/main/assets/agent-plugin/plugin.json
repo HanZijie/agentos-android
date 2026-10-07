@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mcptest",
+  "version": "1.0.0",
+  "description": "AgentOS test plugin: echo, slow and control tools for the Extension Host device tests.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "MCP 测试插件"
+      }
+    },
+    "org.agentos": {
+      "mcpServers": {
+        "test": {
+          "service": "org.agentos.test.mcp.plugin.TestMcpService"
+        }
+      }
+    }
+  }
+}
