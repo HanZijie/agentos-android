@@ -23,7 +23,21 @@
             </intent-filter>
         </activity>
 
-        <!-- AgentOS 通过它发现并使用本 App 内嵌的插件（SDK 合入后加上 NotesMcpService，见 docs/extensions.md 4.1） -->
+        <!--
+          AgentOS 通过它发现并使用本 App 内嵌的插件（docs/extensions.md 4.1）：导出，要求 BIND_MCP_SERVICE（signature，只有 AgentOS 持有），
+          带 PLUGIN action 与插件包目录（assets/agent-plugin）。工具与界面共用同一个进程内仓库，所以不开额外进程。
+        -->
+        <service
+            android:name=".agent.NotesMcpService"
+            android:exported="true"
+            android:permission="org.agentos.permission.BIND_MCP_SERVICE">
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.PLUGIN" />
+            </intent-filter>
+            <meta-data
+                android:name="org.agentos.plugin.assets"
+                android:value="agent-plugin" />
+        </service>
     </application>
 
 </manifest>

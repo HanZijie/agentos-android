@@ -103,19 +103,27 @@ class NotesTools(
     ) { args ->
         val note = repository.get(args.string("id"))
         val offset = (args.optInt("offset", 0, Int.MAX_VALUE) ?: 0).coerceAtMost(note.content.length)
-        val maxChars = args.optInt("max_chars", 1, MAX_GET_CHARS) ?: DEFAULT_GET_CHARS
-        var end = (offset + maxChars).coerceAtMost(note.content.length)
-        if (end < note.content.length && end > offset && Character.isHighSurrogate(note.content[end - 1])) end--
-        val truncated = end < note.content.length
-        ok(
-            buildJsonObject {
+        // 结果会在 content 和 structuredContent 里各出现一次，且正文里的换行 / 引号会被转义：
+        // 按真实的线上成本把切片缩到装得下为止，剩下的由 next_offset 接着读
+        fun slice(maxChars: Int): JsonObject {
+            var end = (offset + maxChars).coerceAtMost(note.content.length)
+            if (end < note.content.length && end > offset && Character.isHighSurrogate(note.content[end - 1])) end--
+            val truncated = end < note.content.length
+            return buildJsonObject {
                 putNoteFields(note)
                 put("content", note.content.substring(offset, end))
                 put("content_offset", offset)
                 put("truncated", truncated)
                 if (truncated) put("next_offset", end)
-            },
-        )
+            }
+        }
+        var maxChars = args.optInt("max_chars", 1, MAX_GET_CHARS) ?: DEFAULT_GET_CHARS
+        var result = slice(maxChars)
+        while (WireSize.cost(result) > WireSize.LIMIT && maxChars > MIN_GET_CHARS) {
+            maxChars = maxOf(MIN_GET_CHARS, maxChars * 3 / 4)
+            result = slice(maxChars)
+        }
+        ok(result)
     }
 
     private val noteCreate = tool(
@@ -337,13 +345,16 @@ class NotesTools(
         put("content_length", note.content.length)
     }
 
-    /** 总大小控制在 Binder 通道单条消息上限（128 KiB）之内：超了就少返回几条，并让 has_more 为 true。 */
+    /**
+     * 总大小控制在 Binder 通道的单条消息上限（65,536 字符）之内：按真实的线上成本（见 [WireSize]）累加，
+     * 超了就少返回几条，并让 has_more 为 true，调用方用 next_offset 接着取。
+     */
     private fun fitToBudget(items: List<JsonObject>): Pair<List<JsonObject>, Boolean> {
-        var bytes = 512
+        var cost = ENVELOPE_COST
         val kept = ArrayList<JsonObject>(items.size)
         for (item in items) {
-            bytes += item.toString().toByteArray(Charsets.UTF_8).size + 1
-            if (bytes > RESPONSE_BUDGET_BYTES && kept.isNotEmpty()) return kept to true
+            cost += WireSize.cost(item) + 2
+            if (cost > WireSize.LIMIT && kept.isNotEmpty()) return kept to true
             kept += item
         }
         return kept to false
@@ -414,9 +425,33 @@ class NotesTools(
         const val MAX_LIST_LIMIT = 200
         const val DEFAULT_SEARCH_LIMIT = 20
         const val MAX_SEARCH_LIMIT = 100
-        const val DEFAULT_GET_CHARS = 20_000
-        const val MAX_GET_CHARS = 30_000
+        const val DEFAULT_GET_CHARS = 12_000
+        const val MAX_GET_CHARS = 20_000
+        const val MIN_GET_CHARS = 200
         const val SUMMARY_CHARS = 200
-        const val RESPONSE_BUDGET_BYTES = 96_000
+
+        /** 列表 / 搜索结果外层字段（total、offset、has_more……）占的成本。 */
+        private const val ENVELOPE_COST = 1_500
+    }
+}
+
+/**
+ * 结果在 MCP 线上的真实成本（docs/sample-apps.md，C7a 的实际行为）：`McpToolResult.json(对象)` 把同一段紧凑 JSON
+ * 在 `content`（作为被转义的字符串）和 `structuredContent` 里各放一份，单条消息上限 65,536 字符。
+ * 成本 ≈ 2 × 长度 + 转义增量（引号、反斜杠、控制字符各多一个字符）+ 外层信封。
+ */
+internal object WireSize {
+    const val CHANNEL_LIMIT = 65_536
+
+    /** 留出余量后的上限。 */
+    const val LIMIT = 60_000
+
+    private const val ENVELOPE = 160
+
+    fun cost(value: JsonObject): Int {
+        val text = value.toString()
+        var escapes = 0
+        for (c in text) if (c == '"' || c == '\\' || c < ' ') escapes++
+        return text.length * 2 + escapes + ENVELOPE
     }
 }

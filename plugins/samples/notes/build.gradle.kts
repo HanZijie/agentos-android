@@ -44,7 +44,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
 
-    // 工具层只依赖 kotlinx-serialization-json（JsonObject）和仓库，与 SDK 无关
+    // 与 SDK 有关的只有 agent/NotesMcpService（McpBinderService）；工具层只依赖 kotlinx-serialization-json 和仓库
+    implementation(project(":sdk:plugin-sdk"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 

@@ -1,13 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
-        <!-- 只在 debug 包里：adb 直接调工具层（与 MCP 走同一个仓库），用来在设备上验证界面实时刷新 -->
+        <!--
+          只在 debug 包里，都要求 DUMP（只有 adb shell 和系统能发）。
+          DebugCallReceiver：adb 直接调工具层（和 MCP 服务用同一个仓库对象），用来在设备上验证界面实时刷新。
+          SelfTestReceiver：在单独的 :selftest 进程里经 McpBinderClient 绑定本 App 的 NotesMcpService，走完全部工具，
+          所以对服务的调用是真正跨进程的 Binder（docs/sample-apps.md 第 5 节）。
+        -->
         <receiver
             android:name=".debug.DebugCallReceiver"
             android:exported="true"
-            tools:ignore="ExportedReceiver" />
+            android:permission="android.permission.DUMP" />
+        <receiver
+            android:name=".debug.SelfTestReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":selftest" />
     </application>
 
 </manifest>

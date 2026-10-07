@@ -21,6 +21,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val NotesTools_CHANNEL_LIMIT = 65_536
+
 class NotesToolsTest {
     private val env = TestEnv()
     private val tools = NotesTools(env.repo, zone = { ZoneOffset.ofHours(8) })
@@ -144,13 +146,39 @@ class NotesToolsTest {
 
     @Test fun `note_get pages long bodies`() = runTest {
         val n = seed("Long", "x".repeat(50_000))
-        val first = ok("note_get", args { put("id", n.id); put("max_chars", 30_000) })
-        assertEquals(30_000, first["content"]!!.jsonPrimitive.content.length)
+        val first = ok("note_get", args { put("id", n.id); put("max_chars", 20_000) })
+        assertEquals(20_000, first["content"]!!.jsonPrimitive.content.length)
         assertEquals(true, first["truncated"]!!.jsonPrimitive.boolean)
-        val next = first["next_offset"]!!.jsonPrimitive.int
-        val second = ok("note_get", args { put("id", n.id); put("offset", next) })
-        assertEquals(20_000, second["content"]!!.jsonPrimitive.content.length)
-        assertEquals(false, second["truncated"]!!.jsonPrimitive.boolean)
+        var offset = first["next_offset"]!!.jsonPrimitive.int
+        var total = 20_000
+        while (true) {
+            val page = ok("note_get", args { put("id", n.id); put("offset", offset) })
+            total += page["content"]!!.jsonPrimitive.content.length
+            if (!page["truncated"]!!.jsonPrimitive.boolean) break
+            offset = page["next_offset"]!!.jsonPrimitive.int
+        }
+        assertEquals(50_000, total)
+    }
+
+    @Test fun `note_get never returns more than the channel allows even for escape-heavy text`() = runTest {
+        // 每个字符在线上都要转义成两个字符，而且结果会出现两次
+        val nasty = "\"\n".repeat(30_000)
+        val n = seed("Nasty", nasty)
+        var offset = 0
+        var total = 0
+        var pages = 0
+        while (true) {
+            val out = tools.call("note_get", args { put("id", n.id); put("offset", offset); put("max_chars", 20_000) }) as ToolOutput.Ok
+            val wire = out.value.toString().length * 2
+            assertTrue("page $pages is $wire chars on the wire", wire < NotesTools_CHANNEL_LIMIT)
+            val page = out.value.jsonObject
+            total += page["content"]!!.jsonPrimitive.content.length
+            pages++
+            if (!page["truncated"]!!.jsonPrimitive.boolean) break
+            offset = page["next_offset"]!!.jsonPrimitive.int
+        }
+        assertEquals(nasty.length, total)
+        assertTrue(pages > 1)
     }
 
     @Test fun `note_get validation`() = runTest {
@@ -212,8 +240,9 @@ class NotesToolsTest {
     @Test fun `note_list stays under the binder message budget`() = runTest {
         repeat(200) { seed("note $it", "字".repeat(1000)) }
         val out = tools.call("note_list", args { put("limit", 200) }) as ToolOutput.Ok
-        val bytes = out.value.toString().toByteArray().size
-        assertTrue("size $bytes", bytes < 110_000)
+        // 结果在线上出现两次（content + structuredContent），所以单条消息 ≈ 2 × 长度
+        val wire = out.value.toString().length * 2
+        assertTrue("wire size $wire", wire < NotesTools_CHANNEL_LIMIT)
         val r = out.value.jsonObject
         assertTrue(r["notes"]!!.jsonArray.size < 200)
         assertEquals(true, r["has_more"]!!.jsonPrimitive.boolean)
