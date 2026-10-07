@@ -178,4 +178,20 @@ class ApprovalPolicyTest {
         assertTrue(RiskPolicy.needsConsent(ToolRisk.HIGH, approval))
         assertFalse(RiskPolicy.needsConsent(ToolRisk.WRITE, approval))
     }
+
+    @Test
+    fun `unlisted plugins can be switched off as a whole, and editing keeps that`() {
+        val closed = ApprovalPolicy(unlistedPluginsEnabled = false)
+        assertFalse(closed.resolve(notes).enabled)
+        assertTrue(closed.resolve(null).enabled, "tools without a plugin are not affected")
+        val opened = closed.withEnabled(PolicyScope.Plugin("notes"), true)
+        assertFalse(opened.unlistedPluginsEnabled, "edits keep the flag")
+        assertTrue(opened.resolve(notes).enabled)
+        assertFalse(opened.resolve(otherPlugin).enabled)
+        // 只写了审批方式、没写 enabled 的插件不算“明确启用”
+        assertFalse(closed.withApproval(PolicyScope.Plugin("notes"), ApprovalMode.ALWAYS).resolve(notes).enabled)
+        // 工具级的 enabled 救不了没启用的插件
+        assertFalse(closed.withEnabled(PolicyScope.of(notes), true).resolve(notes).enabled)
+        assertTrue(ApprovalPolicy.fromJson(closed.toJson()).unlistedPluginsEnabled, "never persisted")
+    }
 }

@@ -74,7 +74,15 @@ data class ToolPolicy(val enabled: Boolean, val approval: ApprovalMode)
  * 第三方插件默认关闭（docs/extensions.md 6）：这份策略对没写的插件按“启用”解析，所以导入或发现第三方插件时，
  * Extension Host 要为它显式写一个 `enabled = false` 的插件级设置，用户启用时改成 true。
  */
-data class ApprovalPolicy(val plugins: Map<String, PluginPolicy> = emptyMap()) {
+data class ApprovalPolicy(
+    val plugins: Map<String, PluginPolicy> = emptyMap(),
+    /**
+     * 没有明确写过 `enabled` 的插件算不算启用。默认 true；**只在策略文件读不出来、又没有上一份可用的时候**由 ApprovalStore
+     * 设为 false（fail closed：除了显式启用的自带插件，所有插件的工具都当作禁用）。**不持久化**（[toJson] 不写它，
+     * [fromJson] 读出来总是 true）：它描述的是“现在读不到策略”这个运行状态，不是用户的设置。
+     */
+    val unlistedPluginsEnabled: Boolean = true,
+) {
 
     /** 这个工具现在能不能用、审批方式是什么。 */
     fun resolve(source: ToolSource?): ToolPolicy {
@@ -83,8 +91,9 @@ data class ApprovalPolicy(val plugins: Map<String, PluginPolicy> = emptyMap()) {
         val server = plugin?.servers?.get(source.server)
         val tool = server?.tools?.get(source.tool)
         val levels = listOfNotNull(tool, server?.entry, plugin?.entry)
+        val pluginEnabled = plugin?.entry?.enabled ?: unlistedPluginsEnabled
         return ToolPolicy(
-            enabled = levels.none { it.enabled == false },
+            enabled = pluginEnabled && levels.none { it.enabled == false },
             approval = levels.firstNotNullOfOrNull { it.approval } ?: ApprovalMode.ASK,
         )
     }
@@ -136,8 +145,8 @@ data class ApprovalPolicy(val plugins: Map<String, PluginPolicy> = emptyMap()) {
         copy(servers = servers + (name to change(servers[name] ?: ServerPolicy())))
 
     /** 去掉空设置：同一份策略只有一种表示（[equals] 和 [toJson] 都因此稳定）。 */
-    private fun pruned(): ApprovalPolicy = ApprovalPolicy(
-        plugins.mapValues { (_, p) ->
+    private fun pruned(): ApprovalPolicy = copy(
+        plugins = plugins.mapValues { (_, p) ->
             p.copy(
                 servers = p.servers.mapValues { (_, s) -> s.copy(tools = s.tools.filterValues { !it.isEmpty }) }
                     .filterValues { !it.entry.isEmpty || it.tools.isNotEmpty() },
