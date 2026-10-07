@@ -12,8 +12,8 @@ class PluginsLogicTest {
 
     private fun plugin(
         id: String = "org.example.notes", status: String = "ready", enabled: Boolean = false, builtin: Boolean = false,
-        toolCount: Int = 0, extra: String = "", servers: String = "[]",
-    ) = """{"id":"$id","packageName":"org.example.notes","name":"notes","displayName":"备忘录","versionName":"1.2","signingDigest":"$digest",
+        toolCount: Int = 0, extra: String = "", servers: String = "[]", trusted: String = "null",
+    ) = """{"id":"$id","packageName":"org.example.notes","name":"notes","displayName":"备忘录","versionName":"1.2","signingDigest":"$digest","trustedSigningDigest":$trusted,
         "status":"$status","builtin":$builtin,"enabled":$enabled,"toolCount":$toolCount,"skillCount":0,"servers":$servers,"problems":[],"unsupported":[]$extra}"""
 
     private fun one(json: String) = Plugins.parsePlugin(json)!!
@@ -156,11 +156,23 @@ class PluginsLogicTest {
         assertTrue(plan.message.contains("签名与之前不同"))
         assertTrue(plan.message.contains("org.example.notes"))
         assertTrue(plan.message.contains("ab12 cd34 ef56"))
-        // the old digest is not invented
-        assertTrue(plan.message.contains("之前的签名：与现在不同"))
-        // when a caller does have it, it is shown
-        val withOld = Plugins.enablePlan(one(plugin(status = "signature_changed")), previousDigest = "ffff00001111")
-        assertTrue(withOld.message.contains("ffff 0000 1111"))
+        // never confirmed: said so, no invented value
+        assertTrue(plan.message.contains("之前的签名：从未确认过"))
+    }
+
+    @Test
+    fun signatureChangedShowsPreviousAndCurrentDigestsSideBySide() {
+        val old = "ffff00001111" + "2".repeat(52)
+        val plan = Plugins.enablePlan(one(plugin(status = "signature_changed", trusted = "\"$old\"")))
+        assertTrue(plan.message.contains("之前的签名：ffff 0000 1111…"))
+        assertTrue(plan.message.contains("现在的签名：ab12 cd34 ef56…"))
+        assertTrue(plan.confirmSignatureFirst)
+        // a hostile or malformed value is reduced to hex
+        val bad = Plugins.enablePlan(one(plugin(status = "signature_changed", trusted = "\"ZZ<x>ff\"")))
+        assertTrue(bad.message.contains("之前的签名：ff…"))
+        // empty string is treated as never confirmed
+        assertTrue(Plugins.enablePlan(one(plugin(status = "signature_changed", trusted = "\"\""))).message.contains("从未确认过"))
+        assertNull(one(plugin()).trustedSigningDigest)
     }
 
     @Test

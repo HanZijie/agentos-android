@@ -34,6 +34,8 @@ object Plugins {
         val description: String,
         val versionName: String,
         val signingDigest: String,
+        /** 上一次确认过的签名摘要；null = 从未确认过（signature_unconfirmed）。 */
+        val trustedSigningDigest: String?,
         val status: Status,
         val unavailableReason: String?,
         val builtin: Boolean,
@@ -143,6 +145,7 @@ object Plugins {
             description = clean(str(o, "description"), MAX_DESCRIPTION),
             versionName = clean(str(o, "versionName"), 40),
             signingDigest = str(o, "signingDigest").orEmpty().lowercase().filter { it in '0'..'9' || it in 'a'..'f' },
+            trustedSigningDigest = str(o, "trustedSigningDigest")?.lowercase()?.filter { it in '0'..'9' || it in 'a'..'f' }?.ifEmpty { null },
             status = when (str(o, "status")) {
                 "ready" -> Status.READY
                 "signature_changed" -> Status.SIGNATURE_CHANGED
@@ -326,10 +329,9 @@ object Plugins {
     fun digestHead(digest: String?): String = (digest?.takeIf { it.isNotEmpty() }?.take(DIGEST_SHOWN)?.chunked(4)?.joinToString(" ")) ?: "（无）"
 
     /**
-     * @param previousDigest 上次确认的签名摘要（IExtensionHost 现在不返回它：签名变了的插件，旧摘要由 :ext 清掉后不再有；
-     *   传 null 时对话框只写“签名与之前不同”，不编造旧摘要）。
+     * 签名变了的对话框并排写“之前的签名”（trustedSigningDigest 的前 12 位）和“现在的签名”；trustedSigningDigest 为 null 写“从未确认过”。
      */
-    fun enablePlan(p: Plugin, previousDigest: String? = null): EnablePlan {
+    fun enablePlan(p: Plugin): EnablePlan {
         val risk = "插件的工具名称、描述和返回的结果都来自第三方，AgentOS 不能保证它们可信。AgentOS 会在每个写操作之前向你确认，高风险操作每次都要确认。"
         val who = "「${p.displayName}」（${p.packageName}）"
         return when {
@@ -338,7 +340,7 @@ object Plugins {
                 message = "$who 的签名与之前不同，可能是开发者换了签名，也可能是被别人换了安装包。\n\n" +
                     "包名：${p.packageName}\n" +
                     "现在的签名：${digestHead(p.signingDigest)}…\n" +
-                    (if (previousDigest != null) "之前的签名：${digestHead(previousDigest)}…\n" else "之前的签名：与现在不同\n") +
+                    (p.trustedSigningDigest?.let { "之前的签名：${digestHead(it)}…\n" } ?: "之前的签名：从未确认过\n") +
                     "\n只有确认这个 App 来自你信任的来源时才继续。\n\n$risk",
                 confirmLabel = "确认新签名并启用",
                 confirmSignatureFirst = true,
