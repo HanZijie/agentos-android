@@ -166,7 +166,15 @@ AgentOS 这一侧：
 
 - 在 Manifest 的 `<queries>` 里声明这个 action，否则 Android 11 及以上看不到其他 App；
 - 用 `queryIntentServices(org.agentos.intent.action.PLUGIN)` 找候选，再通过 `createPackageContext(包名, 0).assets` 读取插件包。**这一步不 bind**；
-- 插件身份记录为“包名 + 签名证书摘要 + versionCode”。签名变化时插件被停用，需要用户重新确认；App 卸载后插件自动移除，已有的连接和授权全部撤销；
+- 插件身份记录为“包名 + 签名证书摘要 + versionCode”（实现：`core/extensions` 的 `registry/PluginScanLogic`，纯函数，A8）。规则：
+  - **签名变化**：变化的那一次发出 `SignatureChanged` 和 `Revoke`（关闭该插件已有的 MCP 连接），用户策略清空并停用，插件状态为“需要重新确认”，没有可用服务器。用户确认（`confirmSignature`）后插件恢复为可用，但**仍然停用**，要再启用一次（整合人 2026-10-07 确认：安全优先；插件页把“确认”和“启用”做在同一个对话框里）。签名变回之前信任过的那一个时自动恢复。自带插件免重新确认。
+  - **升级**（versionCode 变、签名不变）：重新读清单，保留用户策略；升级后改名则清掉旧名字的策略并撤销旧连接。
+  - **卸载**：插件自动移除，已有的连接和授权全部撤销，策略清掉；
+  - **第三方插件默认关闭**（plugin 级 `enabled=false`，不覆盖用户已写的值）；自带插件例外；
+  - **声明了服务器却一个都不能用**（三项检查：属于本包、已导出、要求 `BIND_MCP_SERVICE`，任一项不满足就拒绝这个服务器）、并且没有 Skills 和 Hooks 时，整个插件标为不可用（`NO_USABLE_SERVER`）；还有可用的 https 远端服务器、或只有 Skills / Hooks 的插件正常；
+  - 清单被拒绝、assets 缺失、名字冲突的插件以“不可用”保留在注册表里，带原因和全部问题，插件页显示；
+  - 插件名唯一（自带 > 原来的主人 > id 小的，与扫描顺序无关），`user.` 前缀保留给用户配置的 MCP；一个 App 有多个 assets 目录时每个目录是独立插件（id = 包名/目录）；
+  - 注册表记忆（`PersistedRegistry`，JSON version=1）读不出来时**不能当空继续**（空记忆 = 把当前签名当可信）：保留上一份，或让所有第三方插件重新确认；
 - `extensions."org.agentos".mcpServers` 里的每个 Service 都必须属于本包、已导出、要求 `BIND_MCP_SERVICE`，任何一项不满足就拒绝这个服务器。
 
 `org.agentos.permission.BIND_MCP_SERVICE` 由 AgentOS App 定义，保护级别是 signature，只有 AgentOS 自己持有。所以提供插件的 App 不需要和 AgentOS 用同一个证书，而其他 App 也 bind 不了它的 MCP 服务。
@@ -396,7 +404,8 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 
 | 位置 | 内容 |
 |---|---|
-| `app/src/main/java/org/agentos/app/ext/` | Extension Host（`:ext` 进程）：`registry/`、`policy/`、`mcp/`、`skills/`、`hooks/`、`runner/`、`ExtensionHostService` |
+| `core/extensions/` | 扩展的纯逻辑（JVM）：`ManifestReader`、`ToolNaming`、`registry/`（`PluginScanLogic`、`PersistedRegistry`、`ApprovalStore`，A7 / A8）；依赖 `core:runtime`（取 `ApprovalPolicy`），反向没有依赖 |
+| `app/src/main/java/org/agentos/app/ext/` | Extension Host（`:ext` 进程）：`registry/`（`AppPluginScanner` 只是 PackageManager → `InstalledAppView` 的薄适配层）、`policy/`（只剩文件路径与接线）、`mcp/`、`skills/`、`hooks/`、`runner/`、`ExtensionHostService` |
 | `app/src/main/aidl/org/agentos/internal/` | `IExtensionHost`、`IExtensionCallback` |
 | `app/src/main/java/org/agentos/app/builtin/`、`app/src/main/assets/agent-plugin/` | AgentOS 自带插件 |
 | `runner/` | Runner APK |
