@@ -62,6 +62,13 @@ class ControlClient(private val ctx: Context) {
             call("clearModelSource")
         }
 
+        // v4：Jev（自动选会话，D5.1）
+        fun jevSource(): JSONObject = JSONObject(call("getJevSource") as String)
+        fun setJevSource(endpoint: String?, apiKey: String?): JSONObject = JSONObject(call("setJevSource", endpoint, apiKey) as String)
+        fun clearJevSource() {
+            call("clearJevSource")
+        }
+
         // v3：电脑端接入（C6 的用例，与设置页同一组调用）
         fun desktopAccess(): JSONObject = JSONObject(call("getDesktopAccess") as String)
         fun setDesktopAccessEnabled(on: Boolean): JSONObject = try {

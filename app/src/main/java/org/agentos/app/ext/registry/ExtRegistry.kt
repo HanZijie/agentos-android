@@ -83,6 +83,7 @@ class ExtRegistry(
         }
         val r = result!!
         registryFile.writeAtomically(r.persisted.toJson())
+        lastGoodMemory = r.persisted
         registryFlow.value = r.registry
         scans++
         lastScanError = null
@@ -139,27 +140,35 @@ class ExtRegistry(
         if (p.status != PluginStatus.SIGNATURE_CHANGED && p.status != PluginStatus.SIGNATURE_UNCONFIRMED) {
             throw ExtError.notNeeded("plugin $id has no unconfirmed signature")
         }
-        val memory = loadMemory() ?: PersistedRegistry()
-        registryFile.writeAtomically(PluginScanLogic.confirmSignature(memory, p.id).toJson())
+        val memory = loadMemory() ?: PersistedRegistry.EMPTY
+        val confirmed = PluginScanLogic.confirmSignature(memory, p.id)
+        registryFile.writeAtomically(confirmed.toJson())
+        lastGoodMemory = confirmed
         rescan()
         return plugin(id)
     }
 
-    /** 读记忆：文件不存在 → 空记忆；读不出来 → null（记忆丢失）。 */
+    /**
+     * 读记忆：文件不存在 → 空记忆（首次运行，[PersistedRegistry.EMPTY]）；读不出来 → 本进程里上一份可用的，没有就 null
+     * （记忆丢失：PluginScanLogic 把所有第三方插件按“签名未确认”处理，**不能**当空记忆，否则等于把当前签名当可信）。
+     */
     private fun loadMemory(): PersistedRegistry? {
         val text = try {
             registryFile.readText()
         } catch (e: Exception) {
             Log.w(TAG, "plugin registry memory unreadable: ${e.javaClass.simpleName}")
-            return null
-        } ?: return PersistedRegistry()
+            return lastGoodMemory
+        } ?: return lastGoodMemory ?: PersistedRegistry.EMPTY
         return try {
-            PersistedRegistry.fromJson(text)
+            PersistedRegistry.fromJson(text).also { lastGoodMemory = it }
         } catch (e: Exception) {
             Log.w(TAG, "plugin registry memory is corrupt: ${e.javaClass.simpleName}")
-            null
+            lastGoodMemory
         }
     }
+
+    /** 本进程里最后一份读到或写出的记忆。 */
+    @Volatile private var lastGoodMemory: PersistedRegistry? = null
 
     // ------------------------------------------------------------------ 给插件页的 JSON（IExtensionHost.listPlugins）
 
@@ -170,7 +179,7 @@ class ExtRegistry(
     fun pluginJson(p: PluginRecord, serverStates: Map<String, ServerView> = emptyMap()): JSONObject {
         val policy = approvals.policy.value
         val entry = p.name?.let { policy.plugins[it]?.entry }
-        val enabled = p.name != null && policy.resolvePluginEnabled(p.name!!)
+        val enabled = p.name != null && policy.pluginEnabled(p.name!!)
         val m = p.manifest
         val versionName = runCatching {
             context.packageManager.getPackageInfo(p.identity.packageName, PackageManager.PackageInfoFlags.of(0)).versionName
@@ -224,10 +233,34 @@ class ExtRegistry(
         .put("scans", scans)
         .put("lastScanError", lastScanError ?: JSONObject.NULL)
         .put("memoryLost", memoryLost)
+        .put("policy", policyStatus())
         .put("policyHealth", when (val h = approvals.health.value) {
             is PolicyHealth.Ok -> "ok"
             is PolicyHealth.Corrupt -> "corrupt(${h.using.name.lowercase()})"
         })
+
+    /** 用户策略文件的状态（IExtensionHost.getPolicyStatus，插件页显示）。 */
+    fun policyStatus(): JSONObject {
+        val h = approvals.health.value as? PolicyHealth.Corrupt
+        return JSONObject()
+            .put("health", if (h == null) "ok" else "corrupt")
+            .put("using", h?.using?.name?.lowercase() ?: JSONObject.NULL)
+            .put("reason", h?.reason ?: JSONObject.NULL)
+            .put("failClosed", policyFailClosed())
+            .put("lastBackupError", approvals.lastBackupError ?: JSONObject.NULL)
+    }
+
+    /**
+     * 用户确认“重置策略”（IExtensionHost.resetPolicy）：[ApprovalStore.resetToDefault]，现有的第三方插件都写成停用，
+     * 重置不会把它们重新启用。任何状态下都可以调用。
+     */
+    @Synchronized
+    fun resetPolicy(): JSONObject {
+        val thirdParty = registry.value.plugins.filter { !it.builtin }.mapNotNull { it.name }
+        approvals.resetToDefault(thirdParty)
+        Log.i(TAG, "approval policy reset; ${thirdParty.size} third-party plugin(s) left disabled")
+        return policyStatus()
+    }
 
     companion object {
         private const val TAG = "ExtRegistry"
@@ -243,7 +276,3 @@ internal fun String?.toApprovalMode(): ApprovalMode? = when (this) {
     "always" -> ApprovalMode.ALWAYS
     else -> null
 }
-
-/** 插件级是否启用：与 [ApprovalPolicy.resolve] 的插件层规则相同（写了按写的，没写按 unlistedPluginsEnabled）。 */
-internal fun ApprovalPolicy.resolvePluginEnabled(plugin: String): Boolean =
-    plugins[plugin]?.entry?.enabled ?: unlistedPluginsEnabled

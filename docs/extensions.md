@@ -172,6 +172,7 @@ AgentOS 这一侧：
   - **卸载**：插件自动移除，已有的连接和授权全部撤销，策略清掉；
   - **第三方插件默认关闭**（plugin 级 `enabled=false`，不覆盖用户已写的值）；自带插件例外；
   - **声明了服务器却一个都不能用**（三项检查：属于本包、已导出、要求 `BIND_MCP_SERVICE`，任一项不满足就拒绝这个服务器）、并且没有 Skills 和 Hooks 时，整个插件标为不可用（`NO_USABLE_SERVER`）；还有可用的 https 远端服务器、或只有 Skills / Hooks 的插件正常；
+  - **v3 签名轮换（lineage）也按签名变化处理**，合法的密钥轮换也要用户确认一次（保守规则；要放行“经 lineage 证明的轮换”，需要在 `InstalledAppView` 里带上签名历史、由 `PluginScanLogic` 判断，等有真实需求再做）；
   - 清单被拒绝、assets 缺失、名字冲突的插件以“不可用”保留在注册表里，带原因和全部问题，插件页显示；
   - 插件名唯一（自带 > 原来的主人 > id 小的，与扫描顺序无关），`user.` 前缀保留给用户配置的 MCP；一个 App 有多个 assets 目录时每个目录是独立插件（id = 包名/目录）；
   - 注册表记忆（`PersistedRegistry`，JSON version=1）读不出来时**不能当空继续**（空记忆 = 把当前签名当可信）：调用方只传 `previous = null`（从来没有过记忆文件的首次运行传 `PersistedRegistry.EMPTY`，文件存在但读不出来才传 `null`），所有第三方插件按“签名未确认”处理（状态 `SIGNATURE_UNCONFIRMED`、没有可用服务器、策略清空并停用，发 `MemoryLost` 和每个插件一条 `Revoke`），自带插件不受影响；确认后恢复可用但仍停用，流程同签名变化；
@@ -227,6 +228,7 @@ interface IMcpService {                   // 提供插件的 App 导出，要求
 - 插件 App 每次调用 `IChannel.send` 时，Extension Host 用 `Binder.getCallingUid()` 校验它等于这个 App 的 UID。
 - **连接生命周期**（实现：`core/extensions` 的 `host/ExtensionToolHost`，纯 JVM，A9；Android 侧只有连接器 `BinderMcpConnector`）：启用后、开机后、注册表或策略变化后，对没有缓存的可用服务器先 `bindService(BIND_AUTO_CREATE)` → `open` → MCP 初始化 → `tools/list` 取一次并缓存（收到 `tools/list_changed` 或重连后刷新）；空闲 30 秒（没有在途调用）后 `close` 并 unbind，App 进程可以被系统回收，下次用到时重连。**连不上或 App 进程死亡时，缓存的工具仍留在目录里，调用被拒绝（确定没发出）；从没连成功过的服务器不列出工具。**连接失败后 30 秒内不自动重试，只在 `refreshNow(force)` 和调用时重试；运行时在任务开始前调 `refreshNow`（有等待上限），已有缓存的服务器不会因此重连。
 - **App 进程死亡**：通过 `linkToDeath` 感知。进行中的调用返回错误；已经发出、结果未知的，按 [architecture.md](architecture.md) F8 标为“结果未知”；下次用到时重新连接。
+- **优先级与冻结**（模拟器实测，S4）：`:ext` 和插件 App 进程的优先级跟随 `:agent`。`:agent` 在前台服务时，三者都是 procState 4、不会被冻结，后台 bind 加调用约 36–186 ms；`:agent` 空闲时三者都变成 cached、会被冻结，空闲回收计时随之推迟，不影响行为。`:ext` 被杀后，系统按绑定关系在约 1.1–1.8 秒内重建。
 - **实现**：**不引入官方 MCP Kotlin SDK**（S5 结论，见 [spikes/S5.md](spikes/S5.md)：它每个还在维护的版本都要求 kotlinx-serialization ≥ 1.9.0、kotlinx-io ≥ 0.8，与 ACP 0.30.1 共用并锁定的 1.7.3 / 0.5.4 冲突；唯一兼容的 0.4.0 太旧，还把 Ktor 服务端带进每个插件 App）。`sdk/plugin-sdk` 自己实现 MCP 的 tools 子集：`McpBinderTransport` 在 `binder-channel` 上收发 JSON-RPC，Extension Host 一侧的 `McpBinderClient` 和插件 App 一侧的 `McpBinderService` 共用同一套编码。
 - **协议版本**：实现 2025-06-18 修订版，兼容 2025-03-26、2024-11-05（`initialize` 协商）。2026-07-28 修订版改动较大（去掉了协议层会话，改为每个请求自带元数据）；一条 Binder 通道天然对应一次连接，将来升级只改 `plugin-sdk` 的生命周期部分，公开接口不变。
 
@@ -367,9 +369,12 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 
 | 方法 / 回调 | 方向 | 用途 |
 |---|---|---|
-| `subscribe(callback)` / `onCatalog` | `:agent` → `:ext` / 回调 | 已启用的工具（名字、描述、schema、风险等级、来源插件）和 Skills（名字、描述）；有变化时整体重发 |
-| `callTool` / `cancelTool` / `onToolResult` | 双向 | 工具调用、取消（转成 MCP 的取消通知）、结果 |
-| `readSkill` | 请求 / 响应 | 读取 Skill 正文或附带文件（由 `ExtensionSkillPort` 提供，路径规则见第 6 节） |
+| `subscribe(callback)`、回调 `onCatalogChanged(version)`、`getCatalog` | `:agent` → `:ext` / 回调 | 订阅后收到版本号，再拉目录：`{version, tools, skills, policy, policyFailClosed}`；工具目录、Skill 目录、用户策略任一变化都会推。目录经 `getCatalog` 拉取，不放进 oneway 回调，避开缓冲上限 |
+| `callTool` / `cancelTool` / `onToolResult` | 双向 | 工具调用、取消（转成 MCP 的取消通知）、结果。每个受理的调用恰好回调一次，结局是 completed / not_dispatched / unknown；失败时 `error` 是 core:runtime 的 `ErrorInfo`（code 用 `ErrorCode.wire`） |
+| `readSkill(skillId, path)` | 请求 / 响应 | 读取 Skill 正文或附带文件（由 `ExtensionSkillPort` 提供，路径规则见第 6 节） |
+| `refreshTools` | 请求 / 响应 | 给 `ToolPort.prepare` 用 |
+| `setToolApprovalBySource` | 请求 / 响应 | 给 `ApprovalWriter` 用（确认框里的“始终允许”写回 `:ext` 的 `ApprovalStore`） |
+| `getPolicyStatus` / `resetPolicy` | 请求 / 响应 | 给插件页：策略文件损坏时的提示（正在用上一份、备份还是 fail closed）和重置 |
 | `ToolPort.prepare(timeoutMillis)` | 运行时内部 | 每个任务开始时、构造工具声明之前调一次，等工具目录刷新（默认最多 2 秒，超时或失败只记日志、任务照常开始）；`ExtensionToolHost.prepare` 就是 `refreshNow` |
 | `dispatchHook` | 请求 / 响应 | 触发一个 Hook 事件，返回合并后的决定 |
 | `onConnectionState` | 回调 | 各 MCP 服务器的连接状态，只进诊断页 |

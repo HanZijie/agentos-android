@@ -36,7 +36,11 @@ class FakePhone:
         self.faults = set(faults or [])
         self.enabled = {s.package: False for s in L.SAMPLES.values()}
         self.consent_mode = "off"
-        self.consent_log = []
+        self.consent_log = []       # ConsentDebugReceiver `recent` entries, oldest first (max 50)
+        self.remembered = set()     # (session id, tool) answered with "allow for this session"
+        self._req = 0
+        self.orphans = {}           # alarm id -> fire_at that stays registered with AlarmManager after a (faulty) delete / switch-off
+        self.model = {"modelUsable": True, "modelBaseUrl": "http://127.0.0.1:18787", "modelId": "fake-model"}
         self.desktop = False
         self.log = []          # every adb shell / run call, for assertions
         self.model_requests = []
@@ -100,6 +104,8 @@ class FakePhone:
         name = os.path.basename(relpath)
         if pkg is None or not relpath.startswith("databases/") or name != pkg.db:
             return None
+        if pkg.name != "calendar":
+            raise AssertionError("the driver must read %s through the app's debug dump, not by copying its database" % pkg.name)
         if "no-db-" + pkg.name in self.faults:
             return None
         with open(self.db_path(name), "rb") as f:
@@ -110,10 +116,13 @@ class FakePhone:
         parts = shlex.split(cmd)
         comp = parts[parts.index("-n") + 1]
         extras = {}
+        self.extra_kinds = {}
         i = 0
         while i < len(parts):
-            if parts[i] == "--es":
-                extras[parts[i + 1]] = parts[i + 2]
+            if parts[i] in ("--es", "--ez", "--el", "--ei"):
+                v = parts[i + 2]
+                extras[parts[i + 1]] = (v == "true") if parts[i] == "--ez" else (int(v) if parts[i] in ("--el", "--ei") else v)
+                self.extra_kinds[parts[i + 1]] = parts[i]
                 i += 3
             else:
                 i += 1
@@ -123,23 +132,41 @@ class FakePhone:
             data = self._consent(extras)
         elif comp.endswith("DesktopGatewayDebugReceiver"):
             data = self._gateway(extras)
+        elif comp.endswith("/.debug.DebugToolReceiver"):
+            data = self._alarm_app(extras)
+        elif comp.endswith("/.debug.DebugCallReceiver"):
+            data = self._notes_app(extras)
+        elif comp.endswith("/.debug.DebugReceiver"):
+            self._calendar_app(extras)
+            return "Broadcasting: Intent { }\nBroadcast completed: result=0\n"   # the calendar app answers in logcat only
         else:
             return "Broadcast completed: result=0\n"
-        code = 1 if data.get("ok") else 2
-        return 'Broadcasting: Intent { }\nBroadcast completed: result=%d, data="%s"' % (code, json.dumps(data, ensure_ascii=False))
+        code = 1 if data.get("ok", "error" not in data) else 2
+        return 'Broadcasting: Intent { }\nBroadcast completed: result=%d, data="%s"' % (code, json.dumps(data, ensure_ascii=False).replace("/", "\\/"))
+
+    def _plugin_json(self, s):
+        return {"id": s.package + "/agent-plugin", "packageName": s.package, "name": s.name, "enabled": self.enabled[s.package], "status": "ready",
+                "toolCount": len(s.tools)}
+
+    def _plugin_for(self, ident):
+        return next((s for s in L.SAMPLES.values() if ident in (s.package, s.package + "/agent-plugin")), None)
 
     def _ext(self, ex):
         op = ex.get("op")
         if op == "list":
-            return {"ok": True, "plugins": [{"name": s.name, "package": s.package, "enabled": self.enabled[s.package]} for s in L.SAMPLES.values()]}
+            return {"ok": True, "plugins": [self._plugin_json(s) for s in L.SAMPLES.values()]}
         if op in ("enable", "disable"):
-            if ex.get("plugin") not in self.enabled:
-                return {"ok": False, "error": "unknown plugin"}
-            self.enabled[ex["plugin"]] = op == "enable"
-            return {"ok": True}
+            s = self._plugin_for(ex.get("id"))
+            if s is None:
+                return {"ok": False, "error": "agentos.ext.not_found: unknown plugin"}
+            self.enabled[s.package] = op == "enable"
+            return {"ok": True, "plugin": self._plugin_json(s)}
         if op == "catalog":
-            return {"ok": True, "tools": [{"name": n, "risk": r} for n, r in self.catalog().items()]}
-        return {"ok": False, "error": "unknown op"}
+            return {"ok": True, "catalog": {"version": 1, "tools": [{"name": n, "risk": r.lower(), "enabled": True} for n, r in self.catalog().items()]}}
+        if op == "wait_catalog":
+            present = ex.get("name") in self.catalog()
+            return {"ok": True, "met": present != bool(ex.get("absent", False))}
+        return {"ok": False, "error": "unknown op: %s" % op}
 
     def catalog(self):
         out = {}
@@ -155,11 +182,16 @@ class FakePhone:
 
     def _consent(self, ex):
         if ex.get("op") == "mode":
-            self.consent_mode = ex["mode"]
-            return {"ok": True}
+            m = {"allow": "ALLOW", "allowonce": "ALLOW_ONCE", "deny": "DENY", "off": "OFF"}.get(str(ex.get("mode")).lower())
+            if m is None:
+                return {"ok": False, "error": "mode must be allow|allowOnce|deny|off"}
+            self.consent_mode = str(ex["mode"]).lower() if m != "ALLOW_ONCE" else "allowonce"
+            return {"ok": True, "mode": m}
+        if ex.get("op") == "status":
+            return {"ok": True, "mode": self.consent_mode.upper()}
         if ex.get("op") == "recent":
-            return {"ok": True, "recent": self.consent_log}
-        return {"ok": False}
+            return {"ok": True, "mode": self.consent_mode.upper(), "recent": list(self.consent_log[-50:])}
+        return {"ok": False, "error": "unknown op"}
 
     def _gateway(self, ex):
         op = ex.get("op")
@@ -167,23 +199,97 @@ class FakePhone:
             self.desktop = True
         elif op in ("disable", "revoke_all"):
             self.desktop = False
+        if op == "status":
+            return dict(self.model, ok=True, enabled=self.desktop)
         return {"ok": True, "code": "123456"} if op == "pair" else {"ok": True, "enabled": self.desktop}
 
+    # ------------------------------------------------------------------ the sample apps' own debug receivers (dump / reset), same JSON as the real ones
+    def _page(self, extras, total):
+        """(offset, limit, next_offset) like the real receivers: int extras only (a --el extra would not be read by getIntExtra)."""
+        for k in ("offset", "limit"):
+            if k in extras and self.extra_kinds.get(k) != "--ei":
+                raise AssertionError("%s must be an Int extra (--ei), got %s" % (k, self.extra_kinds.get(k)))
+        offset = max(0, min(int(extras.get("offset", 0)), total))
+        limit = max(1, min(int(extras.get("limit", 50)), 200))
+        nxt = offset + limit if offset + limit < total else None
+        if "dump-stuck" in self.faults and nxt is not None:
+            nxt = offset
+        return offset, limit, nxt
+
+    def _alarm_app(self, ex):
+        cmd = ex.get("cmd")
+        if cmd == "reset":
+            n = len(self.q("alarms.db", "SELECT id FROM alarms"))
+            self.q("alarms.db", "DELETE FROM alarms")
+            left = 1 if "reset-leaves-registered" in self.faults and n else 0
+            self.orphans = {"stuck": "2026-10-08T00:00:00+08:00"} if left else {}
+            return {"cleared": n, "remaining_registered": left}
+        if cmd != "dump":
+            return {"error": "unknown cmd '%s'; use dump or reset" % cmd}
+        rows = self.q("alarms.db", "SELECT * FROM alarms ORDER BY hour, minute, id")
+        offset, limit, nxt = self._page(ex, len(rows))
+        scheduled = []
+        for r in rows:
+            if r["enabled"] or "switch-off-keeps-registration" in self.faults:
+                scheduled.append({"id": str(r["id"]), "fire_at": "2026-10-08T%02d:%02d:00+08:00" % (r["hour"], r["minute"]), "registered": "alarm-not-registered" not in self.faults})
+        scheduled += [{"id": i, "fire_at": f, "registered": True} for i, f in self.orphans.items()]
+        if "dump-fails-alarm" in self.faults:
+            return {"error": "IllegalStateException: boom"}
+        return {"total": len(rows), "offset": offset, "limit": limit, "next_offset": nxt,
+                "alarms": [self._alarm_json(r) | {"repeat": "once", "vibrate": True, "snooze_minutes": r["snooze_minutes"], "snoozed_until": None, "ringing": False} for r in rows[offset:offset + limit]],
+                "scheduled": scheduled, "system": {"next_alarm_clock": None, "now": "2026-10-07T12:00:00+08:00", "time_zone": "Asia/Shanghai"}}
+
+    def _notes_app(self, ex):
+        cmd = ex.get("cmd")
+        if cmd == "reset":
+            n = len(self.q("notes.db", "SELECT id FROM notes"))
+            self.q("notes.db", "DELETE FROM notes")
+            return {"ok": True, "deleted": n}
+        if cmd != "dump":
+            return {"ok": False, "error": "unknown cmd: %s (use dump or reset)" % cmd}
+        if "dump-fails-notes" in self.faults:
+            return {"ok": False, "error": "boom"}
+        rows = self.q("notes.db", "SELECT rowid AS rid, * FROM notes ORDER BY rid")
+        offset, limit, nxt = self._page(ex, len(rows))
+        page = rows[offset:offset + limit]
+        tags = {}
+        for r in rows:
+            for t in json.loads(r["tags"]):
+                tags[t] = tags.get(t, 0) + 1
+        return {"notes": [{"id": r["id"], "title": r["title"], "content": r["content"], "tags": json.loads(r["tags"]), "color": r["color"], "pinned": bool(r["pinned"]),
+                           "archived": r["status"] == 1, "trashed": r["status"] == 2, "created_at": "2026-10-07T12:00:00+08:00", "updated_at": "2026-10-07T12:00:00+08:00",
+                           "content_length": len(r["content"]), "revision": r["revision"]} for r in page],
+                "tags": [{"name": k, "count": v} for k, v in sorted(tags.items())], "total": len(rows), "offset": offset, "count": len(page), "next_offset": nxt}
+
+    def _calendar_app(self, ex):
+        if ex.get("cmd") == "clear" and "calendar-clear-noop" not in self.faults:
+            self.q("calendar.db", "DELETE FROM events")
+            self.q("calendar.db", "DELETE FROM calendars WHERE is_default = 0")
+
     # ------------------------------------------------------------------ running a tool the way AgentOS would
-    def call_tool(self, name, args):
-        """-> (status, text) as the ACP update would carry them."""
+    def call_tool(self, name, args, session="sess-1"):
+        """-> (status, text) as the ACP update would carry them. The confirmation behaves like the real broker + AutoConsentResponder:
+        READ is not asked; WRITE offers ALLOW_ONCE / ALLOW_FOR_SESSION / DENY, HIGH only ALLOW_ONCE / DENY; mode allow answers WRITE with
+        ALLOW_FOR_SESSION (remembered for this session: later calls are not asked at all, whatever the mode is by then) and HIGH with ALLOW_ONCE."""
         catalog = self.catalog()
         if name not in catalog:
             return "failed", "Tool %s not found" % name
         risk = catalog[name]
-        if risk != "READ":
+        if risk != "READ" and (session, name) not in self.remembered:
+            options = ["ALLOW_ONCE", "DENY"] if risk == "HIGH" else ["ALLOW_ONCE", "ALLOW_FOR_SESSION", "DENY"]
             mode = self.consent_mode
-            answer = {"allow": "allow", "allowOnce": "allow", "deny": "deny"}.get(mode)
-            self.consent_log.append({"toolName": name, "risk": risk, "answeredWith": mode})
+            answer = {"allow": "ALLOW_ONCE" if risk == "HIGH" else "ALLOW_FOR_SESSION", "allowonce": "ALLOW_ONCE", "deny": "DENY"}.get(mode)
+            self._req += 1
+            plugin = name.split("__")[1]
+            self.consent_log.append({"requestId": "req_%d" % self._req, "tool": name, "risk": risk, "source": L.source_line(plugin), "args": "{}",
+                                     "options": options, "answeredWith": answer, "end": "ANSWERED" if answer else "TIMED_OUT", "notice": None})
+            del self.consent_log[:-50]
             if answer is None:
                 return "failed", "[agentos:tool_denied] The user did not respond to the confirmation in time."
-            if answer == "deny":
+            if answer == "DENY":
                 return "failed", "[agentos:tool_denied] The user declined this tool call."
+            if answer == "ALLOW_FOR_SESSION":
+                self.remembered.add((session, name))
         s, tool = next((s, name.split("__", 3)[3]) for s in L.SAMPLES.values() if name.startswith("mcp__%s__" % s.name))
         try:
             return "completed", json.dumps(getattr(self, "t_" + tool)(args), ensure_ascii=False)
@@ -242,6 +348,8 @@ class FakePhone:
     def t_alarm_delete(self, a):
         r = self._alarm(a)
         self.q("alarms.db", "DELETE FROM alarms WHERE id=?", r["id"])
+        if "delete-keeps-registration" in self.faults:
+            self.orphans[str(r["id"])] = "2026-10-08T%02d:%02d:00+08:00" % (r["hour"], r["minute"])
         return {"deleted": True, "alarm": self._alarm_json(r)}
 
     def t_alarm_next(self, a):
@@ -445,6 +553,7 @@ class FakeBridge:
 
     def __init__(self, phone, live_plan=None):
         self.phone, self.stderr, self.closed = phone, [], False
+        self.sessions = 0
         self.live_plan = live_plan      # {prompt text: callable(phone) -> [(tool name, args)]}: what a "model" would do
         self.prompts = []
 
@@ -452,18 +561,19 @@ class FakeBridge:
         if method == "initialize":
             return {"msg": {"result": {"protocolVersion": 1}}, "ms": 1, "notes": []}
         if method == "session/new":
-            return {"msg": {"result": {"sessionId": "sess-1"}}, "ms": 1, "notes": []}
+            self.sessions += 1
+            return {"msg": {"result": {"sessionId": "sess-%d" % self.sessions}}, "ms": 1, "notes": []}
         if method == "session/prompt":
             text = params["prompt"][0]["text"]
-            self.prompts.append(text)
-            return self._prompt(text)
+            self.prompts.append((params["sessionId"], text))
+            return self._prompt(text, params["sessionId"])
         raise AssertionError("unexpected method " + method)
 
-    def _prompt(self, text):
+    def _prompt(self, text, sid="sess-1"):
         notes = []
 
         def upd(**u):
-            notes.append({"method": "session/update", "params": {"sessionId": "sess-1", "update": u}})
+            notes.append({"method": "session/update", "params": {"sessionId": sid, "update": u}})
 
         try:
             script = json.loads(text)
@@ -475,7 +585,7 @@ class FakeBridge:
             for name, args in plan(self.phone):
                 cid = "c%d" % rnd
                 upd(sessionUpdate="tool_call", toolCallId=cid, title=name, status="pending", rawInput=args)
-                st, out = self.phone.call_tool(name, args)
+                st, out = self.phone.call_tool(name, args, sid)
                 upd(sessionUpdate="tool_call_update", toolCallId=cid, status=st, content=[{"type": "content", "content": {"type": "text", "text": out}}])
                 rnd += 1
             upd(sessionUpdate="agent_message_chunk", content={"type": "text", "text": "好的，已处理。"})
@@ -485,7 +595,7 @@ class FakeBridge:
             if plan["kind"] == "tool":
                 cid = "c%d" % rnd
                 upd(sessionUpdate="tool_call", toolCallId=cid, title=plan["name"], status="pending", rawInput=plan["arguments"])
-                st, out = self.phone.call_tool(plan["name"], plan["arguments"])
+                st, out = self.phone.call_tool(plan["name"], plan["arguments"], sid)
                 upd(sessionUpdate="tool_call_update", toolCallId=cid, status="in_progress")
                 upd(sessionUpdate="tool_call_update", toolCallId=cid, status=st, content=[{"type": "content", "content": {"type": "text", "text": out}}])
                 results.append({"isError": st == "failed", "text": out})
@@ -507,14 +617,23 @@ class FakeEnv:
         self.adb = phone
         self.ext = L.ExtensionDebug(phone)
         self.consent = L.ConsentDebug(phone)
+        self.gateway = L.GatewayDebug(phone)
         self.bridge = FakeBridge(phone, live_plan)
         self.events = []
 
     def prepare_device(self, opts):
         self.events.append("prepare")
 
-    def ensure_model(self, live):
-        self.events.append("model:" + ("live" if live else "fake"))
+    def open_desktop(self, opts):
+        # the real scenario runs ensureTestModel: the loopback fake endpoint is the model source afterwards
+        self.events.append("desktop")
+        self.phone.desktop = True
+        self.phone.model = {"modelUsable": True, "modelBaseUrl": "http://127.0.0.1:18787", "modelId": "fake-model"}
+
+    def ensure_model(self, opts):
+        self.events.append("model:" + ("tunnel" if opts.tunnel else "live" if opts.live else "fake"))
+        if opts.live and not opts.tunnel and "model-reset-to-fake" not in self.phone.faults:
+            self.phone.model = {"modelUsable": True, "modelBaseUrl": "https://api.minimaxi.com/anthropic", "modelId": "MiniMax-M3"}
 
     def open_session(self):
         self.events.append("session")

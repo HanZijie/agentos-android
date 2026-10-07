@@ -9,6 +9,8 @@ import android.content.pm.ApplicationInfo
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
+import org.agentos.app.agent.AgentControlService
+import org.agentos.internal.IAgentControl
 import org.agentos.internal.IExtensionCallback
 import org.agentos.internal.IExtensionHost
 import org.json.JSONArray
@@ -30,7 +32,8 @@ import kotlin.concurrent.thread
  *
  * op：`list`、`rescan`、`enable`、`disable`、`confirm`、`approval`（插件级）、`tools`、`tool_enable`、`tool_disable`、
  * `tool_approval`、`catalog`、`refresh`、`diag`、`call`（callTool 并等 onToolResult；cancelAfterMs > 0 时到点 cancelTool）、
- * `wait_catalog`（等目录里出现 / 不再有 name，最多 timeoutMs）。结果在广播的 result data 里（JSON，含 ok）。
+ * `wait_catalog`（等目录里出现 / 不再有 name，最多 timeoutMs）、`skill`（readSkill：name = Skill 标识，path 可选）、
+ * `approval_by_source`（--es plugin / server / tool + mode）、`policy`、`policy_reset`、`agent`（:agent 诊断里的 extensions 计数）。结果在广播的 result data 里（JSON，含 ok）。
  * Manifest 要求发送方持有 DUMP（adb shell 有，普通 App 没有）；不可调试的包一律返回 not_debuggable。
  */
 class ExtensionDebugReceiver : BroadcastReceiver() {
@@ -45,7 +48,7 @@ class ExtensionDebugReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         thread(name = "ext-debug") {
             val result = try {
-                withHost(app) { h -> run(h, op, intent) }
+                if (op == "agent") agentStats(app) else withHost(app) { h -> run(h, op, intent) }
             } catch (e: Exception) {
                 Log.w(TAG, "debug op $op failed", e)
                 JSONObject().put("ok", false).put("error", e.message ?: e.javaClass.simpleName)
@@ -73,14 +76,24 @@ class ExtensionDebugReceiver : BroadcastReceiver() {
             "catalog" -> ok().put("catalog", JSONObject(h.catalog))
             "refresh" -> ok().put("refresh", JSONObject(h.refreshTools(timeoutMs, intent.getBooleanExtra("force", false))))
             "diag" -> ok().put("diag", JSONObject(h.diagnostics)).put("version", h.version)
-            "call" -> call(h, name, intent.getStringExtra("args") ?: "{}", timeoutMs, intent.getLongExtra("cancelAfterMs", 0L))
+            "call" -> call(h, name, intent.getStringExtra("args") ?: "{}", timeoutMs, intent.getLongExtra("cancelAfterMs", 0L),
+                intent.getLongExtra("disableAfterMs", 0L), intent.getStringExtra("id"))
             "wait_catalog" -> waitCatalog(h, name, intent.getBooleanExtra("absent", false), timeoutMs)
+            "skill" -> ok().put("skill", JSONObject(h.readSkill(name, intent.getStringExtra("path") ?: "")))
+            "policy" -> ok().put("policy", JSONObject(h.policyStatus))
+            "policy_reset" -> ok().put("policy", JSONObject(h.resetPolicy()))
+            "approval_by_source" -> ok().put("tool", JSONObject(h.setToolApprovalBySource(
+                intent.getStringExtra("plugin"), intent.getStringExtra("server"), intent.getStringExtra("tool"), mode,
+            )))
             else -> JSONObject().put("ok", false).put("error", "unknown op: $op")
         }
     }
 
-    /** callTool → 等 onToolResult（最多 timeoutMs + 20 秒）。 */
-    private fun call(h: IExtensionHost, name: String?, args: String, timeoutMs: Long, cancelAfterMs: Long): JSONObject {
+    /**
+     * callTool → 等 onToolResult（最多 timeoutMs + 20 秒）。cancelAfterMs / disableAfterMs > 0 时到点 cancelTool / 停用插件 id：
+     * 同一进程的广播是串行投递的，调用进行中再发一条 disable 广播要等这条结束才送到，所以在这里做。
+     */
+    private fun call(h: IExtensionHost, name: String?, args: String, timeoutMs: Long, cancelAfterMs: Long, disableAfterMs: Long, id: String?): JSONObject {
         val callId = "debug-" + UUID.randomUUID()
         val results = LinkedBlockingQueue<String>()
         val cb = object : IExtensionCallback.Stub() {
@@ -99,6 +112,12 @@ class ExtensionDebugReceiver : BroadcastReceiver() {
             thread(name = "ext-debug-cancel") {
                 Thread.sleep(cancelAfterMs)
                 runCatching { h.cancelTool(callId) }
+            }
+        }
+        if (disableAfterMs > 0) {
+            thread(name = "ext-debug-disable") {
+                Thread.sleep(disableAfterMs)
+                runCatching { h.setPluginEnabled(resolveId(h, id), false) }.onFailure { Log.w(TAG, "disableAfterMs failed", it) }
             }
         }
         val outcome = results.poll(timeoutMs + 20_000L, TimeUnit.MILLISECONDS)
@@ -135,6 +154,28 @@ class ExtensionDebugReceiver : BroadcastReceiver() {
             }
         } finally {
             runCatching { h.unsubscribe(cb) }
+        }
+    }
+
+    /** :agent 的诊断里 Extension Host 代理的计数（IAgentControl.getDiagnostics）。 */
+    private fun agentStats(context: Context): JSONObject {
+        val latch = CountDownLatch(1)
+        var control: IAgentControl? = null
+        val conn = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                control = IAgentControl.Stub.asInterface(service)
+                latch.countDown()
+            }
+            override fun onServiceDisconnected(name: ComponentName?) {}
+        }
+        check(context.bindService(Intent(context, AgentControlService::class.java), conn, Context.BIND_AUTO_CREATE)) { "bind AgentControlService failed" }
+        try {
+            check(latch.await(BIND_TIMEOUT_S, TimeUnit.SECONDS)) { ":agent did not connect" }
+            val d = JSONObject(control!!.diagnostics)
+            return ok().put("extensions", d.optJSONObject("extensions") ?: JSONObject.NULL)
+                .put("agentPid", d.optJSONObject("runtime")?.optInt("pid") ?: -1)
+        } finally {
+            runCatching { context.unbindService(conn) }
         }
     }
 

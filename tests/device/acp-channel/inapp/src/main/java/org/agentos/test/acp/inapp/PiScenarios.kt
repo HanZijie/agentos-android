@@ -34,6 +34,7 @@ class PiScenarios(
 
     suspend fun run(name: String, args: JSONObject): JSONObject? = when (name) {
         "pi-tool-round" -> toolRound()
+        "ext-e2e" -> extE2e(args)
         "pi-context" -> context()
         "recovery-context" -> recoveryContext()
         "live-minimax" -> live(args)
@@ -104,6 +105,57 @@ class PiScenarios(
             .put("summary", "requests=${log.size} toolCalls=${run.toolCalls} statuses=${run.toolStatuses} text=${text.takeLast(60).replace('\n', ' ')} checks=${count(checks)}")
             .put("checks", checks).put("prompt", run.json()).put("text", text.take(400))
             .put("fakeRequests", JSONArray(log))
+    }
+
+    // ------------------------------------------------------------------ C7b：插件工具端到端
+
+    /**
+     * 真实运行时调用插件工具（tests/device/mcp-plugin/run.py 先启用测试插件、设好审批方式）：假模型在第一轮末尾请求 args.tool
+     * （参数 args.toolInput），Broker（目录、策略镜像、确认）→ :agent 的 ExtensionClient → IExtensionHost → :ext 的
+     * ExtensionToolHost → Binder MCP → 测试插件；结果交回模型，第二轮把它带回来（after-tool:）。
+     * args.expect：completed（工具执行了）或 failed（被拒绝 / 不可用，工具没执行）；args.resultContains：交回模型的结果里应有的文字。
+     */
+    private suspend fun extE2e(args: JSONObject): JSONObject {
+        val n = nonce()
+        val tool = args.getString("tool")
+        val input = args.optJSONObject("toolInput") ?: JSONObject()
+        val expect = args.optString("expect", "completed")
+        val want = args.optString("resultContains")
+        val prompt = JSONObject().put("chunks", 2).put("intervalMs", 0).put("tool", tool).put("toolInput", input).put("n", n).toString()
+        val before = control.use { it.diagnostics() }.optJSONObject("extensions")
+        val c = conn("ext-e2e")
+        val run = PromptRun()
+        val t0 = SystemClock.elapsedRealtime()
+        try {
+            c.connect()
+            runPrompt(c.newSession(), prompt, run, status)
+            c.closeAndWait()
+        } finally {
+            c.dispose()
+        }
+        val elapsed = SystemClock.elapsedRealtime() - t0
+        val after = control.use { it.diagnostics() }.optJSONObject("extensions")
+        val log = fakeLog().filter { it.optString("userText").contains(n) }
+        val second = log.firstOrNull { it.optInt("round") == 1 }
+        val toolResult = second?.msgs()?.lastOrNull { m -> m.optJSONArray("blocks")?.toString()?.contains("tool_result") == true }
+        val resultText = toolResult?.optJSONArray("blocks")?.toString().orEmpty()
+        val text = run.text.toString()
+        val statuses = run.toolStatuses.toList()
+        val callsDelta = (after?.optLong("calls") ?: 0) - (before?.optLong("calls") ?: 0)
+        val checks = JSONObject()
+            .put("endTurn", run.stopReason == "END_TURN")
+            // 失败的那一类只要求“没有执行”：不在目录里的工具可能在 Pi 那一层就被拒（不一定有 FAILED 的状态更新）
+            .put("toolStatus", if (expect == "completed") "COMPLETED" in statuses else "COMPLETED" !in statuses)
+            .put("toolResultSentBack", toolResult != null)
+            // 假端点的日志只记块类型；结果文字在第二轮的 after-tool: 里（假模型把收到的 tool_result 原样念回来）
+            .put("resultText", want.isEmpty() || text.substringAfter("after-tool:", "").contains(want))
+            .put("secondRoundText", text.contains("after-tool:"))
+            // 执行了的调用经过 :agent 的代理；被 Broker 拒绝的不经过
+            .put("proxyCalls", if (expect == "completed") callsDelta == 1L else callsDelta == 0L)
+        return JSONObject().put("ok", allTrue(checks))
+            .put("summary", "tool=$tool expect=$expect statuses=$statuses proxyCalls=$callsDelta elapsedMs=$elapsed checks=${count(checks)}")
+            .put("checks", checks).put("prompt", run.json()).put("text", text.take(400)).put("toolResult", resultText.take(600))
+            .put("extensionsBefore", before ?: JSONObject.NULL).put("extensionsAfter", after ?: JSONObject.NULL)
     }
 
     // ------------------------------------------------------------------ 多轮上下文

@@ -25,6 +25,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import org.agentos.extensions.McpServerDecl
 import org.agentos.extensions.ToolId
 import org.agentos.extensions.ToolNaming
@@ -32,6 +33,8 @@ import org.agentos.extensions.registry.PluginRecord
 import org.agentos.extensions.registry.PluginRegistry
 import org.agentos.extensions.registry.PluginStatus
 import org.agentos.extensions.registry.RegistryEvent
+import org.agentos.runtime.broker.ApprovalMode
+import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.RiskPolicy
 import org.agentos.runtime.broker.ToolAnnotations
 import org.agentos.runtime.errors.ErrorCode
@@ -83,6 +86,29 @@ data class RefreshResult(
 )
 
 /**
+ * [ExtensionToolHost.knownTools] 的一项：Host 从某个服务器最后一次成功的 `tools/list` 里知道的一个工具，**不管用户策略现在是否把它交给模型**。
+ * 插件页据此列出“全部工具”，让用户启用、禁用、改审批方式（被禁用的工具也在里面，否则没法再打开）。
+ *
+ * @property name 交给模型的名字（ToolNaming，对所有已知工具一起算）：和它在目录里的名字相同；工具被禁用、服务器断开、Host 重建后都不变
+ * @property pluginId 插件 ID（`PluginRecord.id`）
+ * @property enabled 插件、服务器、工具三层策略都启用（`ApprovalPolicy.resolve`）：为 true 的才在目录里
+ * @property approval 审批方式（`ApprovalPolicy.resolve`）；高风险工具即使是 ALWAYS 也每次确认（[mayAlwaysAllow] 为 false）
+ * @property title 描述、title 已截断（与目录里的一样）；都是第三方文字，不可信
+ */
+data class KnownTool(
+    val name: String,
+    val pluginId: String,
+    val source: ToolSource,
+    val title: String?,
+    val description: String,
+    val inputSchema: JsonObject,
+    val risk: ToolRisk,
+    val enabled: Boolean,
+    val approval: ApprovalMode,
+    val mayAlwaysAllow: Boolean,
+)
+
+/**
  * Extension Host 的纯逻辑（docs/extensions.md 5.1、5.3、5.4、9）：把已启用插件的 MCP 服务器汇总成**工具目录**，
  * 管理到服务器的**连接生命周期**，并作为 [ToolPort] 执行调用。不依赖 Android：连接经 [McpServerConnector]（Android 上是 Binder），
  * 插件来自 [registry]（A8），用户策略来自 [approvals]（A7/A8）。
@@ -97,6 +123,16 @@ data class RefreshResult(
  * - 描述、title 截断（[ExtensionHostConfig.maxDescriptionChars]、[ExtensionHostConfig.maxTitleChars]）；单个服务器的工具数、
  *   schema 大小有上限；同一服务器重名的工具只留第一个。
  * - [ToolCatalog.version] 在**内容变化**时递增（启用、禁用、list_changed、刷新、插件移除、签名变化、Revoke）。
+ *
+ * ## 已知工具（[knownTools]）
+ * 目录只含“现在交给模型的”工具；插件页要看的是“Host 知道的全部”：[knownTools] 按**服务器最后一次成功的工具列表**（缓存）给出，
+ * 包括被用户策略禁用的（工具、服务器、插件任一层），每项带最终名字、风险、是否启用、审批方式。名字和目录里的完全一致（同一次 [ToolNaming.assign]），
+ * 所以禁用、断开（空闲回收、App 死亡、连不上）、启用状态来回切换都不会改名。只读、不连接任何服务器。
+ * - **缓存在这些情况下保留**：工具被禁用；服务器或插件被禁用（缓存标记为过期，重新启用后再取一次）；连接断开或连不上。
+ * - **缓存在这些情况下丢弃**（[knownTools] 不再列出）：插件被移除、签名变化或还没确认（不再是 READY）、升级或服务声明变了、[RegistryEvent.Revoke]。
+ * - **Host 重建**（进程重启）后缓存是空的：对**启用**的服务器，启动时连一次取列表（和平时一样），取到后被禁用的工具也在里面，名字不变；
+ *   而**被禁用**的插件或服务器按策略不连接，所以重建后在它们被启用一次之前 [knownTools] 没有它们的工具。缓存不落盘（第三方数据，可能过期）。
+ * - 刚启用、还没取到列表时用 [refreshNow] 等一次（共用后台的刷新任务）。
  *
  * ## 连接生命周期
  * - 启动后和注册表、策略变化后，对没有缓存的可用服务器**先连一次**取工具列表（后台进行，缓存下来）；之后第一次调用时也会连接。
@@ -210,6 +246,22 @@ class ExtensionToolHost(
     override suspend fun prepare(timeoutMillis: Long) {
         refreshNow(timeoutMillis)
     }
+
+    /**
+     * 现在知道的全部工具（含被策略禁用的），按名字排序；[pluginId]（`PluginRecord.id`）不为 null 时只要这个插件的。见类说明的“已知工具”。
+     * 不连接、不等待；插件没有缓存（刚启用还没取到列表、被禁用后 Host 重建、不再 READY）时没有它的工具。
+     */
+    fun knownTools(pluginId: String? = null): List<KnownTool> =
+        knownEntries(approvals.policy.value)
+            .filter { pluginId == null || it.rt.key.pluginId == pluginId }
+            .map {
+                KnownTool(
+                    name = it.name, pluginId = it.rt.key.pluginId, source = it.source, title = it.info.title?.take(config.maxTitleChars),
+                    description = (it.info.description ?: it.info.title ?: "").take(config.maxDescriptionChars), inputSchema = it.info.inputSchema,
+                    risk = it.risk, enabled = it.enabled, approval = it.approval, mayAlwaysAllow = RiskPolicy.mayAlwaysAllow(it.risk),
+                )
+            }
+            .sortedBy { it.name }
 
     /** 处理注册表事件：[RegistryEvent.Revoke] 立即关闭该插件的连接、丢弃缓存、把它的工具从目录移除。其他事件不需要处理（注册表本身会变）。 */
     fun onRegistryEvent(event: RegistryEvent) {
@@ -589,38 +641,59 @@ class ExtensionToolHost(
 
     // ------------------------------------------------------------------ 目录
 
-    private fun rebuildCatalog() {
-        val policy = approvals.policy.value
-        data class Known(val rt: ServerRt, val info: McpToolInfo)
+    /** 一个已知工具及它现在的状态（[knownTools] 和目录共用，保证两边的名字、风险一致）。 */
+    private class Entry(
+        val rt: ServerRt,
+        val pluginName: String,
+        val info: McpToolInfo,
+        val name: String,
+        val source: ToolSource,
+        val risk: ToolRisk,
+        val enabled: Boolean,
+        val approval: ApprovalMode,
+    )
+
+    /** 所有 READY 插件的所有已知工具（含被策略禁用的）：名字用 [ToolNaming.assign] 对它们一起算。 */
+    private fun knownEntries(policy: ApprovalPolicy): List<Entry> {
+        class Known(val rt: ServerRt, val pluginName: String, val disabled: Boolean, val info: McpToolInfo)
 
         val known = ArrayList<Known>()
         synchronized(lock) {
             for (rt in servers.values.sortedBy { it.key.pluginId + "/" + it.key.server }) {
                 val tools = rt.tools ?: continue
-                for (t in tools) known += Known(rt, t)
+                val pluginName = rt.plugin.name ?: continue
+                for (t in tools) known += Known(rt, pluginName, rt.disabled, t)
             }
         }
-        val names = ToolNaming.assign(known.map { ToolId(it.rt.plugin.name ?: "", it.rt.key.server, it.info.name) })
-        val tools = ArrayList<CatalogTool>()
-        val newRoutes = HashMap<String, Route>()
-        for (k in known) {
-            val pluginName = k.rt.plugin.name ?: continue
-            val source = ToolSource(pluginName, k.rt.key.server, k.info.name)
-            if (k.rt.disabled || !policy.resolve(source).enabled) continue
-            val name = names.getValue(ToolId(pluginName, k.rt.key.server, k.info.name))
+        val names = ToolNaming.assign(known.map { ToolId(it.pluginName, it.rt.key.server, it.info.name) })
+        return known.map { k ->
+            val source = ToolSource(k.pluginName, k.rt.key.server, k.info.name)
+            val resolved = policy.resolve(source)
             val ann = k.info.annotations
             val declared: ToolRisk? = if (k.rt.plugin.builtin && ann?.readOnlyHint == true) ToolRisk.READ else null
-            val risk = RiskPolicy.effectiveRisk(declared, ToolAnnotations(ann?.readOnlyHint, ann?.destructiveHint))
-            tools += CatalogTool(
-                name = name,
-                description = (k.info.description ?: k.info.title ?: "").take(config.maxDescriptionChars),
-                inputSchema = k.info.inputSchema,
-                risk = risk,
-                provider = k.rt.key.pluginId,
-                title = k.info.title?.take(config.maxTitleChars),
-                source = source,
+            Entry(
+                rt = k.rt, pluginName = k.pluginName, info = k.info, name = names.getValue(ToolId(k.pluginName, k.rt.key.server, k.info.name)), source = source,
+                risk = RiskPolicy.effectiveRisk(declared, ToolAnnotations(ann?.readOnlyHint, ann?.destructiveHint)),
+                enabled = !k.disabled && resolved.enabled, approval = resolved.approval,
             )
-            newRoutes[name] = Route(k.rt.key, pluginName, k.info.name)
+        }
+    }
+
+    private fun rebuildCatalog() {
+        val tools = ArrayList<CatalogTool>()
+        val newRoutes = HashMap<String, Route>()
+        for (e in knownEntries(approvals.policy.value)) {
+            if (!e.enabled) continue
+            tools += CatalogTool(
+                name = e.name,
+                description = (e.info.description ?: e.info.title ?: "").take(config.maxDescriptionChars),
+                inputSchema = e.info.inputSchema,
+                risk = e.risk,
+                provider = e.rt.key.pluginId,
+                title = e.info.title?.take(config.maxTitleChars),
+                source = e.source,
+            )
+            newRoutes[e.name] = Route(e.rt.key, e.pluginName, e.info.name)
         }
         tools.sortBy { it.name }
         synchronized(lock) {

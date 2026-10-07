@@ -20,6 +20,8 @@ import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.CatalogTool
 import org.agentos.runtime.ports.ContentPart
+import org.agentos.runtime.ports.SkillCatalog
+import org.agentos.runtime.ports.SkillSummary
 import org.agentos.runtime.ports.ToolCatalog
 import org.agentos.runtime.ports.ToolInvocation
 import org.agentos.runtime.ports.ToolInvocationResult
@@ -56,15 +58,20 @@ object ExtWire {
     }
 
     /** getCatalog 的返回值。[failClosed]：策略文件坏了又没有可用的副本，第三方插件一律当作禁用（toJson 不带这个状态）。 */
-    fun catalogJson(version: Long, catalog: ToolCatalog, policy: ApprovalPolicy): String = buildJsonObject {
+    fun catalogJson(version: Long, catalog: ToolCatalog, policy: ApprovalPolicy, skills: SkillCatalog = SkillCatalog.EMPTY): String = buildJsonObject {
         put("version", version)
         put("tools", buildJsonArray { catalog.tools.forEach { add(toolJson(it, policy)) } })
+        put("skills", buildJsonArray {
+            skills.skills.forEach { s ->
+                add(buildJsonObject { put("id", s.id); put("name", s.name); put("description", s.description); put("provider", s.provider) })
+            }
+        })
         put("policy", policy.toJsonObject())
         put("policyFailClosed", !policy.unlistedPluginsEnabled)
     }.toString()
 
     /** :agent 侧解析 getCatalog 的结果。 */
-    class DecodedCatalog(val version: Long, val tools: List<CatalogTool>, val policy: ApprovalPolicy)
+    class DecodedCatalog(val version: Long, val tools: List<CatalogTool>, val policy: ApprovalPolicy, val skills: List<SkillSummary>)
 
     fun decodeCatalog(text: String): DecodedCatalog {
         val root = json.parseToJsonElement(text) as JsonObject
@@ -72,7 +79,11 @@ object ExtWire {
         val policy = ApprovalPolicy.fromJsonObject(root["policy"] as JsonObject).copy(unlistedPluginsEnabled = !failClosed)
         val tools = (root["tools"] as? JsonArray).orEmpty().mapNotNull { decodeTool(it as? JsonObject ?: return@mapNotNull null) }
         // 目录里不能有重名（ToolCatalog 的要求）；:ext 已经保证，这里只是不让一条坏数据拖垮整个目录
-        return DecodedCatalog(root.long("version") ?: 0, tools.distinctBy { it.name }, policy)
+        val skills = (root["skills"] as? JsonArray).orEmpty().mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            SkillSummary(o.str("id") ?: return@mapNotNull null, o.str("name") ?: "", o.str("description") ?: "", o.str("provider") ?: "")
+        }.distinctBy { it.id }
+        return DecodedCatalog(root.long("version") ?: 0, tools.distinctBy { it.name }, policy, skills)
     }
 
     private fun decodeTool(o: JsonObject): CatalogTool? {

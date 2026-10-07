@@ -18,6 +18,16 @@
             android:process=":agent" />
 
         <!--
+          lane D（D5.1）：Jev（自动选会话）的测试入口：用 adb 把 KeyDropProvider 投递的 key 和 endpoint 写进 Keystore。
+          要求 DUMP 权限；运行在 :agent（JevSources 在那里）。
+        -->
+        <receiver
+            android:name=".agent.JevDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":agent" />
+
+        <!--
           lane C（C7b）：Extension Host 的测试入口（tests/device/mcp-plugin 用它发现、启停插件、调用工具、取消、等目录变化）。
           要求 DUMP 权限；跑在主进程，经 IExtensionHost 访问 :ext（与插件管理页相同的路径）。
         -->

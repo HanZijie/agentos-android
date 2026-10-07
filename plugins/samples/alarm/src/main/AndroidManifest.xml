@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 闹钟类 App 可用：精确闹钟（setAlarmClock），安装即授予，不需要用户去设置里开 -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- 响铃时的全屏通知（锁屏上直接弹出响铃页） -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 响铃用前台服务（播放铃声）；开机后重新登记闹钟 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application
+        android:name=".AlarmApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Alarm">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 响铃全屏页：锁屏上可见、点亮屏幕；单独的任务栈，不进最近任务 -->
+        <activity
+            android:name=".ui.RingActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Alarm.Ring"
+            android:turnScreenOn="true" />
+
+        <service
+            android:name=".ring.AlarmRingService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!--
+          Binder MCP 服务（docs/extensions.md 4.1）：AgentOS 用 queryIntentServices(PLUGIN) 发现它，
+          读 assets/agent-plugin/ 里的插件包；只有持有 BIND_MCP_SERVICE（signature，AgentOS 独有）的调用方才能 bind。
+        -->
+        <service
+            android:name=".agent.AlarmMcpService"
+            android:exported="true"
+            android:permission="org.agentos.permission.BIND_MCP_SERVICE">
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.PLUGIN" />
+            </intent-filter>
+            <meta-data
+                android:name="org.agentos.plugin.assets"
+                android:value="agent-plugin" />
+        </service>
+
+        <receiver
+            android:name=".ring.AlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".ring.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>

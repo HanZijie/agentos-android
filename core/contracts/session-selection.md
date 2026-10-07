@@ -45,7 +45,7 @@
 
 - 返回 `answers.session.choice`。运行时只接受这次请求里出现过的 choiceId。
 - key 由 `HostPort.secrets.credentialFor(endpoint)` 提供，放在 `Authorization: Bearer` 头里；不写进请求体、日志、事件和 Store。
-- 默认 endpoint `https://omnilabs.vibeadmin.cn/v1/systemone`，模型 `jev-1.13.0`，HTTP 超时 1.5 秒，路由等待上限 2 秒（`JevConfig`、`RouterConfig`）。
+- 默认 endpoint `https://api.typesafe.ai/v1/systemone`（2026-10-07 实测：原默认 `omnilabs.vibeadmin.cn` 对现有 key 返回 401，`api.typesafe.ai` 返回 200，约 0.8 秒），模型 `jev-1.13.0`，HTTP 超时 3 秒，路由等待上限 3.5 秒（`JevConfig`、`RouterConfig`）；endpoint 可配置，Jev key 在 Keystore 里按 Jev endpoint 绑定，不会交给模型 endpoint。
 
 ## 4. 结果、回退与事件
 
