@@ -2,37 +2,41 @@
 """
 Sample-apps acceptance (A12): can AgentOS operate the alarm, calendar and notes apps completely through MCP? Repeatable, with evidence.
 
-adb only, no taps. Needs the AgentOS **debug** build and the three sample apps' **debug** builds on the device (the app databases are read
-with `run-as`), `adb` and `node` (acp-bridge) on the computer. Do not run it on a phone you cannot afford to touch: it creates and removes
-alarms / events / notes that carry the marker `e2e-<run id>`, and leaves other data alone (it still asserts nothing else changed in the steps
-that must not write).
+adb only, no taps. Needs the AgentOS **debug** build and the three sample apps' **debug** builds on the device, `adb` and `node` (acp-bridge)
+on the computer. The state of each app is read through the app's own debug `dump` receiver (a real phone has no sqlite3), see sample_apps_lib.py.
+
+**It resets the three sample apps before and after the run** (`--es cmd reset`: every alarm, note and calendar event in them is removed and the
+alarms are cancelled in the system): run it on a test phone. `--no-reset` keeps what is there and only removes what this run created
+(marker `e2e-<run id>`).
 
     ./gradlew :app:assembleDebug :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug \\
               :tests:device:acp-channel:client:assembleDebug
     python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL                # scripted, deterministic (fake model)
     set -a; . ../.secrets/minimax.env; set +a
-    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live         # natural language, real MiniMax
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live         # natural language, real MiniMax-M3
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live --tunnel  # phone without internet (see live_tunnel.py)
 
 Flow (every part writes its checks into the result JSON, `results/raw/sample-apps-*.json`; exit code 0 when all checks pass):
   1. install (unless --no-install), start each sample app once, grant AgentOS what it needs, battery-optimisation exemption for AgentOS while it
-     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入"); the phone's model source is the fake model
-     endpoint (scripted) or the real MiniMax (--live; the key goes in through stdin and is removed afterwards).
-  2. `ExtensionDebugReceiver list`: the three plugins are discovered and off by default (--allow-enabled skips the "off" check for reruns).
-  3. `enable` each, `catalog`: all documented tools are offered under their final names (`mcp__alarm__alarm__alarm_create`...), risk level as
+     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入").
+  2. desktop access on from the foreground UI (inapp `desktop-access`: it runs `ensureTestModel` and puts the loopback fake model endpoint on
+     the phone), THEN the model: the fake endpoint (scripted) or, with --live, the real MiniMax preset minimax-cn / MiniMax-M3 (key through stdin,
+     removed afterwards). `setup.model` reads DesktopGatewayDebugReceiver `status` and checks the model source before anything is asked.
+  3. reset of the three apps; `ExtensionDebugReceiver list`: the three plugins are discovered and off by default (--allow-enabled skips the "off" check).
+  4. `enable` each, `catalog`: all documented tools are offered under their final names (`mcp__alarm__alarm__alarm_create`...), risk level as
      RiskPolicy gives it for third-party MCP tools: WRITE, and HIGH for `*_delete` (destructiveHint).
-  4. desktop access on, pair, `ConsentDebugReceiver mode=allow`, ACP session through acp-bridge.
-  5. scripted: one fake-model script per step (deterministic CRUD of each app, failure paths: missing parameter, unknown id, declined
-     confirmation, plugin switched off); after each step the app's own database is compared with what the step must have done.
-     live: three natural-language prompts, the same database check, plus the tool sequence the model really chose and the times.
-  6. clean up what this run created (also after a failed run), consent mode off, plugins off, desktop access off, exemption restored.
+  5. pair, `ConsentDebugReceiver mode=allow`, ACP session through acp-bridge.
+  6. scripted: one fake-model script per step (deterministic CRUD of each app, failure paths: missing parameter, unknown id, declined
+     confirmation in a new session, plugin switched off); after each step the app's dump is compared with what the step must have done (alarms:
+     also that they are really registered with AlarmManager). live: three natural-language prompts; the verdict is the app state, not a fixed
+     tool sequence (the model may look first), the sequence and the times are recorded.
+  7. reset (or the marker cleanup), consent mode off, plugins off, desktop access off, exemption restored, live model removed.
 
-Debug receivers of AgentOS that this script talks to (C7b / D5.2): see sample_apps_lib.py (shapes assumed there). AGENTOS_EXT_RECEIVER and
-AGENTOS_CONSENT_RECEIVER override the component names.
+AGENTOS_EXT_RECEIVER and AGENTOS_CONSENT_RECEIVER override the component names of the AgentOS debug receivers; LIVE_MODEL the live model id.
 """
 import argparse
 import json
 import os
-import re
 import sys
 import tempfile
 import time
@@ -47,9 +51,10 @@ TEST_MODEL_KEY = "agtest-fake-model-key"
 
 
 class Options:
-    def __init__(self, live=False, only=None, allow_enabled=False, keep_data=False, step_timeout=90, live_timeout=240):
-        self.live, self.only, self.allow_enabled, self.keep_data = live, only, allow_enabled, keep_data
-        self.step_timeout, self.live_timeout = step_timeout, live_timeout
+    def __init__(self, live=False, tunnel=False, only=None, allow_enabled=False, keep_data=False, reset=True, tell_date=False,
+                 step_timeout=90, live_timeout=240):
+        self.live, self.tunnel, self.only, self.allow_enabled, self.keep_data = live, tunnel, only, allow_enabled, keep_data
+        self.reset, self.tell_date, self.step_timeout, self.live_timeout = reset, tell_date, step_timeout, live_timeout
 
 
 def log_line(m):
@@ -71,8 +76,12 @@ def run_acceptance(env, opts, log=log_line):
 
     try:
         env.prepare_device(opts)
-        env.ensure_model(opts.live)
-        ctx = L.Context(env.adb, env.ext, env.consent, None, today, offset, run_id, log=log)
+        env.open_desktop(opts)      # first: its scenario puts the loopback fake model endpoint on the phone
+        env.ensure_model(opts)      # then the model (the real one last)
+        ctx = L.Context(env.adb, env.ext, env.consent, None, today, offset, run_id, log=log, gateway=env.gateway)
+        record(S.run_check_step("setup.model", "the phone's model source is the intended one", S.setup_model(opts.live, opts.tunnel), ctx))
+        if opts.reset:
+            record(S.run_check_step("setup.reset", "the three apps start empty (debug reset)", S.setup_reset, ctx))
         record(S.run_check_step("setup.discover", "three plugins are discovered" + ("" if opts.allow_enabled else " and off by default"), S.setup_discover(opts.allow_enabled), ctx))
         record(S.run_check_step("setup.enable", "enable the three plugins", S.setup_enable, ctx))
         record(S.run_check_step("setup.catalog", "catalog: documented tools, final names, risk levels", S.setup_catalog, ctx))
@@ -80,7 +89,7 @@ def run_acceptance(env, opts, log=log_line):
         ctx.session = session
         record(S.run_check_step("setup.consent", "auto-consent allow", S.setup_consent_allow, ctx))
         if all(s["ok"] for s in steps):
-            plan = S.live_cases(ctx) if opts.live else S.scripted_steps(ctx)
+            plan = S.live_cases(ctx, opts.tell_date) if opts.live else S.scripted_steps(ctx)
             for item in plan:
                 if opts.only and item_sample(item) not in opts.only:
                     continue
@@ -100,10 +109,13 @@ def run_acceptance(env, opts, log=log_line):
         steps.append({"id": "driver", "sample": None, "title": "driver", "ok": False, "ms": 0, "error": "%s: %s" % (type(e).__name__, e), "checks": [], "turn": None})
     leftovers = None
     try:
-        if ctx is not None and session is not None and not opts.keep_data:
-            leftovers = S.cleanup(ctx)
-            if leftovers:
-                notes.append("cleaned up leftovers: %s" % json.dumps(leftovers))
+        if ctx is not None and not opts.keep_data:
+            if opts.reset:
+                record(S.run_check_step("teardown.reset", "the three apps are left empty (debug reset)", S.setup_reset, ctx))
+            elif session is not None:
+                leftovers = S.cleanup(ctx)
+                if leftovers:
+                    notes.append("cleaned up leftovers: %s" % json.dumps(leftovers))
     except Exception as e:  # noqa: BLE001
         notes.append("cleanup failed: %s: %s (look for data marked e2e-%s)" % (type(e).__name__, e, run_id))
     finally:
@@ -143,10 +155,12 @@ class RealEnv:
         self.consent = L.ConsentDebug(self.adb)
         self.gateway = L.GatewayDebug(self.adb)
         self.fake = None
+        self.tunnel = None
         self.bridge = None
         self.state_dir = tempfile.TemporaryDirectory(prefix="e2e-bridge-")
         self.had_exemption = False
         self.live_key = None
+        self.tunnel_requests = None
 
     # ---- device
     def prepare_device(self, opts):
@@ -167,17 +181,35 @@ class RealEnv:
         adb.sh("wm dismiss-keyguard", check=False)
         adb.sh("am force-stop %s" % R.APP_PKG, check=False)
 
-    def ensure_model(self, live):
+    def open_desktop(self, opts):
+        """Desktop access on, from the foreground UI path (inapp `desktop-access`, the path that is known to work). That scenario runs
+        `ensureTestModel` first: the loopback fake model endpoint is the phone's model source afterwards, so the model is configured after this."""
         R, adb = self.R, self.adb
-        if live:
+        R.run_one(adb.base, "e2e-off", R.INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
+        r = R.run_one(adb.base, "e2e-on", R.INAPP_ACTIVITY, "desktop-access", {"on": True}, 60)
+        if not (r and r.get("ok")):
+            raise L.DriverError("desktop access could not be switched on: %s" % (r and (r.get("summary") or r.get("error"))))
+        adb.sh("input keyevent KEYCODE_HOME", check=False)
+
+    def ensure_model(self, opts):
+        R, adb = self.R, self.adb
+        if opts.live:
             key = R.live_key()
             if not key:
                 raise L.DriverError("--live needs MINIMAX_API_KEY in the environment (it is delivered through stdin, never on a command line)")
             self.live_key = key
-            R.push_key(adb.base, "live_key", key)
-            r = R.run_one(adb.base, "e2e-live-model", R.INAPP_ACTIVITY, "live-model-set", {}, 60)
-            if not (r and r.get("ok")):
-                raise L.DriverError("could not set the live model source: %s" % (r and (r.get("summary") or r.get("error"))))
+            if opts.tunnel:
+                # no internet on the phone: the model source stays the loopback endpoint, a proxy on the computer adds the real key
+                import live_tunnel
+                self.tunnel = live_tunnel.MiniMaxTunnel(key).start()
+                adb.run("reverse", "tcp:%d" % self.fake_model_mod.DEVICE_PORT, "tcp:%d" % self.tunnel.port)
+                R.run_one(adb.base, "e2e-tunnel-model", R.INAPP_ACTIVITY, "handshake", {}, 60)  # sets the loopback source; its fake-echo check cannot pass behind a real model
+            else:
+                R.push_key(adb.base, "live_key", key)
+                model = os.environ.get("LIVE_MODEL", S.LIVE_MODEL_ID)
+                r = R.run_one(adb.base, "e2e-live-model", R.INAPP_ACTIVITY, "live-model-set", {"provider": "minimax-cn", "model": model}, 60)
+                if not (r and r.get("ok")):
+                    raise L.DriverError("could not set the live model source: %s" % (r and (r.get("summary") or r.get("error"))))
         else:
             self.fake = R.start_fake_model(adb.base, {TEST_MODEL_KEY: "test"})
             r = R.run_one(adb.base, "e2e-model", R.INAPP_ACTIVITY, "handshake", {}, 60)  # also sets the model source to the fake endpoint
@@ -186,7 +218,6 @@ class RealEnv:
 
     def open_session(self):
         D = self.D
-        self.gateway.op("enable")
         paired = self.gateway.op("pair")
         code = paired.get("code")
         if not code:
@@ -205,16 +236,20 @@ class RealEnv:
                 fn()
             except Exception as e:  # noqa: BLE001
                 notes.append("%s failed: %s: %s" % (what, type(e).__name__, e))
-        if self.args.live:
+        if self.live_key and not self.tunnel:
             try:
                 r = R.run_one(self.adb.base, "e2e-live-clear", R.INAPP_ACTIVITY, "live-model-clear", {}, 60)
                 if not (r and r.get("ok")):
                     notes.append("the live model source was NOT cleared: %s" % (r and r.get("summary")))
             except Exception as e:  # noqa: BLE001
                 notes.append("live model clear failed: %s: %s" % (type(e).__name__, e))
-        if self.fake is not None:
+        if self.fake is not None or self.tunnel is not None:
             self.adb.run("reverse", "--remove", "tcp:%d" % self.fake_model_mod.DEVICE_PORT, check=False)
+        if self.fake is not None:
             self.fake.stop()
+        if self.tunnel is not None:
+            self.tunnel_requests = self.tunnel.requests()
+            self.tunnel.stop()
         if not self.had_exemption:
             self.adb.sh("cmd deviceidle whitelist -%s" % R.APP_PKG, check=False)
         self.state_dir.cleanup()
@@ -255,21 +290,31 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--serial", default=os.environ.get("ANDROID_SERIAL"))
     ap.add_argument("--live", action="store_true", help="natural-language prompts to the real MiniMax (key from MINIMAX_API_KEY, delivered through stdin)")
+    ap.add_argument("--tunnel", action="store_true", help="with --live, for a phone without internet: the real key stays on the computer (live_tunnel.py)")
+    ap.add_argument("--tell-date", action="store_true", help="with --live, start each prompt with today's date (otherwise the model has to find it out itself, agenda_today)")
     ap.add_argument("--only", help="comma separated: alarm,calendar,notes")
     ap.add_argument("--no-install", action="store_true")
     ap.add_argument("--allow-enabled", action="store_true", help="do not require the plugins to be off at the start (rerun after an aborted run)")
-    ap.add_argument("--keep-data", action="store_true", help="do not remove what the run created")
+    ap.add_argument("--no-reset", action="store_true", help="do not reset the three apps before and after; only remove what this run created")
+    ap.add_argument("--keep-data", action="store_true", help="do not remove anything afterwards (no final reset, no cleanup)")
     ap.add_argument("--label", default="")
     a = ap.parse_args()
     if not a.serial:
         sys.exit("need --serial or ANDROID_SERIAL")
+    if a.tunnel and not a.live:
+        sys.exit("--tunnel only makes sense with --live")
     import run as R
     adb = R.Adb(a.serial)
     device = device_info(adb)
     print(json.dumps(device, ensure_ascii=False), flush=True)
+    if not a.no_reset:
+        print("note: the alarm, calendar and notes apps on this phone are reset before and after the run (--no-reset keeps them)", flush=True)
     env = RealEnv(adb, a)
-    opts = Options(live=a.live, only=set(a.only.split(",")) if a.only else None, allow_enabled=a.allow_enabled, keep_data=a.keep_data)
+    opts = Options(live=a.live, tunnel=a.tunnel, only=set(a.only.split(",")) if a.only else None, allow_enabled=a.allow_enabled,
+                   keep_data=a.keep_data, reset=not a.no_reset, tell_date=a.tell_date)
     report = run_acceptance(env, opts)
+    if env.tunnel_requests is not None:
+        report["tunnelRequests"] = env.tunnel_requests
     if a.live:
         leak = env.leak_scan(report)
         report["leakScan"] = leak

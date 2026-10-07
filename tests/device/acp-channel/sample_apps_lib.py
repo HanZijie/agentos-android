@@ -2,15 +2,23 @@
 
 Goal of the acceptance: the alarm, calendar and notes apps (plugins/samples/*) can be driven completely by AgentOS through MCP, with
 evidence. Everything here goes through adb only (no taps): debug broadcast receivers of AgentOS, the acp-bridge for the conversation,
-and a **direct read of each app's SQLite file** for the ground truth.
+and the **apps' own debug dump / reset receivers** for the ground truth (a real phone has no `sqlite3`, `run-as <pkg> sqlite3` fails there).
 
-Why the database and not the apps' own debug entries (checked against the three app worktrees, A12):
-  - alarm `DebugToolReceiver` and notes `DebugCallReceiver` call the *tool layer* and write one line to logcat (about 4 KB per line,
-    longer lines are cut): they would verify the tools with the tools, and lists get truncated;
-  - calendar `DebugReceiver` has only seed / clear / remind_test (no read command), `McpSelfTestReceiver` runs its own tool tour.
-  The apps are debug builds, so `run-as <pkg> cat databases/<db>` gives the real file (copied to the computer, read with sqlite3):
-  independent of the code under test, no size limit. The state readers are small classes with one method (`snapshot`), so an app
-  dump entry can replace them later.
+State sources (`adb shell am broadcast -n <package>/<receiver> --es cmd dump [--ei offset N --ei limit M]`, result in the broadcast's result data,
+paged with `next_offset`, null = last page; `--es cmd reset` clears the app):
+  alarm    org.agentos.sample.alarm/.debug.DebugToolReceiver
+           dump  -> {"total","offset","limit","next_offset","alarms":[{id,time,label,days,repeat,enabled,vibrate,snooze_minutes,snoozed_until,next_fire_at,ringing}],
+                     "scheduled":[{id,fire_at,registered}],"system":{next_alarm_clock,now,time_zone}}
+                    `scheduled[].registered` is measured against AlarmManager (PendingIntent FLAG_NO_CREATE): it proves the alarm is really set in the system
+           reset -> {"cleared":N,"remaining_registered":0}
+  notes    org.agentos.sample.notes/.debug.DebugCallReceiver
+           dump  -> {"notes":[{id,title,content,tags,color,pinned,archived,trashed,created_at,updated_at,trashed_at,...}] (all, incl. archived and trash),
+                     "tags":[{name,count}],"total","offset","count","next_offset"}
+           reset -> {"ok":true,"deleted":N}
+  calendar org.agentos.sample.calendar/.debug.DebugReceiver  (the dump is not on main yet: until it is, the state is read by copying `calendar.db` with
+           `run-as <pkg> cat` (no sqlite3 needed on the phone) and reading the copy on the computer; reset = the existing `--es cmd clear`).
+           Switch [CalendarState] to the dump when it lands: one class, one `snapshot` method.
+The state readers return plain dicts (the driver's own shape, below), so the scenarios do not depend on the apps' JSON names.
 
 The AgentOS debug receivers (main, app/src/debug; shapes checked against the code, A12 follow-up):
   ExtensionDebugReceiver  `--es op ... [--es id <plugin id or package name>] [--es name <tool>] [--ez absent true] [--el timeoutMs N]`
@@ -51,8 +59,13 @@ class DriverError(Exception):
 
 
 class Sample:
-    def __init__(self, name, package, db, tools):
-        self.name, self.package, self.db, self.tools = name, package, db, tools
+    def __init__(self, name, package, db, tools, receiver):
+        self.name, self.package, self.db, self.tools, self.receiver = name, package, db, tools, receiver
+
+    @property
+    def component(self):
+        """The app's debug receiver (dump / reset)."""
+        return "%s/%s" % (self.package, self.receiver)
 
     @property
     def apk_name(self):
@@ -65,12 +78,15 @@ class Sample:
 # docs/sample-apps.md section 4 (the minimum lists; the apps may offer more)
 SAMPLES = {
     "alarm": Sample("alarm", "org.agentos.sample.alarm", "alarms.db",
-                    ["alarm_list", "alarm_get", "alarm_create", "alarm_update", "alarm_set_enabled", "alarm_delete", "alarm_next", "alarm_dismiss"]),
+                    ["alarm_list", "alarm_get", "alarm_create", "alarm_update", "alarm_set_enabled", "alarm_delete", "alarm_next", "alarm_dismiss"],
+                    ".debug.DebugToolReceiver"),
     "calendar": Sample("calendar", "org.agentos.sample.calendar", "calendar.db",
                        ["calendar_list", "calendar_create", "calendar_delete", "event_list", "event_get", "event_create", "event_update",
-                        "event_delete", "event_search", "agenda_today", "free_slots"]),
+                        "event_delete", "event_search", "agenda_today", "free_slots"],
+                       ".debug.DebugReceiver"),
     "notes": Sample("notes", "org.agentos.sample.notes", "notes.db",
-                    ["note_list", "note_get", "note_create", "note_update", "note_append", "note_search", "note_trash", "note_restore", "note_delete", "tag_list"]),
+                    ["note_list", "note_get", "note_create", "note_update", "note_append", "note_search", "note_trash", "note_restore", "note_delete", "tag_list"],
+                    ".debug.DebugCallReceiver"),
 }
 
 
@@ -116,12 +132,18 @@ class RealAdb:
         return p.stdout if p.returncode == 0 and p.stdout else None
 
 
+class LongExtra(int):
+    """An `am` extra the receiver reads with getLongExtra (--el). A plain int is an Int extra (--ei): Android does not convert between them."""
+
+
 def _extra(k, v):
-    """am extra with the type the receiver reads it as: bool -> --ez, int -> --el, everything else -> --es."""
+    """am extra with the type the receiver reads it as: bool -> --ez, LongExtra -> --el, int -> --ei, everything else -> --es."""
     if isinstance(v, bool):
         return "--ez %s %s" % (k, "true" if v else "false")
-    if isinstance(v, int):
+    if isinstance(v, LongExtra):
         return "--el %s %d" % (k, v)
+    if isinstance(v, int):
+        return "--ei %s %d" % (k, v)
     return "--es %s %s" % (k, shq(v))
 
 
@@ -184,7 +206,7 @@ class ExtensionDebug:
 
     def wait_tool(self, name, absent=False, timeout_ms=15000):
         """Wait (in the app, not by polling) until `name` is in the catalog / gone from it. -> bool (met)."""
-        data = self._op("wait_catalog", name=name, absent=True if absent else None, timeoutMs=int(timeout_ms))
+        data = self._op("wait_catalog", name=name, absent=True if absent else None, timeoutMs=LongExtra(timeout_ms))
         return bool(data.get("met"))
 
 
@@ -218,17 +240,85 @@ class GatewayDebug:
         return data
 
 
-# ---------------------------------------------------------------------- state readers (the app databases)
+# ---------------------------------------------------------------------- state readers (the apps' debug dump / reset)
 
 class StateReadError(DriverError):
     pass
 
 
 DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+DUMP_PAGE = 50          # rows per dump page (--ei limit); the notes dump also has its own character budget per page
+MAX_DUMP_PAGES = 400
+
+
+def dump_pages(adb, sample, key):
+    """All pages of `<app> --es cmd dump`: returns the first page with its `key` list replaced by the rows of all pages.
+    Follows `next_offset` (null = last page); a receiver that does not move forward is an error, not an endless loop."""
+    offset, first, rows, seen = 0, None, [], 0
+    while True:
+        code, data = broadcast(adb, sample.component, {"cmd": "dump", "offset": offset, "limit": DUMP_PAGE})
+        if code != 1 or "error" in data:
+            raise StateReadError("%s dump failed: %s" % (sample.name, json.dumps(data, ensure_ascii=False)[:300]))
+        if key not in data:
+            raise StateReadError("%s dump has no %r: %s" % (sample.name, key, json.dumps(data, ensure_ascii=False)[:200]))
+        first = first or data
+        rows += data[key]
+        nxt = data.get("next_offset")
+        if nxt is None:
+            break
+        seen += 1
+        if not isinstance(nxt, int) or nxt <= offset or seen > MAX_DUMP_PAGES:
+            raise StateReadError("%s dump does not advance (offset %s -> next_offset %r)" % (sample.name, offset, nxt))
+        offset = nxt
+    total = first.get("total")
+    if total is not None and total != len(rows):
+        raise StateReadError("%s dump: total=%s but %d rows were read (the data changed while paging?)" % (sample.name, total, len(rows)))
+    return dict(first, **{key: rows})
+
+
+class AlarmState:
+    """Alarms from the app's dump: `alarms` (stable fields only, so that "unchanged" comparisons do not trip over clocks),
+    `scheduled` ({id: {fire_at, registered}}, measured against AlarmManager) and `system` (the phone's own next alarm; evidence only)."""
+    sample = SAMPLES["alarm"]
+
+    def __init__(self, adb):
+        self.adb = adb
+
+    def snapshot(self):
+        d = dump_pages(self.adb, self.sample, "alarms")
+        return {"alarms": [{"id": str(a["id"]), "time": a["time"], "label": a.get("label") or "", "days": list(a.get("days") or []),
+                            "enabled": bool(a["enabled"]), "snooze_minutes": a.get("snooze_minutes")} for a in d["alarms"]],
+                "scheduled": {str(x["id"]): {"fire_at": x.get("fire_at"), "registered": bool(x.get("registered"))} for x in d.get("scheduled") or []},
+                "system": d.get("system") or {}}
+
+    def reset(self):
+        code, data = broadcast(self.adb, self.sample.component, {"cmd": "reset"})
+        return code == 1 and data.get("remaining_registered") == 0, data
+
+
+class NotesState:
+    sample = SAMPLES["notes"]
+
+    def __init__(self, adb):
+        self.adb = adb
+
+    @staticmethod
+    def status(n):
+        return "trashed" if n.get("trashed") else "archived" if n.get("archived") else "active"
+
+    def snapshot(self):
+        d = dump_pages(self.adb, self.sample, "notes")
+        return {"notes": [{"id": n["id"], "title": n.get("title"), "content": n.get("content") or "", "tags": list(n.get("tags") or []),
+                           "color": n.get("color"), "pinned": bool(n.get("pinned")), "status": self.status(n)} for n in d["notes"]],
+                "tags": d.get("tags") or []}
+
+    def reset(self):
+        code, data = broadcast(self.adb, self.sample.component, {"cmd": "reset"})
+        return code == 1 and data.get("ok") is True, data
 
 
 def _open_copy(adb, sample):
-    """Copy databases/<db> (and -wal / -shm when there are any) to a temp dir and open the copy; the caller closes via [_Db]."""
+    """Calendar only (until its dump lands): copy databases/<db> (and -wal / -shm when there are any) to a temp dir and open the copy."""
     tmp = tempfile.mkdtemp(prefix="e2e-db-")
     main = adb.pull_private(sample.package, "databases/" + sample.db)
     if not main:
@@ -255,10 +345,14 @@ class _Db:
         return self.conn
 
     def __exit__(self, *exc):
-        self.conn.close()
-        for n in os.listdir(self.tmp):
-            os.remove(os.path.join(self.tmp, n))
-        os.rmdir(self.tmp)
+        conn = getattr(self, "conn", None)
+        if conn is not None:
+            conn.close()
+        tmp = getattr(self, "tmp", None)
+        if tmp:
+            for n in os.listdir(tmp):
+                os.remove(os.path.join(tmp, n))
+            os.rmdir(tmp)
 
 
 def _ints(text):
@@ -271,35 +365,9 @@ def _ints(text):
     return [int(x) for x in t.split(",") if x.strip()]
 
 
-class AlarmState:
-    sample = SAMPLES["alarm"]
-
-    def __init__(self, adb):
-        self.adb = adb
-
-    def snapshot(self):
-        with _Db(self.adb, self.sample) as c:
-            rows = c.execute("SELECT id, hour, minute, label, days, enabled, snooze_minutes FROM alarms ORDER BY id").fetchall()
-        return {"alarms": [{"id": str(r["id"]), "time": "%02d:%02d" % (r["hour"], r["minute"]), "label": r["label"] or "",
-                            "days": [DAY_CODES[i] for i in range(7) if r["days"] & (1 << i)], "enabled": bool(r["enabled"]),
-                            "snooze_minutes": r["snooze_minutes"]} for r in rows]}
-
-
-class NotesState:
-    sample = SAMPLES["notes"]
-    STATUS = {0: "active", 1: "archived", 2: "trashed"}
-
-    def __init__(self, adb):
-        self.adb = adb
-
-    def snapshot(self):
-        with _Db(self.adb, self.sample) as c:
-            rows = c.execute("SELECT id, title, content, tags, color, pinned, status FROM notes").fetchall()
-        return {"notes": [{"id": r["id"], "title": r["title"], "content": r["content"], "tags": json.loads(r["tags"] or "[]"),
-                           "color": r["color"], "pinned": bool(r["pinned"]), "status": self.STATUS.get(r["status"], str(r["status"]))} for r in rows]}
-
-
 class CalendarState:
+    """Calendar: database copy for now (see the module docstring); reset = the app's `cmd clear` (its result goes to logcat only, so the
+    outcome is read back from the state: no events and only the default calendar)."""
     sample = SAMPLES["calendar"]
 
     def __init__(self, adb):
@@ -313,6 +381,35 @@ class CalendarState:
                 "events": [{"id": r["id"], "calendar_id": r["calendar_id"], "title": r["title"], "description": r["description"], "location": r["location"],
                             "all_day": bool(r["all_day"]), "start_utc": r["start_utc"], "end_utc": r["end_utc"], "tz": r["tz"],
                             "reminders": _ints(r["reminders"]), "recurrence": r["recurrence"], "recurrence_until": r["recurrence_until"]} for r in evs]}
+
+    def reset(self):
+        out = self.adb.sh("am broadcast -f 32 -n %s --es cmd clear" % self.sample.component, check=False, timeout=60)
+        # the app clears on a worker thread: wait until the state shows it (the clear has no result data to wait for)
+        deadline = time.time() + 15 * SLEEP_SCALE
+        snap = None
+        while time.time() < deadline:
+            snap = self.snapshot()
+            if not snap["events"] and all(c["is_default"] for c in snap["calendars"]):
+                return True, {"cleared": True, "calendars": len(snap["calendars"])}
+            time.sleep(0.5 * SLEEP_SCALE)
+        return False, {"cleared": False, "events": len(snap["events"]), "calendars": len(snap["calendars"]), "broadcast": out.strip()[:120]}
+
+
+SLEEP_SCALE = 1.0  # unit tests shrink the waits
+
+
+def reset_apps(adb, only=None):
+    """Clear the three sample apps (debug builds only): [{app, ok, detail}]. Used before and after a run (everything in the apps is removed)."""
+    out = []
+    for name, cls in STATE_READERS.items():
+        if only and name not in only:
+            continue
+        try:
+            ok, detail = cls(adb).reset()
+        except DriverError as e:
+            ok, detail = False, {"error": str(e)}
+        out.append({"app": name, "ok": bool(ok), "detail": detail})
+    return out
 
 
 STATE_READERS = {"alarm": AlarmState, "calendar": CalendarState, "notes": NotesState}
@@ -475,8 +572,8 @@ class Step:
 class Context:
     """Everything a step needs: the device pieces, the variables captured by earlier steps, the dates."""
 
-    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print):
-        self.adb, self.ext, self.consent, self.session = adb, ext, consent, session
+    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print, gateway=None):
+        self.adb, self.ext, self.consent, self.session, self.gateway = adb, ext, consent, session, gateway
         self.today, self.tz_offset, self.run_id, self.log = today, tz_offset, run_id, log
         self.vars = {}
         self.consent_seen = set()   # requestIds already in ConsentDebugReceiver `recent` before this run asked anything
@@ -484,6 +581,12 @@ class Context:
 
     def state(self, sample):
         return self.states[sample].snapshot()
+
+    def model_status(self):
+        """DesktopGatewayDebugReceiver `status`: modelUsable / modelBaseUrl / modelId of the phone's model source (no key in it)."""
+        if self.gateway is None:
+            raise DriverError("no gateway debug access in this context")
+        return self.gateway.op("status")
 
     def mark_consent_baseline(self):
         self.consent_seen = {e.get("requestId") for e in self.consent.recent()}
