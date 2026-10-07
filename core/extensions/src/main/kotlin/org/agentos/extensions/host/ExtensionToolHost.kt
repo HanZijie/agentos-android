@@ -206,6 +206,11 @@ class ExtensionToolHost(
         return RefreshResult(refreshed, failed, timedOut = !done)
     }
 
+    /** [ToolPort.prepare]：任务开始前等没有缓存的服务器刷新完（[refreshNow]，不强制）。 */
+    override suspend fun prepare(timeoutMillis: Long) {
+        refreshNow(timeoutMillis)
+    }
+
     /** 处理注册表事件：[RegistryEvent.Revoke] 立即关闭该插件的连接、丢弃缓存、把它的工具从目录移除。其他事件不需要处理（注册表本身会变）。 */
     fun onRegistryEvent(event: RegistryEvent) {
         if (event !is RegistryEvent.Revoke) return

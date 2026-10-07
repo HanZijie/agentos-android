@@ -21,10 +21,16 @@ data class SchedulerConfig(
     /** events.md 6.3：文字增量的合并窗口与上限。 */
     val coalesceWindowMillis: Long = 32,
     val coalesceMaxChars: Int = 8_192,
-    /** 交给 Pi 的基础 system prompt（W20 起追加 Skill 目录）。 */
+    /** 交给 Pi 的基础 system prompt；Skill 目录由 Scheduler 在每个任务开始时追加（`SkillPrompt`）。 */
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     /** architecture 4.1：工具轮次上限。 */
     val maxToolRounds: Int = 12,
+    /** 任务开始前等 `ToolPort.prepare`（Extension Host 刷新工具目录）的上限；0 表示不等。 */
+    val toolPrepareTimeoutMillis: Long = 2_000,
+    /** 系统提示里 Skill 目录那一段的总长度上限（字符）；超出的 Skill 按目录顺序截断，不写进提示（`SkillPrompt.render` 报告哪些被截断）。 */
+    val skillPromptMaxChars: Int = 4_000,
+    /** 系统提示里每个 Skill 的描述长度上限（字符）。 */
+    val skillPromptDescriptionChars: Int = 240,
     /**
      * architecture F8 的过渡期限（W10 之后保留作兜底）：需要恢复满这么久的任务，在运行时启动时按放弃结束
      * （`task.recovery_resolved { reason: recovery_expired }` → `task.failed`）。0 表示不限。
@@ -37,6 +43,7 @@ data class SchedulerConfig(
         require(maxRunningSessions >= 1 && maxRunningPerOwner >= 1 && maxQueuedPerSession >= 1)
         require(cancelGraceMillis > 0 && tickMillis > 0 && coalesceWindowMillis in 1..1_000 && coalesceMaxChars > 0)
         require(recoveryExpiryMillis >= 0 && maxRecoveryPending >= 0)
+        require(toolPrepareTimeoutMillis >= 0 && skillPromptMaxChars >= 0 && skillPromptDescriptionChars >= 1)
     }
 
     companion object {

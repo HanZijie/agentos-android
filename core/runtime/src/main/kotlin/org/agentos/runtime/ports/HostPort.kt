@@ -75,6 +75,15 @@ interface ToolPort {
      */
     suspend fun invoke(invocation: ToolInvocation): ToolInvocationResult
 
+    /**
+     * **任务开始前的准备**：Scheduler 在为这个任务构造 Agent 的工具目录和系统提示之前调用一次，最多等 [timeoutMillis]
+     * （`SchedulerConfig.toolPrepareTimeoutMillis`，默认 2 秒）。Extension Host 借此保证模型看到的目录不是空的：
+     * 等“还没有缓存”的 MCP 服务器取完工具列表（刚启用、刚开机）。默认什么都不做。
+     *
+     * 实现必须在 [timeoutMillis] 内返回（Scheduler 也会用同样的时限强制取消）；抛异常只会被记录，任务照常开始。
+     */
+    suspend fun prepare(timeoutMillis: Long) {}
+
     companion object {
         /** 没有任何工具（M1）。 */
         val NONE: ToolPort = object : ToolPort {
