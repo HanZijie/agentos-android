@@ -413,7 +413,7 @@ class CallerRegistry(
 
     /**
      * 一个 prompt 完成（A 的 CallerQuota 每次完成回调一次）：计数、最近使用时间。
-     * 调用方身份里只有包名（`CallerIdentity.label`），签名摘要取注册表里现在的那条；状态不是 ALLOWED 时忽略
+     * 调用方身份里的包名（`CallerIdentity.packageName`），签名摘要取注册表里现在的那条；状态不是 ALLOWED 时忽略
      * （撤销后旧通道上的 prompt 不会算到新的记录上）。
      */
     fun recordPromptOf(packageName: String) {

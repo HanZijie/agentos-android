@@ -198,8 +198,8 @@ class Adb:
         return self.sh(f"getprop {name}").strip()
 
 
-def collect_result(adb, run_id, timeout, want_phase=None):
-    """轮询 logcat 里的 ACPTEST 分片，拼回完整 JSON。"""
+def collect_result(adb, run_id, timeout, want_phase=None, not_phase=None):
+    """轮询 logcat 里的 ACPTEST 分片，拼回完整 JSON。want_phase：只要这个阶段；not_phase：跳过这个阶段（等最终结果时跳过 "ready"）。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         out = adb.run("logcat", "-d", "-v", "raw", "-s", f"{RESULT_TAG}:I", check=False, timeout=30)
@@ -218,7 +218,7 @@ def collect_result(adb, run_id, timeout, want_phase=None):
             parts[i] = data
         if total and len(parts) == total:
             obj = json.loads("".join(parts[i] for i in range(1, total + 1)))
-            if want_phase is None or obj.get("phase") == want_phase:
+            if (want_phase is None or obj.get("phase") == want_phase) and (not_phase is None or obj.get("phase") != not_phase):
                 return obj
         time.sleep(1)
     return None
