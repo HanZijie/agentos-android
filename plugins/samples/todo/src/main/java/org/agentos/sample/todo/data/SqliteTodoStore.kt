@@ -79,6 +79,7 @@ class SqliteTodoStore(context: Context, name: String? = DB_NAME) : TodoStore {
         }
     }
 
+    @Suppress("Recycle") // Cursor 由 use 关闭
     override fun count(): Int =
         helper.readableDatabase.rawQuery("SELECT COUNT(*) FROM $TABLE", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
 

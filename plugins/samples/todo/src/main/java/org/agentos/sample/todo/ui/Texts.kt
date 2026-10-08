@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import java.time.ZoneId
 import java.util.Locale
@@ -24,15 +25,16 @@ class ResourceDueTexts(private val resources: Resources) : DueTexts {
 @Composable
 fun rememberDueFormatter(): DueFormatter {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val configuration = LocalConfiguration.current
     val locale: Locale = configuration.locales[0]
     val is24 = DateFormat.is24HourFormat(context)
-    return remember(locale, is24, configuration) {
+    return remember(locale, is24, configuration, resources) {
         DueFormatter(
             locale = locale,
             zone = ZoneId.systemDefault(),
             is24Hour = is24,
-            texts = ResourceDueTexts(context.resources),
+            texts = ResourceDueTexts(resources),
             bestPattern = { skeleton -> DateFormat.getBestDateTimePattern(locale, skeleton) },
         )
     }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -31,7 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 import org.agentos.sample.todo.R
@@ -45,7 +46,7 @@ private const val EDIT = "edit:"
  */
 @Composable
 fun TodoRoot(vm: TodoViewModel, onLanguage: () -> Unit) {
-    val context = LocalContext.current
+    val resources = LocalResources.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var stack by rememberSaveable { mutableStateOf(ArrayList<String>()) }
@@ -63,22 +64,21 @@ fun TodoRoot(vm: TodoViewModel, onLanguage: () -> Unit) {
             // 每个提示条各自一个协程：新的来了就顶掉旧的
             scope.launch {
                 snackbar.currentSnackbarData?.dismiss()
-                val resources = context.resources
                 val message: String
-                var action: String? = context.getString(R.string.snack_undo)
+                var action: String? = resources.getString(R.string.snack_undo)
                 when (event) {
-                    is UndoEvent.Completed -> message = context.getString(R.string.snack_completed, event.before.title)
-                    is UndoEvent.Reopened -> message = context.getString(R.string.snack_reopened, event.before.title)
+                    is UndoEvent.Completed -> message = resources.getString(R.string.snack_completed, event.before.title)
+                    is UndoEvent.Reopened -> message = resources.getString(R.string.snack_reopened, event.before.title)
                     is UndoEvent.Deleted -> {
                         val subtasks = event.items.size - 1
                         message = if (subtasks > 0) {
                             resources.getQuantityString(R.plurals.snack_deleted_with_subtasks, subtasks, event.items.first().title, subtasks)
                         } else {
-                            context.getString(R.string.snack_deleted, event.items.first().title)
+                            resources.getString(R.string.snack_deleted, event.items.first().title)
                         }
                     }
                     UndoEvent.Failed -> {
-                        message = context.getString(R.string.snack_failed)
+                        message = resources.getString(R.string.snack_failed)
                         action = null
                     }
                 }
@@ -106,10 +106,10 @@ fun TodoRoot(vm: TodoViewModel, onLanguage: () -> Unit) {
                 )
             }
         },
-    ) { _ ->
+    ) { padding ->
         AnimatedContent(
             targetState = route,
-            modifier = Modifier.background(MaterialTheme.colorScheme.background),
+            modifier = Modifier.padding(padding).background(MaterialTheme.colorScheme.background),
             transitionSpec = {
                 if (depth > previousDepth.intValue) {
                     (slideInHorizontally(initialOffsetX = { it / 4 }) + fadeIn()) togetherWith (fadeOut() + slideOutHorizontally(targetOffsetX = { -it / 8 }))
