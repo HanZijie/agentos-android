@@ -16,6 +16,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.agentos.app.R
 import org.agentos.app.agent.consent.ConsentWire.Card
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.ui.Ui
 import org.agentos.runtime.consent.ConsentChoice
 import org.agentos.runtime.consent.ConsentSeverity
@@ -39,6 +41,7 @@ class ConsentDialog private constructor(
     private val onChoice: (ConsentChoice) -> Unit,
 ) {
     private val handler = Handler(Looper.getMainLooper())
+    private val strings: Strings = AndroidStrings(activity)
     private var dialog: AlertDialog? = null
     private lateinit var countdown: TextView
     private val buttons = ArrayList<Button>()
@@ -112,11 +115,11 @@ class ConsentDialog private constructor(
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
         column.addView(Ui.text(activity, 19f, R.color.ui_text, bold = true).apply {
-            text = card.title
+            text = strings.get(card.title)
             setPadding(0, dp(10), 0, dp(4))
         })
-        column.addView(line(ConsentLabels.initiator(card, appLabel), R.color.ui_text))
-        card.sourceLine?.let { column.addView(line(it, R.color.ui_text_secondary)) }
+        column.addView(line(ConsentLabels.initiator(card, appLabel, strings), R.color.ui_text))
+        card.sourceLine?.let { column.addView(line(strings.get(it), R.color.ui_text_secondary)) }
         ConsentLabels.queueNote(queueSize)?.let { column.addView(line(it, R.color.ui_text_secondary)) }
 
         if (card.argumentsPreview.isNotEmpty()) {

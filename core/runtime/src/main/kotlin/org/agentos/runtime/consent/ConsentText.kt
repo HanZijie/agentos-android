@@ -1,6 +1,8 @@
 package org.agentos.runtime.consent
 
 import org.agentos.runtime.broker.RiskPolicy
+import org.agentos.runtime.i18n.FrameChars
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.ConsentRequest
@@ -13,13 +15,14 @@ import org.agentos.runtime.ports.ToolRisk
  * - 去掉控制字符、不可见格式字符（Unicode 的 Cf：零宽字符、BOM，以及**双向文字控制符**：LRE/RLE/PDF/LRO/RLO、LRI/RLI/FSI/PDI、LRM/RLM、ALM），
  *   代理对不完整的字符、私用区字符；这些字符可以让文字显示的顺序和实际不同（“删除”显示成“允许”），或者让一行看起来像另一行；
  * - 各种空白（含 U+00A0、U+3000、U+2028、U+2029）统一成普通空格或换行；
- * - [singleLine]：折叠成**单行**（工具显示名、来源、发起者），并去掉「」『』（界面用它们把第三方文字框起来）；
+ * - [singleLine]：折叠成**单行**（工具显示名、来源、发起者），并把引号类字符（「」『』“”‘’"«» 等所有语言的模板可能用来把第三方文字框起来的字符，
+ *   见 [FrameChars]）换成 ASCII 单引号；放在括号里的文字（[brackets] 为 true，发起者一行的名字和包名）再把括号类字符当空白去掉；
  * - [block]：参数摘要允许换行，但连续的空行折叠成一个、行首行尾空白去掉；
  * - 按字符数（Unicode 码点）截断，不会切开一个字符。
  */
 internal object ConsentText {
 
-    fun singleLine(s: String?, max: Int): String {
+    fun singleLine(s: String?, max: Int, brackets: Boolean = false): String {
         if (s == null) return ""
         val sb = StringBuilder(minOf(s.length, max + 1))
         var space = false
@@ -31,12 +34,14 @@ internal object ConsentText {
             when {
                 isBlank(cp) || cp == '\n'.code -> space = sb.isNotEmpty()
                 isDropped(cp) -> Unit
-                cp == '「'.code || cp == '」'.code || cp == '『'.code || cp == '』'.code -> {
+                // 引号先判：「 在 Unicode 里是“开括号”类，但模板把它当引号用，要换成替身而不是当空白
+                FrameChars.isQuote(cp) -> {
                     if (space) sb.append(' ')
                     space = false
-                    sb.append('\'')
+                    sb.append(FrameChars.REPLACEMENT)
                     count++
                 }
+                brackets && FrameChars.isBracket(cp) -> space = sb.isNotEmpty()
                 else -> {
                     if (space) sb.append(' ')
                     space = false
@@ -105,7 +110,7 @@ internal object ConsentText {
 
     // ------------------------------------------------------------------ 界面自己的文案
 
-    fun title(displayName: String) = "要允许「$displayName」吗？"
+    fun title(displayName: String) = MessageRef.of(ConsentMessages.TITLE, displayName)
 
     /** 第三方包名在界面上最多显示这么多字符（Android 的包名实际远短于此）。 */
     const val PACKAGE_MAX_CHARS = 128
@@ -114,44 +119,44 @@ internal object ConsentText {
     private const val INITIATOR_BUDGET_CHARS = 160
 
     /**
-     * 第三方 App（[CallerKind.APP]）的包名，清理过（和别的第三方文字同一套：控制字符、不可见格式字符、双向控制符、空白、「」『』），单行，最多
+     * 第三方 App（[CallerKind.APP]）的包名，清理过（和别的第三方文字同一套：控制字符、不可见格式字符、双向控制符、空白、引号），单行，最多
      * [PACKAGE_MAX_CHARS]；没有、或清理后为空、或调用方不是第三方 App 时为 null。**从来不用 label 代替包名。**
+     * 包名在界面上总是放在括号里（任何语言），所以括号类字符也去掉（真正的包名只有字母、数字、下划线、点）。
      */
     fun packageOf(caller: CallerIdentity): String? =
-        if (caller.kind != CallerKind.APP) null else singleLine(caller.packageName, PACKAGE_MAX_CHARS).takeIf { it.isNotEmpty() }
+        if (caller.kind != CallerKind.APP) null else singleLine(caller.packageName, PACKAGE_MAX_CHARS, brackets = true).takeIf { it.isNotEmpty() }
 
     /**
-     * 发起者一行。
-     * - 第三方 App 且知道包名：`由 <名字> 发起（<包名>）`。名字是 App 自己起的、可以随便写，所以**包名一定在**：名字先被截断（预算
-     *   [INITIATOR_BUDGET_CHARS] 减去包名的长度；包名最长 [PACKAGE_MAX_CHARS]，所以名字总还剩二十几个字符），名字为空或和包名相同时只写 `由 <包名> 发起`。名字里的括号换成半角，这样括号只可能是
-     *   这一行自己写的那一对，名字不能在行里再造一个“包名”。
-     * - 第三方 App 不知道包名（旧任务、没解析到）：`由 <名字> 发起`，和以前一字不差；名字也没有就是 `由 未知应用 发起`。
-     * - 其他调用方：固定文案，包名不参与。
+     * 发起者一行（key + 参数；用哪种语言的模板由界面定）。
+     * - 第三方 App 且知道包名：[ConsentMessages.INITIATOR_APP]（名字、包名）。名字是 App 自己起的、可以随便写，所以**包名一定在**：名字先被截断
+     *   （预算 [INITIATOR_BUDGET_CHARS] 减去包名的长度；包名最长 [PACKAGE_MAX_CHARS]，所以名字总还剩二十几个字符），名字为空或和包名相同时只给包名
+     *   （[ConsentMessages.INITIATOR_NAMED]）。名字和包名在模板里被括号框着，所以两者的括号类字符都去掉（[FrameChars.isBracket]）：
+     *   不管模板用（）还是 ()，括号只可能是模板自己写的那一对，名字不能在行里再造一个“包名”。
+     * - 第三方 App 不知道包名（旧任务、没解析到）：[ConsentMessages.INITIATOR_NAMED]（名字）；名字也没有就是 [ConsentMessages.INITIATOR_UNKNOWN_APP]。
+     * - 其他调用方：固定 key，包名不参与。
      */
-    fun initiatorLine(caller: CallerIdentity, max: Int): String = when (caller.kind) {
+    fun initiatorLine(caller: CallerIdentity, max: Int): MessageRef = when (caller.kind) {
         CallerKind.APP -> {
             val pkg = packageOf(caller)
             if (pkg == null) {
-                "由 ${singleLine(caller.label, max).ifEmpty { "未知应用" }} 发起"
+                val name = singleLine(caller.label, max)
+                if (name.isEmpty()) MessageRef.of(ConsentMessages.INITIATOR_UNKNOWN_APP) else MessageRef.of(ConsentMessages.INITIATOR_NAMED, name)
             } else {
-                val shownPackage = halfWidthParens(pkg)
                 // room >= 160 - 128 - 3 = 29 whatever the package is, so the label can always be cut to something
-                val room = minOf(max, INITIATOR_BUDGET_CHARS - shownPackage.codePointCount(0, shownPackage.length) - APP_LINE_OVERHEAD_CHARS)
-                val label = halfWidthParens(singleLine(caller.label, room))
-                if (label.isEmpty() || label == shownPackage) "由 $shownPackage 发起" else "由 $label 发起（$shownPackage）"
+                val room = minOf(max, INITIATOR_BUDGET_CHARS - pkg.codePointCount(0, pkg.length) - APP_LINE_OVERHEAD_CHARS)
+                val label = singleLine(caller.label, room, brackets = true)
+                if (label.isEmpty() || label == pkg) MessageRef.of(ConsentMessages.INITIATOR_NAMED, pkg) else MessageRef.of(ConsentMessages.INITIATOR_APP, label, pkg)
             }
         }
-        CallerKind.DESKTOP -> "由电脑端发起"
-        CallerKind.SELF -> "由 AgentOS 自己发起"
-        CallerKind.SYSTEM -> "由 AgentOS 运行时发起"
+        CallerKind.DESKTOP -> MessageRef.of(ConsentMessages.INITIATOR_DESKTOP)
+        CallerKind.SELF -> MessageRef.of(ConsentMessages.INITIATOR_SELF)
+        CallerKind.SYSTEM -> MessageRef.of(ConsentMessages.INITIATOR_SYSTEM)
     }
 
     private const val APP_LINE_OVERHEAD_CHARS = 3
 
-    private fun halfWidthParens(s: String) = s.replace('（', '(').replace('）', ')')
-
-    fun sourceLine(plugin: String, server: String, max: Int): String =
-        "来自插件「${singleLine(plugin, max)}」 · 服务器「${singleLine(server, max)}」"
+    fun sourceLine(plugin: String, server: String, max: Int): MessageRef =
+        MessageRef.of(ConsentMessages.SOURCE, singleLine(plugin, max), singleLine(server, max))
 
     fun severity(risk: ToolRisk) = when (risk) {
         ToolRisk.READ -> ConsentSeverity.NORMAL

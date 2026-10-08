@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.Clock
@@ -608,11 +609,11 @@ class ConsentCoordinatorTest {
         f.ask(req("r1", title = "追加备忘", packageName = "com.example.app"))
         runCurrent()
         val v = f.coordinator.pending.value.single()
-        assertEquals("要允许「追加备忘」吗？", v.title)
-        assertEquals("由 com.example.app 发起", v.initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.TITLE, "追加备忘"), v.title)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_NAMED, "com.example.app"), v.initiatorLine)
         assertEquals(CallerKind.APP, v.caller.kind)
         assertEquals("com.example.app", v.caller.packageName)
-        assertEquals("来自插件「com.example.notes」 · 服务器「main」", v.sourceLine)
+        assertEquals(MessageRef.of(ConsentMessages.SOURCE, "com.example.notes", "main"), v.sourceLine)
         assertEquals("会修改数据", v.riskLabel)
         assertEquals(ConsentSeverity.ELEVATED, v.severity)
         assertIs<ConsentView>(v)

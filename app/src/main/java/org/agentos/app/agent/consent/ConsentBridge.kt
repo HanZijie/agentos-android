@@ -10,6 +10,8 @@ import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.os.RemoteCallbackList
 import android.util.Log
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.ui.consent.AuthorizationLabels
 import org.agentos.app.ui.consent.ConsentActivity
 import org.agentos.internal.IConsentListener
@@ -35,6 +37,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class ConsentBridge(private val context: Context, private val log: (String) -> Unit = { Log.w(TAG, it) }) : ConsentSurface, AuthorizationSurface {
     @Volatile private var coordinator: ConsentCoordinator? = null
+    /** 通知文字按当前界面语言（`:agent` 进程的 Resources 跟随应用语言）；每次现取，不缓存文字。 */
+    private val strings: Strings = AndroidStrings(context)
     /** 监听者所在的主进程死了（被杀、崩溃）时，还没答复的请求转成通知：用户不会因为界面没了就收不到确认。 */
     private val listeners = object : RemoteCallbackList<IConsentListener>() {
         override fun onCallbackDied(callback: IConsentListener?) {
@@ -168,9 +172,9 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
             val deny = action(id, view.requestId, ConsentChoice.DENY)
             val b = Notification.Builder(context, channel)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(card.title)
-                .setContentText(listOfNotNull(card.initiatorLine, card.sourceLine).joinToString(" · "))
-                .setStyle(Notification.BigTextStyle().bigText(listOfNotNull(card.initiatorLine, card.sourceLine, card.riskDescription.ifEmpty { null }, card.argumentsPreview.ifEmpty { null }).joinToString("\n")))
+                .setContentTitle(strings.get(card.title))
+                .setContentText(listOfNotNull(strings.get(card.initiatorLine), card.sourceLine?.let { strings.get(it) }).joinToString(" · "))
+                .setStyle(Notification.BigTextStyle().bigText(listOfNotNull(strings.get(card.initiatorLine), card.sourceLine?.let { strings.get(it) }, card.riskDescription.ifEmpty { null }, card.argumentsPreview.ifEmpty { null }).joinToString("\n")))
                 .setCategory(Notification.CATEGORY_ALARM)
                 .setContentIntent(open)
                 .setOngoing(true)

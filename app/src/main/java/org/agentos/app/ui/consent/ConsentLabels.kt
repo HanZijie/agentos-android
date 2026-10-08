@@ -1,6 +1,9 @@
 package org.agentos.app.ui.consent
 
+import org.agentos.app.R
 import org.agentos.app.agent.consent.ConsentWire.Card
+import org.agentos.app.i18n.Strings
+import org.agentos.runtime.i18n.FrameChars
 
 /**
  * 确认框里“谁发起的”的文字（纯 Kotlin，ConsentLabelsTest）。App 的名字是第三方自己取的，也是不可信输入：
@@ -25,7 +28,8 @@ object ConsentLabels {
                 Character.isWhitespace(cp) || Character.isSpaceChar(cp) -> space = sb.isNotEmpty()
                 type == Character.CONTROL.toInt() || type == Character.FORMAT.toInt() || type == Character.PRIVATE_USE.toInt() ||
                     type == Character.SURROGATE.toInt() || type == Character.UNASSIGNED.toInt() -> Unit
-                cp == '「'.code || cp == '」'.code || cp == '『'.code || cp == '』'.code -> Unit
+                // 模板用引号把名字框起来：所有语言的引号去掉（和核心层的清理同一份清单，FrameChars）；名字在引号里面，括号伪造不了包名那一对
+                FrameChars.isQuote(cp) -> Unit
                 else -> {
                     if (space) sb.append(' ')
                     space = false
@@ -38,16 +42,16 @@ object ConsentLabels {
     }
 
     /**
-     * 发起者一行。第三方 App 发起：`由「<App 名>」（<包名>）发起`；解析不到名字、或不是第三方 App：用协调器给的原文
-     * （`由 com.example.app 发起` / `由电脑端发起` / `由 AgentOS 自己发起`）。
+     * 发起者一行。第三方 App 发起：`由「<App 名>」（<包名>）发起`（英文 `Requested by “<App 名>” (<包名>)`，App 名是主进程按包名解析出的标签，清理过）；
+     * 解析不到名字、或不是第三方 App：用协调器给的那句（`由 com.example.app 发起` / `由电脑端发起` / `由 AgentOS 自己发起`）。
      */
-    fun initiator(card: Card, appLabel: String?): String {
+    fun initiator(card: Card, appLabel: String?, strings: Strings): String {
         val pkg = card.callerPackage
         val label = cleanLabel(appLabel)
         return if (card.callerKind == "APP" && pkg != null && label != null && label != pkg) {
-            "由「$label」（$pkg）发起"
+            strings.get(R.string.consent_initiator_app_resolved, label, pkg)
         } else {
-            card.initiatorLine
+            strings.get(card.initiatorLine)
         }
     }
 

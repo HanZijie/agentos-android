@@ -3,10 +3,12 @@ package org.agentos.app.agent.consent
 import org.agentos.runtime.consent.ConsentCaller
 import org.agentos.runtime.consent.ConsentChoice
 import org.agentos.runtime.consent.ConsentEnd
+import org.agentos.runtime.consent.ConsentMessages
 import org.agentos.runtime.consent.ConsentOption
 import org.agentos.runtime.consent.ConsentResolution
 import org.agentos.runtime.consent.ConsentSeverity
 import org.agentos.runtime.consent.ConsentView
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.ToolRisk
 import org.agentos.runtime.ports.ToolSource
@@ -18,8 +20,8 @@ import org.junit.Test
 
 class ConsentWireTest {
     private fun view(id: String = "r1", risk: ToolRisk = ToolRisk.WRITE, args: String = "{\"a\":\"<b>x</b> %s %1\$d\"}") = ConsentView(
-        requestId = id, sessionId = "s", taskId = "t", title = "要允许「note_create」吗？", initiatorLine = "由 com.example.app 发起",
-        caller = ConsentCaller(CallerKind.APP, 10123, "com.example.app"), sourceLine = "来自插件 notes · 服务器 notes",
+        requestId = id, sessionId = "s", taskId = "t", title = MessageRef.of(ConsentMessages.TITLE, "note_create"), initiatorLine = MessageRef.of(ConsentMessages.INITIATOR_NAMED, "com.example.app"),
+        caller = ConsentCaller(CallerKind.APP, 10123, "com.example.app"), sourceLine = MessageRef.of(ConsentMessages.SOURCE, "notes", "notes"),
         source = ToolSource("notes", "notes", "note_create"), toolDisplayName = "note_create", toolName = "mcp__notes__note_create",
         argumentsPreview = args, argumentsTruncated = false, risk = risk,
         severity = if (risk == ToolRisk.HIGH) ConsentSeverity.CRITICAL else ConsentSeverity.ELEVATED,
@@ -37,6 +39,8 @@ class ConsentWireTest {
         val v = view()
         val c = ConsentWire.parseCard(ConsentWire.encodeViewString(v))!!
         assertEquals(v.title, c.title)
+        assertEquals(v.initiatorLine, c.initiatorLine)
+        assertEquals(v.sourceLine, c.sourceLine)
         assertEquals(v.argumentsPreview, c.argumentsPreview)
         assertEquals("com.example.app", c.callerPackage)
         assertEquals("APP", c.callerKind)

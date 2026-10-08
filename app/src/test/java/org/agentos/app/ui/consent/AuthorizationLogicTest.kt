@@ -5,7 +5,9 @@ import org.agentos.app.agent.consent.ConsentWire.AuthRequest
 import org.agentos.app.agent.consent.ConsentWire.Card
 import org.agentos.app.agent.consent.ConsentWire.Option
 import org.agentos.runtime.consent.ConsentChoice
+import org.agentos.runtime.consent.ConsentMessages
 import org.agentos.runtime.consent.ConsentSeverity
+import org.agentos.runtime.i18n.MessageRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -22,7 +24,7 @@ class AuthorizationLogicTest {
     ) = AuthRequest(id, pkg, label, d, changed, deadline, timeout)
 
     private fun card(id: String, deadline: Long, timeout: Long = 60_000) = Card(
-        requestId = id, title = "t", initiatorLine = "由 x 发起", callerKind = "APP", callerPackage = "org.example.notes", sourceLine = null,
+        requestId = id, title = MessageRef.of(ConsentMessages.TITLE, "t"), initiatorLine = MessageRef.of(ConsentMessages.INITIATOR_NAMED, "x"), callerKind = "APP", callerPackage = "org.example.notes", sourceLine = null,
         toolDisplayName = "x", argumentsPreview = "", argumentsTruncated = false, risk = "WRITE", severity = ConsentSeverity.ELEVATED,
         riskLabel = "", riskDescription = "",
         options = listOf(Option(ConsentChoice.ALLOW_ONCE, "允许一次", false), Option(ConsentChoice.DENY, "拒绝", true)),
@@ -108,7 +110,7 @@ class AuthorizationLogicTest {
 
     @Test
     fun toolConsentWithoutKindStillParsesAsACard() {
-        val p = ConsentWire.parsePending("""{"requestId":"c1","title":"t","initiatorLine":"i","callerKind":"APP","toolDisplayName":"x","risk":"WRITE","deadlineMillis":5,
+        val p = ConsentWire.parsePending("""{"requestId":"c1","title":{"key":"consent_title","args":["t"]},"initiatorLine":{"key":"consent_initiator_system","args":[]},"callerKind":"APP","toolDisplayName":"x","risk":"WRITE","deadlineMillis":5,
             "options":[{"choice":"ALLOW_ONCE","label":"a","destructive":false},{"choice":"DENY","label":"d","destructive":true}]}""")
         assertTrue(p is Card)
     }

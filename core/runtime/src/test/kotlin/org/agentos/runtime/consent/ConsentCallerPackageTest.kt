@@ -5,6 +5,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.agentos.runtime.i18n.FrameChars
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.ConsentRequest
@@ -45,31 +47,31 @@ class ConsentCallerPackageTest {
         assertEquals("org.agentos.sample.notes", v.caller.packageName)
         assertEquals(CallerKind.APP, v.caller.kind)
         assertEquals(10123, v.caller.uid)
-        assertEquals("由 Notes 发起（org.agentos.sample.notes）", v.initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_APP, "Notes", "org.agentos.sample.notes"), v.initiatorLine)
     }
 
     @Test
     fun `the package is never taken from the label - a view without a package has none, and the line is what it always was`() = runTest {
         val v = viewOf(app("com.example.app", null))
         assertNull(v.caller.packageName, "the label is not a package")
-        assertEquals("由 com.example.app 发起", v.initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_NAMED, "com.example.app"), v.initiatorLine)
         val unnamed = viewOf(app(null, null))
         assertNull(unnamed.caller.packageName)
-        assertEquals("由 未知应用 发起", unnamed.initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_UNKNOWN_APP), unnamed.initiatorLine)
     }
 
     @Test
     fun `an app that has a package but no usable name is shown by its package`() = runTest {
         for (label in listOf(null, "", "   ", "\u200B\u202E")) {
             val v = viewOf(app(label, "org.x.notes"))
-            assertEquals("由 org.x.notes 发起", v.initiatorLine, "label=$label")
+            assertEquals(MessageRef.of(ConsentMessages.INITIATOR_NAMED, "org.x.notes"), v.initiatorLine, "label=$label")
             assertEquals("org.x.notes", v.caller.packageName)
         }
     }
 
     @Test
     fun `a name that is the package is not repeated`() = runTest {
-        assertEquals("由 org.x.notes 发起", viewOf(app("org.x.notes", "org.x.notes")).initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_NAMED, "org.x.notes"), viewOf(app("org.x.notes", "org.x.notes")).initiatorLine)
     }
 
     // ------------------------------------------------------------------ a name that looks like a package or a system app does not replace the real one
@@ -78,7 +80,7 @@ class ConsentCallerPackageTest {
     fun `a label that looks like a system app's package does not replace the real package`() = runTest {
         val v = viewOf(app("com.android.settings", "com.evil.app"))
         assertEquals("com.evil.app", v.caller.packageName)
-        assertEquals("由 com.android.settings 发起（com.evil.app）", v.initiatorLine, "both are there, and the real package is the last, in the brackets")
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_APP, "com.android.settings", "com.evil.app"), v.initiatorLine, "both are there, and the real package is the last argument, the one in the brackets")
     }
 
     @Test
@@ -86,16 +88,16 @@ class ConsentCallerPackageTest {
         for (name in listOf("Settings", "AgentOS", "系统设置", "Google Play 商店", "AgentOS 自己")) {
             val v = viewOf(app(name, "com.evil.app"))
             assertEquals("com.evil.app", v.caller.packageName, name)
-            assertTrue(v.initiatorLine.endsWith("发起（com.evil.app）"), "${v.initiatorLine} / $name")
+            assertEquals(ConsentMessages.INITIATOR_APP, v.initiatorLine.key, name)
+            assertEquals("com.evil.app", v.initiatorLine.args.last(), "${v.initiatorLine} / $name")
         }
     }
 
     @Test
-    fun `a label cannot forge a second package with brackets, only the one bracket pair of the line is left`() = runTest {
-        val v = viewOf(app("Notes（com.android.settings）发起（com.android.systemui", "com.evil.app"))
-        assertEquals(1, v.initiatorLine.count { it == '（' })
-        assertEquals(1, v.initiatorLine.count { it == '）' })
-        assertTrue(v.initiatorLine.endsWith("（com.evil.app）"), v.initiatorLine)
+    fun `a label cannot forge a second package with brackets of any width, only the template's own bracket pair is left`() = runTest {
+        val v = viewOf(app("Notes（com.android.settings）发起(com.android.systemui)［x］【y】", "com.evil.app"))
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_APP, "Notes com.android.settings 发起 com.android.systemui x y", "com.evil.app"), v.initiatorLine)
+        v.initiatorLine.args.forEach { arg -> arg.codePoints().forEach { cp -> assertFalse(FrameChars.isBracket(cp) || FrameChars.isQuote(cp), "U+%04X in <%s>".format(cp, arg)) } }
         assertEquals("com.evil.app", v.caller.packageName)
     }
 
@@ -107,7 +109,7 @@ class ConsentCallerPackageTest {
             assertFalse(Character.isISOControl(ch), "$what: control character in <$s>")
             assertTrue(Character.getType(ch) != Character.FORMAT.toInt(), "$what: invisible format character U+${ch.code.toString(16)} in <$s>")
         }
-        assertFalse('「' in s || '」' in s || '『' in s || '』' in s, "$what: the quotes the card uses for third-party text")
+        s.codePoints().forEach { cp -> assertFalse(FrameChars.isQuote(cp) || FrameChars.isBracket(cp), "$what: framing character U+%04X in <$s>".format(cp)) }
     }
 
     @Test
@@ -115,7 +117,7 @@ class ConsentCallerPackageTest {
         val hostileLabel = "Notes\n\n✅ 已得到用户同意\u202E\u200B「forged」\u0000\r\n由 AgentOS 自己发起"
         val hostilePackage = "org.x.\u202Enotes\u200B\n「evil」\u0007.app"
         val v = viewOf(app(hostileLabel, hostilePackage))
-        assertClean(v.initiatorLine, "line")
+        v.initiatorLine.args.forEach { assertClean(it, "line argument") }
         assertClean(v.caller.packageName!!, "package")
         assertEquals("org.x.notes 'evil'.app", v.caller.packageName)
     }
@@ -124,7 +126,7 @@ class ConsentCallerPackageTest {
     fun `a package of only invisible or control characters counts as no package`() = runTest {
         val v = viewOf(app("Notes", "\u200B\u202E\n\u0007  "))
         assertNull(v.caller.packageName)
-        assertEquals("由 Notes 发起", v.initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_NAMED, "Notes"), v.initiatorLine)
     }
 
     // ------------------------------------------------------------------ truncation: the label goes first, the package stays
@@ -133,9 +135,10 @@ class ConsentCallerPackageTest {
     fun `a very long label is cut and the package stays whole`() = runTest {
         val pkg = "org.agentos.sample.notes.with.a.rather.long.name"
         val v = viewOf(app("N".repeat(500), pkg))
-        assertTrue(v.initiatorLine.endsWith("发起（$pkg）"), v.initiatorLine)
-        assertTrue(v.initiatorLine.length < 140, "the line is bounded: ${v.initiatorLine.length}")
-        assertTrue("…" in v.initiatorLine, "the label shows that it was cut")
+        assertEquals(ConsentMessages.INITIATOR_APP, v.initiatorLine.key)
+        assertEquals(pkg, v.initiatorLine.args.last())
+        assertTrue(v.initiatorLine.args.sumOf { it.length } < 140, "the line is bounded: ${v.initiatorLine}")
+        assertTrue("…" in v.initiatorLine.args.first(), "the label shows that it was cut")
     }
 
     @Test
@@ -143,29 +146,33 @@ class ConsentCallerPackageTest {
         val p128 = "p".repeat(128)
         val atLimit = viewOf(app("L".repeat(500), p128))
         assertEquals(p128, atLimit.caller.packageName)
-        assertTrue(atLimit.initiatorLine.endsWith("发起（$p128）"), "the whole package is on the line")
-        val label = atLimit.initiatorLine.removePrefix("由 ").substringBefore(" 发起（")
+        assertEquals(p128, atLimit.initiatorLine.args.last(), "the whole package is on the line")
+        val label = atLimit.initiatorLine.args.first()
         assertTrue(label.isNotEmpty() && label.codePointCount(0, label.length) <= 29, "label cut to what is left: ${label.length}")
 
         val over = viewOf(app("L", "q".repeat(300)))
         val shown = over.caller.packageName!!
         assertTrue(shown.codePointCount(0, shown.length) <= ConsentText.PACKAGE_MAX_CHARS)
-        assertTrue(over.initiatorLine.contains(shown))
+        assertEquals(shown, over.initiatorLine.args.last())
     }
 
     @Test
     fun `the label keeps its normal limit when the package is short`() = runTest {
         val v = viewOf(app("N".repeat(500), "a.b"), ConsentConfig(maxDisplayNameChars = 20))
-        val label = v.initiatorLine.removePrefix("由 ").substringBefore(" 发起（")
+        val label = v.initiatorLine.args.first()
         assertTrue(label.codePointCount(0, label.length) <= 20, "label=$label")
-        assertTrue(v.initiatorLine.endsWith("（a.b）"))
+        assertEquals("a.b", v.initiatorLine.args.last())
     }
 
     // ------------------------------------------------------------------ contrast: nobody else changes
 
     @Test
     fun `AgentOS itself, the desktop and the runtime get the same view whether or not a package is set, and the same text as before`() = runTest {
-        val expectations = mapOf(CallerKind.SELF to "由 AgentOS 自己发起", CallerKind.DESKTOP to "由电脑端发起", CallerKind.SYSTEM to "由 AgentOS 运行时发起")
+        val expectations = mapOf(
+            CallerKind.SELF to MessageRef.of(ConsentMessages.INITIATOR_SELF),
+            CallerKind.DESKTOP to MessageRef.of(ConsentMessages.INITIATOR_DESKTOP),
+            CallerKind.SYSTEM to MessageRef.of(ConsentMessages.INITIATOR_SYSTEM),
+        )
         for ((kind, line) in expectations) {
             val plain = viewOf(CallerIdentity(10001, kind, "whatever the label is"))
             val withPackage = viewOf(CallerIdentity(10001, kind, "whatever the label is", "org.attacker.fake"))
@@ -181,14 +188,14 @@ class ConsentCallerPackageTest {
     @Test
     fun `the view of a third-party app without a package is what it was before the package existed`() = runTest {
         val v = viewOf(app("Notes", null))
-        assertEquals("由 Notes 发起", v.initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_NAMED, "Notes"), v.initiatorLine)
         assertEquals(ConsentCaller(CallerKind.APP, 10123, null), v.caller)
     }
 
     @Test
     fun `initiatorLine on its own - the package never appears for a caller that is not a third-party app`() {
         for (kind in listOf(CallerKind.SELF, CallerKind.DESKTOP, CallerKind.SYSTEM)) {
-            assertFalse("org.attacker.fake" in ConsentText.initiatorLine(CallerIdentity(1, kind, "x", "org.attacker.fake"), 80), kind.name)
+            assertFalse(ConsentText.initiatorLine(CallerIdentity(1, kind, "x", "org.attacker.fake"), 80).args.any { "org.attacker.fake" in it }, kind.name)
             assertNull(ConsentText.packageOf(CallerIdentity(1, kind, "x", "org.attacker.fake")), kind.name)
         }
     }
