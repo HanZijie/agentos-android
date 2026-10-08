@@ -74,7 +74,8 @@ class ScriptedRunTest(unittest.TestCase):
         self.assertTrue(high)
         # HIGH requests are allowed once, never remembered; the only ones answered DENY are the declined todo_delete of todo.denied_delete
         self.assertEqual({"ALLOW_ONCE"}, {e["answeredWith"] for e in high if e["answeredWith"] != "DENY"}, "HIGH requests are allowed once, never remembered")
-        self.assertEqual(["mcp__todo__todo__todo_delete"], [e["tool"] for e in high if e["answeredWith"] == "DENY"])
+        self.assertEqual(["mcp__todo__todo__todo_delete", "mcp__sms__sms__sms_send"], [e["tool"] for e in high if e["answeredWith"] == "DENY"],
+                         "todo.denied_delete and sms.denied")
 
     def test_the_catalog_check_reports_risk_per_tool(self):
         _, _, report = run()
@@ -405,7 +406,7 @@ class FiveAppsSetupTest(unittest.TestCase):
         phone, env, report = run()
         self.assertTrue(report["ok"], report["summary"]["failures"])
         self.assertEqual(["alarm", "calendar", "notes", "todo", "sms"], report["apps"])
-        self.assertEqual([], report["skipped"])
+        self.assertEqual(["sms.send / sms.status / sms.dedup"], [x["what"] for x in report["skipped"]], "no second emulator in this fake world: only that part is skipped, not an app")
         discover = self.step(report, "setup.discover")
         self.assertEqual(10, len(discover["checks"]), "five plugins: discovered + off by default each")
         for name in ("todo", "sms"):
@@ -470,7 +471,7 @@ class FiveAppsSetupTest(unittest.TestCase):
         _, _, report = run(phone, sms_on_device=True)
         self.assertTrue(report["ok"], report["summary"]["failures"])
         self.assertEqual(["alarm", "calendar", "notes", "todo", "sms"], report["apps"])
-        self.assertEqual([], report["skipped"])
+        self.assertNotIn("sms", [x["what"] for x in report["skipped"]], "the app itself is not skipped")
 
     def test_the_sms_peer_is_the_port_of_another_emulator(self):
         phone = FakePhone(other_devices=["38290DLJH0007B", "emulator-5616", "emulator-5618"])
@@ -659,6 +660,177 @@ class TodoStepsTest(unittest.TestCase):
         off = self.step(report, "todo.plugin_off")
         self.assertTrue(off["ok"], off["checks"])
         self.assertTrue(any("no todo tool is offered" in c["name"] for c in off["checks"]))
+
+
+class SmsStepsTest(unittest.TestCase):
+    """The scripted sms plan: emulator only, the incoming messages come from `adb emu sms send`, the send goes to a second emulator when there is one."""
+
+    PEER = ["emulator-5616"]
+
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def sms_ids(self, report):
+        return [s["id"] for s in report["steps"] if s["id"].startswith("sms.")]
+
+    def test_a_healthy_emulator_with_a_second_emulator_passes_every_sms_step(self):
+        phone, env, report = run(FakePhone(other_devices=self.PEER), only={"sms"})
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        ids = self.sms_ids(report)
+        for expect in ("sms.prepare", "sms.err.short_number", "sms.err.missing_text", "sms.err.missing_to", "sms.err.too_long", "sms.seed_inbox", "sms.threads", "sms.messages",
+                       "sms.search", "sms.unmask", "sms.allow_short", "sms.send", "sms.status", "sms.dedup", "sms.denied", "sms.compose_only", "sms.permissions_back",
+                       "sms.plugin_off", "sms.plugin_on", "sms.restore"):
+            self.assertIn(expect, ids)
+        self.assertEqual([], report["skipped"])
+        self.assertEqual("5616", report["smsPeer"])
+        self.assertTrue(self.step(report, "audit.sms")["ok"])
+        self.assertEqual([], phone.sms["outbox"], "the final reset empties the outbox")
+
+    def test_without_a_second_emulator_only_the_confirmation_and_the_refusal_run_and_the_report_says_so(self):
+        phone, env, report = run(only={"sms"})
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        ids = self.sms_ids(report)
+        for gone in ("sms.send", "sms.status", "sms.dedup"):
+            self.assertNotIn(gone, ids)
+        self.assertIn("sms.denied", ids)
+        self.assertEqual("sms.send / sms.status / sms.dedup", report["skipped"][0]["what"])
+        self.assertTrue(any(n.startswith("skipped sms.send") for n in report["notes"]))
+        self.assertIsNone(report["smsPeer"])
+        self.assertEqual([], phone.sms["outbox"])
+
+    def test_the_driver_never_sends_to_a_number_it_was_not_given(self):
+        phone, env, report = run(FakePhone(other_devices=self.PEER), only={"sms"})
+        calls = [c for _, text in env.bridge.prompts if text.startswith("{") for c in json.loads(text).get("toolCalls", []) if c["name"].endswith("sms_send")]
+        self.assertTrue(calls)
+        self.assertEqual({"10086", S.SMS_SENDER, "5616"}, {c["arguments"].get("to") for c in calls if c["arguments"].get("to")})
+        # the only send that goes through is to the peer emulator: the others are refused by the app or declined before they reach it
+        sends = [c for c in calls if c["arguments"].get("to") == "5616"]
+        self.assertEqual(4, len(sends), "sms.send, its duplicate, the declined one and the one in compose-only mode")
+        self.assertEqual([{"to": "5616", "text": sends[0]["arguments"]["text"]}], phone.sms_sent_log, "exactly one message left the phone (the fake radio's own log)")
+
+    def test_nothing_of_sms_runs_on_a_real_phone_without_the_flag(self):
+        phone = FakePhone(serial="38290DLJH0007B", other_devices=self.PEER)
+        _, env, report = run(phone)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertEqual([], self.sms_ids(report))
+        self.assertFalse([c for c in phone.log if "emu sms send" in c or "pm revoke" in c or "pm grant" in c])
+        self.assertEqual(1, len(report["skipped"]))
+        self.assertIsNone(report["smsPeer"], "no peer is looked for when sms is left out")
+        self.assertEqual([], phone.sms["inbox"])
+
+    def test_sms_on_device_runs_the_plan_on_a_real_phone(self):
+        phone = FakePhone(serial="38290DLJH0007B", other_devices=self.PEER)
+        _, env, report = run(phone, sms_on_device=True, only={"sms"})
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertIn("sms.send", self.sms_ids(report))
+        self.assertEqual("5616", report["smsPeer"], "a real phone's neighbour emulator is still found")
+
+    def test_the_incoming_messages_come_from_the_emulator_console(self):
+        phone, env, report = run(only={"sms"})
+        self.assertEqual(2, len([c for c in phone.log if c.startswith("emu sms send " + S.SMS_SENDER)]))
+        self.assertEqual(2, len(phone.sms["inbox"]))
+        self.assertFalse(any("verification" in m["body"] and S.SMS_CODE not in m["body"] for m in phone.sms["inbox"]), "the code goes in as it is; the app masks it on the way out")
+
+    def test_permissions_are_revoked_once_and_granted_again_even_after_a_failed_step(self):
+        phone, env, report = run(only={"sms"})
+        grants = [c for c in phone.log if c.startswith("pm revoke") or c.startswith("pm grant")]
+        self.assertEqual(2, len([c for c in grants if c.startswith("pm revoke")]))
+        self.assertEqual(2, len([c for c in grants if c.startswith("pm grant")]))
+        self.assertTrue(all(phone.sms["granted"].values()))
+        phone, env, report = run(FakePhone(faults={"sms-no-composer"}), only={"sms"})
+        self.assertIn("sms.compose_only", failed(report))
+        self.assertTrue(all(phone.sms["granted"].values()), "post-step restores the permissions although the step failed")
+
+    def test_the_settings_are_what_they_were_before_the_run(self):
+        phone = FakePhone()
+        phone.sms["settings"].update({"rate_limit": 3, "allow_short_numbers": False, "mask_codes": True})
+        run(phone, only={"sms"})
+        self.assertEqual({"mask_codes": True, "allow_short_numbers": False, "rate_limit": 3}, phone.sms["settings"])
+        phone = FakePhone()
+        phone.sms["settings"].update({"rate_limit": 12, "allow_short_numbers": True, "mask_codes": False})
+        _, _, report = run(phone, only={"sms"})
+        self.assertEqual({"mask_codes": False, "allow_short_numbers": True, "rate_limit": 12}, phone.sms["settings"])
+        self.assertTrue(self.step(report, "sms.restore")["ok"])
+
+    def test_the_confirmation_card_check_reads_recipient_and_text_from_the_recorded_request(self):
+        _, _, report = run(FakePhone(other_devices=self.PEER), only={"sms"})
+        send = self.step(report, "sms.send")
+        card = [c for c in send["checks"] if "full recipient and the full text" in c["name"]]
+        self.assertEqual(1, len(card))
+        self.assertTrue(card[0]["ok"])
+        self.assertIn("5616", card[0]["actual"])
+        self.assertIn("纪要已发出，请查收", card[0]["actual"])
+        high = [c for c in send["checks"] if "risk HIGH with only Allow once / Deny" in c["name"]]
+        self.assertTrue(high and high[0]["ok"])
+        self.assertTrue(any("answered ALLOW_ONCE" in c["name"] and c["ok"] for c in send["checks"]))
+        denied = self.step(report, "sms.denied")
+        self.assertTrue(any("answered DENY" in c["name"] or "recorded and declined" in c["name"] for c in denied["checks"]))
+
+    def test_a_card_that_cuts_the_text_off_fails_the_check(self):
+        _, _, report = run(FakePhone(other_devices=self.PEER, faults={"consent-args-truncated"}), only={"sms"})
+        self.assertIn("sms.send", failed(report))
+        self.assertIn("sms.denied", failed(report))
+        bad = [c for c in self.step(report, "sms.denied")["checks"] if not c["ok"]]
+        self.assertTrue(any("full recipient and the full text" in c["name"] for c in bad), bad)
+
+    def test_a_short_number_that_goes_through_is_caught_at_its_step(self):
+        phone, _, report = run(FakePhone(faults={"sms-sends-to-short"}), only={"sms"})
+        self.assertIn("sms.err.short_number", failed(report))
+        self.assertEqual({"10086"}, {x["to"] for x in phone.sms_sent_log}, "this is what would have left the phone")
+
+    def test_masking_that_does_not_happen_is_caught_in_messages_and_search(self):
+        _, _, report = run(FakePhone(faults={"sms-never-masks"}), only={"sms"})
+        self.assertTrue({"sms.messages", "sms.search"} <= failed(report), failed(report))
+        self.assertIn("sms.threads", failed(report))
+
+    def test_a_send_that_misses_the_outbox_a_missing_dedupe_and_a_failed_send_are_caught(self):
+        _, _, report = run(FakePhone(other_devices=self.PEER, faults={"sms-forgets-outbox"}), only={"sms"})
+        self.assertIn("sms.send", failed(report))
+        _, _, report = run(FakePhone(other_devices=self.PEER, faults={"sms-no-dedupe"}), only={"sms"})
+        self.assertIn("sms.dedup", failed(report))
+        _, _, report = run(FakePhone(other_devices=self.PEER, faults={"sms-send-fails"}), only={"sms"})
+        self.assertTrue({"sms.send", "sms.status"} & failed(report), failed(report))
+
+    def test_a_delivery_report_that_never_comes_is_not_a_failure(self):
+        _, _, report = run(FakePhone(other_devices=self.PEER, faults={"sms-never-delivered"}), only={"sms"})
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        status = self.step(report, "sms.status")
+        self.assertEqual("sent", json.loads(status["turn"]["tools"][0]["result"])["state"])
+
+    def test_missing_permissions_at_the_start_are_named_by_the_prepare_step(self):
+        phone = FakePhone(faults={"sms-grant-refused"})
+        phone.sms["granted"] = {p: False for p in L.SMS_PERMISSIONS}
+        _, _, report = run(phone, only={"sms"})
+        self.assertIn("sms.prepare", failed(report))
+        bad = [c for c in self.step(report, "sms.prepare")["checks"] if not c["ok"]]
+        self.assertTrue(any("mode full" in c["expected"] and c["actual"]["mode"] == "compose_only" for c in bad), bad)
+
+    def test_the_audit_sees_sms_send_as_high_and_the_read_tools_as_write(self):
+        phone, _, report = run(FakePhone(other_devices=self.PEER), only={"sms"})
+        by_tool = {}
+        for e in phone.consent_log:
+            by_tool.setdefault(e["tool"].split("__")[-1], set()).add(e["risk"])
+        self.assertEqual({"HIGH"}, by_tool["sms_send"])
+        self.assertEqual({"WRITE"}, by_tool["sms_thread_list"])
+        self.assertEqual({"WRITE"}, by_tool["sms_message_list"])
+        audit = self.step(report, "audit.sms")
+        self.assertTrue(audit["ok"], [c for c in audit["checks"] if not c["ok"]])
+        wrong = L.audit_consent([{"tool": "mcp__sms__sms__sms_send", "risk": "WRITE", "source": L.source_line("sms"), "options": ["ALLOW_ONCE", "DENY"],
+                                  "answeredWith": "ALLOW_ONCE", "end": "ANSWERED"}], "sms")
+        self.assertTrue(any(not c.ok and "risk" in c.name for c in wrong), "sms_send recorded as WRITE is a deviation")
+
+    def test_no_reset_leaves_the_outbox_of_this_run_and_says_nothing_else_is_touched(self):
+        phone = FakePhone(other_devices=self.PEER)
+        phone.sms["outbox"] = [{"id": "9", "to": "5560", "text": "mine", "parts": 1, "state": "delivered", "sent_parts": 1, "delivered_parts": 1, "error": None}]
+        phone.sms["next_id"] = 10
+        _, _, report = run(phone, reset=False, only={"sms"})
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertEqual(["mine"], [o["text"] for o in phone.sms["outbox"] if o["text"] == "mine"])
+
+    def test_the_marker_of_the_texts_has_no_run_of_digits_the_app_could_mask(self):
+        self.assertEqual("e2e-abcghi", S.sms_mark("abc012"))
+        self.assertEqual("e2e-gpgpgp", S.sms_mark("090909"))
+        self.assertNotRegex(S.sms_mark("123456"), r"\d{4}")
 
 
 class TodoSmsStateTest(unittest.TestCase):

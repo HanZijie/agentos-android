@@ -62,6 +62,7 @@ class FakePhone:
         self.sms = {"outbox": [], "drafts": [], "inbox": [], "next_id": 1, "settings": {"mask_codes": True, "allow_short_numbers": False, "rate_limit": 5},
                     "granted": {"android.permission.READ_SMS": True, "android.permission.SEND_SMS": True}}
         self.sms_tool_calls = []        # (tool, args) of the debug `tool` receiver
+        self.sms_sent_log = []          # every message that left the phone (the fake radio), whatever the outbox says
         self._init_dbs()
 
     @property
@@ -119,10 +120,19 @@ class FakePhone:
             return "+0800\n"
         if cmd.startswith("am broadcast"):
             return self._broadcast(cmd)
+        m = re.fullmatch(r"pm (grant|revoke) (\S+) (\S+)", cmd.strip())
+        if m and m.group(2) == L.SAMPLES["sms"].package and m.group(3) in self.sms["granted"]:
+            if m.group(1) == "grant" and "sms-grant-refused" in self.faults:
+                return "Exception occurred while executing 'grant': SecurityException\n"
+            self.sms["granted"][m.group(3)] = m.group(1) == "grant"
         return ""
 
     def run(self, *args, **kw):
         self.log.append(" ".join(args))
+        if tuple(args[:3]) == ("emu", "sms", "send") and len(args) >= 5:
+            # the emulator console: an incoming SMS lands in the system SMS store (the sms app reads it with READ_SMS; its dump never shows it)
+            self.sms["inbox"].append({"address": args[3], "body": " ".join(args[4:]), "type": "inbox", "date": self.NOW_MS + len(self.sms["inbox"]) * 1000})
+            return "OK\n"
         return ""
 
     def prop(self, name):
@@ -168,7 +178,7 @@ class FakePhone:
                 return "Broadcasting: Intent { }\nBroadcast completed: result=0\n"   # seed / clear / remind_test answer in logcat only
         else:
             return "Broadcast completed: result=0\n"
-        code = 1 if data.get("ok", "error" not in data) else 2
+        code = 1 if data.get("ok", "error" not in data) and not data.get("isError") else 2
         return 'Broadcasting: Intent { }\nBroadcast completed: result=%d, data="%s"' % (code, json.dumps(data, ensure_ascii=False).replace("/", "\\/"))
 
     def _plugin_json(self, s):
@@ -363,14 +373,21 @@ class FakePhone:
             else:
                 return {"error": "unknown key '%s'; use mask_codes, allow_short_numbers or rate_limit" % key}
             return dict(st["settings"])
+        if ex.get("tool") is not None:
+            args = json.loads(ex.get("args", "{}"))
+            self.sms_tool_calls.append((ex["tool"], args))
+            status, text = self._call_sms_tool(ex["tool"], args)
+            return {"tool": ex["tool"], "isError": status != "completed", "result": text}
         if cmd != "dump":
             return {"error": "unknown cmd '%s'; use dump, reset or set" % cmd}
+        self._sms_advance()
         if "dump-fails-sms" in self.faults:
             return {"error": "IllegalStateException: boom"}
         rows = st["outbox"]
         offset, limit, nxt = self._page(ex, len(rows))
         return {"mode": self.sms_mode(), "permissions": {"read_sms": st["granted"][L.SMS_PERMISSIONS[0]], "send_sms": st["granted"][L.SMS_PERMISSIONS[1]]},
-                "settings": dict(st["settings"]), "outbox": [dict(o, created_at="2026-10-07T12:00:00+08:00", updated_at="2026-10-07T12:00:00+08:00") for o in rows[offset:offset + limit]],
+                "settings": dict(st["settings"]), "outbox": [dict({k: v for k, v in o.items() if not k.startswith("_")}, created_at="2026-10-07T12:00:00+08:00", updated_at="2026-10-07T12:00:00+08:00")
+                           for o in rows[offset:offset + limit]],
                 "drafts": [dict(d, created_at="2026-10-07T12:00:00+08:00") for d in st["drafts"]], "total": len(rows), "offset": offset, "count": len(rows[offset:offset + limit]),
                 "next_offset": nxt, "now": "2026-10-07T12:00:00+08:00", "time_zone": "Asia/Shanghai"}
 
@@ -470,7 +487,8 @@ class FakePhone:
             answer = {"allow": "ALLOW_ONCE" if risk == "HIGH" else "ALLOW_FOR_SESSION", "allowonce": "ALLOW_ONCE", "deny": "DENY"}.get(mode)
             self._req += 1
             plugin = name.split("__")[1]
-            self.consent_log.append({"requestId": "req_%d" % self._req, "tool": name, "risk": risk, "source": L.source_line(plugin), "args": "{}",
+            self.consent_log.append({"requestId": "req_%d" % self._req, "tool": name, "risk": risk, "source": L.source_line(plugin),
+                                     "args": json.dumps(args, ensure_ascii=False, separators=(",", ":"))[:(20 if "consent-args-truncated" in self.faults else 120)],
                                      "options": options, "answeredWith": answer, "end": "ANSWERED" if answer else "TIMED_OUT", "notice": None})
             del self.consent_log[:-50]
             if answer is None:
@@ -904,6 +922,178 @@ class FakePhone:
                 "due_today": len([r for r in live if day_of(r) == self.today.isoformat()]),
                 "due_this_week": len([r for r in live if self.today.isoformat() <= day_of(r) <= (week_start + timedelta(days=6)).isoformat()]),
                 "today": self.today.isoformat(), "week_start": week_start.isoformat(), "week_end": (week_start + timedelta(days=6)).isoformat(), "time_zone": "Asia/Shanghai"}
+
+    # ---- sms (plugins/samples/sms/README.md: permission gate, masking, short numbers, dedupe, rate limit, the async outbox)
+    def _call_sms_tool(self, tool, args):
+        try:
+            return "completed", json.dumps(getattr(self, "t_" + tool)(args), ensure_ascii=False)
+        except ToolError as e:
+            return "failed", str(e)
+
+    def _sms_require(self, perm_index):
+        mode = self.sms_mode()
+        if self.sms["granted"][L.SMS_PERMISSIONS[perm_index]]:
+            return
+        if mode == "compose_only":
+            raise ToolError("Compose-only mode: the Messages app has no SMS permissions, so only sms_compose works right now. Ask the user to open the Messages app")
+        raise ToolError("%s is not granted. Ask the user to open the Messages app" % L.SMS_PERMISSIONS[perm_index].split(".")[-1])
+
+    def _sms_advance(self):
+        """The async part of a send: every look at the outbox moves a row one step on (queued -> sent -> delivered)."""
+        for o in self.sms["outbox"]:
+            if o["state"] in ("queued", "sent"):
+                o["_age"] = o.get("_age", 0) + 1
+                if "sms-send-fails" in self.faults:
+                    o["state"], o["error"] = "failed", "radio_off"
+                elif o["_age"] >= 1 and o["state"] == "queued":
+                    o["state"], o["sent_parts"] = "sent", o["parts"]
+                elif o["_age"] >= 3 and o["state"] == "sent" and "sms-never-delivered" not in self.faults:
+                    o["state"], o["delivered_parts"] = "delivered", o["parts"]
+
+    CODE_WORDS = ("code", "otp", "pin", "verification", "验证码", "校验码", "动态码")
+
+    def _sms_mask(self, body):
+        if not self.sms["settings"]["mask_codes"] or "sms-never-masks" in self.faults or not any(w in body.lower() for w in self.CODE_WORDS):
+            return body, 0
+        n = [0]
+        def hide(m):
+            n[0] += 1
+            return "\u2022" * len(m.group(0))
+        return re.sub(r"(?<!\d)\d{4,8}(?!\d)", hide, body), n[0]
+
+    def _sms_parse_to(self, a):
+        raw = str(a.get("to") or "").strip()
+        if not raw:
+            raise ToolError("Missing recipient: pass the phone number in 'to'.")
+        if any(ch in raw for ch in ",;/|\n"):
+            raise ToolError("Only one recipient per call is allowed; send separate messages one at a time.")
+        number = re.sub(r"[ \-.()]", "", raw)
+        if not re.fullmatch(r"\+?\d+", number):
+            raise ToolError("Invalid recipient: use a phone number with digits only (optionally starting with +), not names or text.")
+        digits = number.lstrip("+")
+        if not 3 <= len(digits) <= 15:
+            raise ToolError("Invalid recipient: a phone number has 3 to 15 digits (got %d). Pass exactly one number." % len(digits))
+        return number
+
+    def _sms_is_short(self, number):
+        digits = number.lstrip("+")
+        if not number.startswith("+") and len(digits) < 7:
+            return True
+        national = digits[2:] if number.startswith("+86") else digits
+        return (number.startswith("+86") or len(national) <= 8) and national[:2] in ("10", "95", "96") and not number.startswith("+") or number.startswith("+86") and national[:2] in ("10", "95", "96")
+
+    def _sms_check_text(self, a):
+        text = a.get("text")
+        if text is None:
+            raise ToolError("Missing required parameter 'text' (the message body).")
+        if not str(text).strip():
+            raise ToolError("The message text is empty.")
+        if len(text) > 500:
+            raise ToolError("The message is too long: %d characters, the limit is 500. Shorten it; do not split one request into several messages." % len(text))
+        return text
+
+    @staticmethod
+    def _last10(address):
+        return re.sub(r"\D", "", address)[-10:]
+
+    def t_sms_thread_list(self, a):
+        self._sms_require(0)
+        threads = {}
+        for m in self.sms["inbox"]:
+            threads.setdefault(self._last10(m["address"]), []).append(m)
+        out, masked_total = [], 0
+        for key, msgs in sorted(threads.items(), key=lambda kv: -max(x["date"] for x in kv[1])):
+            last = max(msgs, key=lambda x: x["date"])
+            snippet, masked = self._sms_mask(last["body"])
+            masked_total += masked
+            item = {"thread_id": str(len(out) + 1), "address": last["address"], "last_date": "2026-10-07T12:00:00+08:00", "last_type": last["type"], "message_count": len(msgs),
+                    "unread_count": 0, "snippet": snippet}
+            if masked:
+                item["code_masked"] = True
+            out.append(item)
+        limit, offset = int(a.get("limit", 20)), int(a.get("offset", 0))
+        page = out[offset:offset + limit]
+        return {"count": len(page), "total": len(out), "has_more": offset + len(page) < len(out), "next_offset": None,
+                "masking": {"verification_codes": "masked" if self.sms["settings"]["mask_codes"] else "visible", **({"masked_count": masked_total} if masked_total else {})}, "threads": page}
+
+    def _sms_message_json(self, i, m, body, masked):
+        out = {"id": str(i), "address": m["address"], "type": m["type"], "date": "2026-10-07T12:00:00+08:00", "read": True, "body": body}
+        if masked:
+            out["code_masked"] = True
+        return out
+
+    def t_sms_message_list(self, a):
+        self._sms_require(0)
+        address = str(a.get("address") or "").strip()
+        if not address:
+            raise ToolError("Missing required parameter 'address' (phone number or sender name).")
+        rows = sorted([(i, m) for i, m in enumerate(self.sms["inbox"], 1) if self._last10(m["address"]) == self._last10(address)], key=lambda x: -x[1]["date"])
+        out, masked_total = [], 0
+        for i, m in rows[:int(a.get("limit", 20))]:
+            body, masked = self._sms_mask(m["body"])
+            masked_total += masked
+            out.append(self._sms_message_json(i, m, body, masked))
+        return {"address": address, "count": len(out), "has_more": len(rows) > len(out), "next_offset": None,
+                "masking": {"verification_codes": "masked" if self.sms["settings"]["mask_codes"] else "visible", **({"masked_count": masked_total} if masked_total else {})}, "messages": out}
+
+    def t_sms_search(self, a):
+        self._sms_require(0)
+        q = str(a.get("query") or "").strip()
+        if not q:
+            raise ToolError("Missing required parameter 'query' (text to search for).")
+        out, masked_total = [], 0
+        for i, m in sorted(enumerate(self.sms["inbox"], 1), key=lambda x: -x[1]["date"]):
+            body, masked = self._sms_mask(m["body"])
+            if q.lower() in body.lower():
+                masked_total += masked
+                out.append(self._sms_message_json(i, m, body, masked))
+        out = out[:int(a.get("limit", 20))]
+        return {"query": q, "count": len(out), "has_more": False,
+                "masking": {"verification_codes": "masked" if self.sms["settings"]["mask_codes"] else "visible", **({"masked_count": masked_total} if masked_total else {})}, "messages": out}
+
+    def t_sms_send(self, a):
+        self._sms_require(1)
+        to = self._sms_parse_to(a)
+        text = self._sms_check_text(a)
+        if not self.sms["settings"]["allow_short_numbers"] and "sms-sends-to-short" not in self.faults and self._sms_is_short(to):
+            raise ToolError("Refusing to send to %s: it looks like a short or service number, and messages to those can be charged or are irreversible. "
+                            "Only the user can allow short numbers, in the Messages app settings." % to)
+        out = self.sms["outbox"]
+        dup = next((o for o in out if o["state"] != "failed" and o["to"] == to and o["text"] == text), None)
+        if dup is not None and "sms-no-dedupe" not in self.faults:
+            return {"id": dup["id"], "to": to, "parts": dup["parts"], "state": dup["state"], "submitted": True, "deduplicated": True, "note": "already submitted"}
+        if len(out) >= self.sms["settings"]["rate_limit"]:
+            raise ToolError("Rate limit reached: %d messages were submitted in the last 10 minutes (limit %d)." % (len(out), self.sms["settings"]["rate_limit"]))
+        parts = 1 if len(text) <= 70 else -(-len(text) // 67)
+        entry = {"id": str(self.sms["next_id"]), "to": to, "text": text, "parts": parts, "state": "queued", "sent_parts": 0, "delivered_parts": 0, "error": None}
+        self.sms["next_id"] += 1
+        if "sms-forgets-outbox" not in self.faults:
+            out.insert(0, entry)
+        self.sms_sent_log.append({"to": to, "text": text})
+        self.sms["inbox"].append({"address": to, "body": text, "type": "sent", "date": self.NOW_MS + 10_000 + len(self.sms["inbox"]) * 1000})
+        return {"id": entry["id"], "to": to, "parts": parts, "state": "queued", "submitted": True, "deduplicated": False, "note": "Submitted to the phone's SMS service."}
+
+    def t_sms_send_status(self, a):
+        self._sms_require(1)
+        sid = str(a.get("id") or "").strip()
+        if not sid:
+            raise ToolError("Missing required parameter 'id' (as returned by sms_send).")
+        self._sms_advance()
+        o = next((x for x in self.sms["outbox"] if x["id"] == sid), None)
+        if o is None:
+            raise ToolError("Unknown id '%s': only messages sent by this app with sms_send can be checked." % sid)
+        return {k: o[k] for k in ("id", "to", "parts", "state", "sent_parts", "delivered_parts")} | ({"error": o["error"]} if o["error"] else {})
+
+    def t_sms_compose(self, a):
+        to = self._sms_parse_to(a)
+        text = a.get("text") or None
+        if text is not None and len(text) > 500:
+            raise ToolError("The message is too long: %d characters, the limit is 500." % len(text))
+        if "sms-no-composer" in self.faults:
+            raise ToolError("No messaging screen could be opened on this phone.")
+        draft = {"id": str(len(self.sms["drafts"]) + 1), "to": to, "text": text}
+        self.sms["drafts"].append(draft)
+        return {"opened": True, "draft_id": draft["id"], "to": to, "prefilled_text": text is not None, "note": "Nothing was sent; the user has to press send."}
 
     # ---- notes
     def _note(self, a):

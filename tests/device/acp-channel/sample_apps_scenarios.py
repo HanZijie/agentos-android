@@ -874,10 +874,247 @@ def todo_steps(ctx):
     return S
 
 
+# ---------------------------------------------------------------------- sms (emulators only)
+
+SMS_SENDER = "+12025550143"      # who the incoming test messages come from: a made-up number (the 555-01xx range is reserved for fiction)
+SMS_CODE = "482910"
+MASK = "\u2022" * 6             # what the app shows instead of a six-digit verification code
+SMS_SHORT_NUMBER = "10086"       # a service number: refused unless the user allows short numbers
+
+
+def wait_until(fn, timeout, interval=0.5):
+    """Poll `fn` until it is truthy or `timeout` seconds (scaled by the unit tests) are over; returns its last value."""
+    deadline = time.time() + timeout * L.SLEEP_SCALE
+    while True:
+        v = fn()
+        if v or time.time() >= deadline:
+            return v
+        time.sleep(interval * L.SLEEP_SCALE)
+
+
+def sms_unchanged(b, a, t, c):
+    return [eq("nothing was sent: the outbox rows are the same", b["outbox_keys"], a["outbox_keys"])]
+
+
+def sms_consent_card(c, risk_tool, to, text, answered=None):
+    """What the user was shown for sms_send (ConsentDebugReceiver `recent`): HIGH risk, only Allow once / Deny, and the recipient and the whole text in the arguments."""
+    asked = c.asked(L.model_name("sms", risk_tool))
+    last = asked[-1] if asked else {}
+    out = [truth("the confirmation for %s was shown at risk HIGH with only Allow once / Deny" % risk_tool, "HIGH, [ALLOW_ONCE, DENY]",
+                 last.get("risk") == "HIGH" and list(last.get("options") or []) == ["ALLOW_ONCE", "DENY"], {k: last.get(k) for k in ("risk", "options")}),
+           truth("the confirmation shows the full recipient and the full text", "to=%s and text=%r in the arguments" % (to, text),
+                 to in (last.get("args") or "") and text in (last.get("args") or ""), last.get("args")),
+           truth("the confirmation names the plugin and server", L.source_line("sms"), last.get("source") == L.source_line("sms"), last.get("source"))]
+    if answered:
+        out.append(eq("the confirmation was answered %s" % answered, answered, last.get("answeredWith")))
+    return out
+
+
+def sms_mark(run_id):
+    """The marker of the sms texts: the run id with its digits turned into letters (0-9 -> g-p). A run of 4 to 8 digits next to the words "verification code" is
+    exactly what the app masks, and the marker has to survive that to be searched for."""
+    return "e2e-" + "".join(chr(ord("g") + int(ch)) if ch.isdigit() else ch for ch in run_id)
+
+
+def sms_steps(ctx):
+    mark = sms_mark(ctx.run_id)
+    pkg = L.SAMPLES["sms"].package
+    peer = ctx.sms_peer
+    S = []
+    normal = "[%s] Meeting notes are ready. See you at 3pm." % mark
+    code_msg = "[%s] Your verification code is %s. It expires in 5 minutes." % (mark, SMS_CODE)
+    sent_text = mark + " 纪要已发出，请查收"
+    denied_to = peer or SMS_SENDER
+    denied_text = mark + " 请确认纪要"
+
+    # ---- settings for the run (restored by sms.restore): codes masked, short numbers refused, a rate limit the run cannot hit
+    def prepare(c):
+        st = L.SmsState(c.adb)
+        before = c.state("sms")
+        c.vars["_sms_settings0"] = dict(before["settings"])
+        for key, value in (("mask_codes", True), ("allow_short_numbers", False), ("rate_limit", 30)):
+            st.set(key, value)
+        now = c.state("sms")
+        return [truth("the sms app has both SMS permissions (mode full): `pm grant` worked", "mode full, read_sms and send_sms true",
+                      now["mode"] == "full" and now["permissions"] == {"read_sms": True, "send_sms": True}, {"mode": now["mode"], "permissions": now["permissions"]}),
+                eq("settings for the run: codes masked, short numbers refused, rate limit 30", {"mask_codes": True, "allow_short_numbers": False, "rate_limit": 30}, now["settings"])]
+
+    S.append(("sms.prepare", "sms: both permissions granted, settings for the run", prepare))
+
+    # ---- failure paths of sms_send (HIGH risk: the confirmation is allowed once, then the tool refuses; nothing is sent)
+    S.append(Step("sms.err.short_number", "sms", "sms_send to a service number (10086) is refused by default, nothing sent",
+                  [Call("sms", "sms_send", {"to": SMS_SHORT_NUMBER, "text": mark + " hi"}, ok=False, error_has="short")], verify=sms_unchanged))
+    S.append(Step("sms.err.missing_text", "sms", "sms_send without text: error, nothing sent",
+                  [Call("sms", "sms_send", {"to": SMS_SENDER}, ok=False, error_has="text")], verify=sms_unchanged))
+    S.append(Step("sms.err.missing_to", "sms", "sms_send without a recipient: error, nothing sent",
+                  [Call("sms", "sms_send", {"text": mark + " hi"}, ok=False, error_has="recipient")], verify=sms_unchanged))
+    S.append(Step("sms.err.too_long", "sms", "sms_send with a text of 501 characters: refused, nothing sent",
+                  [Call("sms", "sms_send", {"to": SMS_SENDER, "text": "a" * 501}, ok=False, error_has="500|too long")], verify=sms_unchanged))
+
+    # ---- incoming messages: made on the emulator, read through MCP
+    def seed(c):
+        for text in (normal, code_msg):
+            L.emu_sms_send(c.adb, SMS_SENDER, text)
+        st = L.SmsState(c.adb)
+
+        def arrived():
+            err, res = st.call("sms_search", {"query": mark})
+            return not err and isinstance(res, dict) and res.get("count") == 2
+        ok = bool(wait_until(arrived, 20))
+        return [truth("both incoming messages are in the phone's SMS store (read in-process by the app's debug tool, 20 s at most)", "sms_search finds 2 messages with the marker", ok, None)]
+
+    S.append(("sms.seed_inbox", "sms: `adb emu sms send` makes two incoming messages (one with a verification code)", seed))
+
+    def thread_of(r):
+        return next((x for x in (r or {}).get("threads", []) if L.SmsState and x.get("address", "").replace(" ", "")[-10:] == SMS_SENDER[-10:]), None)
+
+    def v_threads(b, a, t, c):
+        r = t.tools[0].json() or {}
+        th = thread_of(r)
+        return [truth("sms_thread_list has the conversation with the sender (two messages)", "a thread whose message_count >= 2", bool(th) and th.get("message_count", 0) >= 2, th),
+                truth("no thread snippet shows the verification code", "%s in no snippet" % SMS_CODE, not any(SMS_CODE in x.get("snippet", "") for x in r.get("threads", [])),
+                      [x.get("snippet") for x in r.get("threads", [])]),
+                eq("the result says the codes are masked", "masked", (r.get("masking") or {}).get("verification_codes"))]
+
+    S.append(Step("sms.threads", "sms", "sms_thread_list: the conversation is there, the code in a snippet is masked",
+                  [Call("sms", "sms_thread_list")], verify=lambda b, a, t, c: v_threads(b, a, t, c) + sms_unchanged(b, a, t, c)))
+
+    def v_messages(b, a, t, c):
+        r = t.tools[0].json() or {}
+        msgs = r.get("messages", [])
+        coded = next((m for m in msgs if "verification code" in m.get("body", "")), {})
+        plain = next((m for m in msgs if "Meeting notes" in m.get("body", "")), {})
+        return [eq("sms_message_list has both messages", 2, len([m for m in msgs if mark in m.get("body", "")])),
+                truth("the verification code is masked by default (the six digits are replaced, code_masked is true)", "%s in the body, %s not" % (MASK, SMS_CODE),
+                      MASK in coded.get("body", "") and SMS_CODE not in coded.get("body", "") and coded.get("code_masked") is True, coded.get("body")),
+                eq("a message without a code is returned as it is", normal, plain.get("body")),
+                eq("the messages are incoming (type inbox)", ["inbox", "inbox"], sorted(m.get("type") for m in msgs if mark in m.get("body", ""))),
+                eq("the result says the codes are masked", "masked", (r.get("masking") or {}).get("verification_codes"))]
+
+    S.append(Step("sms.messages", "sms", "sms_message_list: the code is masked by default",
+                  [Call("sms", "sms_message_list", {"address": SMS_SENDER})], verify=v_messages))
+
+    def v_search(b, a, t, c):
+        by_marker, by_code = (t.tools[0].json() or {}), (t.tools[1].json() or {})
+        return [eq("sms_search finds both messages by the marker", 2, by_marker.get("count")),
+                eq("searching for the digits of the code finds nothing while codes are masked (no probing)", 0, by_code.get("count"))]
+
+    S.append(Step("sms.search", "sms", "sms_search: by text; the code digits cannot be searched while masked",
+                  [Call("sms", "sms_search", {"query": mark}), Call("sms", "sms_search", {"query": SMS_CODE})], verify=v_search))
+
+    def v_unmask(b, a, t, c):
+        r = t.tools[0].json() or {}
+        coded = next((m for m in r.get("messages", []) if "verification code" in m.get("body", "")), {})
+        return [truth("with `mask_codes` off the code is readable", "%s in the body" % SMS_CODE, SMS_CODE in coded.get("body", "") and not coded.get("code_masked"), coded.get("body")),
+                eq("the result says the codes are visible", "visible", (r.get("masking") or {}).get("verification_codes")),
+                eq("the app's setting is off", False, a["settings"]["mask_codes"])]
+
+    S.append(Step("sms.unmask", "sms", "sms_message_list with `mask_codes` switched off in the app: the code is readable",
+                  [Call("sms", "sms_message_list", {"address": SMS_SENDER})], pre=lambda c: L.SmsState(c.adb).set("mask_codes", False),
+                  post=lambda c: L.SmsState(c.adb).set("mask_codes", True), verify=v_unmask))
+
+    def allow_short(c):
+        L.SmsState(c.adb).set("allow_short_numbers", True)
+        now = c.state("sms")["settings"]
+        return [eq("allow_short_numbers is on (the user's setting; emulators call each other by their port number, 4 digits)", True, now["allow_short_numbers"]),
+                eq("mask_codes is back on", True, now["mask_codes"])]
+
+    S.append(("sms.allow_short", "sms: the user allows short numbers (the emulators' port numbers)", allow_short))
+
+    # ---- sending: to the other emulator when there is one
+    if peer:
+        def v_send(b, a, t, c):
+            known = {o["id"] for o in b["outbox"]}
+            new = [o for o in a["outbox"] if o["id"] not in known]
+            r = t.tools[0].json() or {}
+            row = new[0] if new else None
+            return [eq("one row more in the app's outbox", 1, len(new))] + fields("outbox row", row, to=peer, text=sent_text, parts=1) \
+                + [truth("the row is queued, sent or delivered (never failed)", "queued | sent | delivered", bool(row) and row["state"] in ("queued", "sent", "delivered"), row and (row["state"], row["error"])),
+                   eq("the result: submitted, not deduplicated, state queued", [True, False, "queued"], [r.get("submitted"), r.get("deduplicated"), r.get("state")]),
+                   eq("the result's id is the outbox row's", row and row["id"], r.get("id"))] + sms_consent_card(c, "sms_send", peer, sent_text, "ALLOW_ONCE")
+
+        S.append(Step("sms.send", "sms", "sms_send to the other emulator: high-risk confirmation with the full recipient and text, then the outbox row",
+                      [Call("sms", "sms_send", {"to": peer, "text": sent_text})],
+                      capture=lambda tools, c: {"sms_id": str(tools[0].json()["id"])}, verify=v_send))
+
+        def settle(c):
+            """Wait (15 s at most) for the delivery report: queued -> sent -> delivered. Not delivered is fine (the report may never come), failed is not."""
+            sid = var(c.vars, "sms_id")
+            wait_until(lambda: (find(c.state("sms")["outbox"], sid) or {}).get("state") in ("delivered", "failed"), 15, 1.0)
+
+        def v_status(b, a, t, c):
+            r = t.tools[0].json() or {}
+            row = find(a["outbox"], c.vars["sms_id"])
+            return [truth("sms_send_status: the message was handed to the network (sent or delivered)", "sent | delivered", r.get("state") in ("sent", "delivered"), {k: r.get(k) for k in ("state", "error")}),
+                    eq("parts, sent_parts", [1, 1], [r.get("parts"), r.get("sent_parts")]),
+                    truth("the app's dump shows the same message in state sent or delivered", "sent | delivered", bool(row) and row["state"] in ("sent", "delivered"), row and (row["state"], row["error"]))]
+
+        S.append(Step("sms.status", "sms", "sms_send_status and the dump agree: sent (and delivered when the report arrived)",
+                      lambda v: [Call("sms", "sms_send_status", {"id": var(v, "sms_id")})], pre=settle, verify=v_status))
+
+        def v_dedup(b, a, t, c):
+            r = t.tools[0].json() or {}
+            return [eq("the same recipient and text again: deduplicated, the earlier id", [True, c.vars["sms_id"]], [r.get("deduplicated"), r.get("id")]),
+                    eq("no second message was sent", b["outbox_keys"], a["outbox_keys"])]
+
+        S.append(Step("sms.dedup", "sms", "sms_send with the same recipient and text again: deduplicated, nothing new in the outbox",
+                      [Call("sms", "sms_send", {"to": peer, "text": sent_text})], verify=v_dedup))
+    else:
+        ctx.skipped.append({"what": "sms.send / sms.status / sms.dedup", "reason": "no second emulator in `adb devices` (or --sms-peer none): the real send, the "
+                                                                                "delivery states and the duplicate check were not run; the confirmation and the refusal still are"})
+
+    def v_denied(b, a, t, c):
+        return sms_unchanged(b, a, t, c) + sms_consent_card(c, "sms_send", denied_to, denied_text)
+
+    S.append(Step("sms.denied", "sms", "sms_send declined (new session, mode=deny): the card shows the full recipient and text, nothing sent",
+                  [Call("sms", "sms_send", {"to": denied_to, "text": denied_text}, ok=False, error_has="tool_denied")],
+                  pre=deny_pre, post=deny_post, verify=declined("sms", "sms_send", v_denied)))
+
+    # ---- permissions revoked: compose-only mode
+    def revoke(c):
+        L.sms_permissions(c.adb, grant=False)
+
+    def regrant(c):
+        L.sms_permissions(c.adb, grant=True)
+
+    def v_compose_only(b, a, t, c):
+        compose = t.tools[3].json() or {}
+        return [eq("mode is compose_only and both permissions are off", ["compose_only", {"read_sms": False, "send_sms": False}], [a["mode"], a["permissions"]]),
+                truth("sms_thread_list names the compose-only mode in its error", "Compose-only", L.text_has(t.tools[0].text, "compose-only"), t.tools[0].text[:160]),
+                truth("sms_send names it too, and nothing was sent", "Compose-only", L.text_has(t.tools[1].text, "compose-only"), t.tools[1].text[:160]),
+                truth("sms_send_status names it", "Compose-only", L.text_has(t.tools[2].text, "compose-only"), t.tools[2].text[:160]),
+                eq("sms_compose works without any SMS permission: it opened the composer", True, compose.get("opened")),
+                eq("the draft is kept in the app", [(denied_to, mark + " draft")], [(x["to"], x["text"]) for x in a["drafts"] if mark in (x["text"] or "")])] + sms_unchanged(b, a, t, c)
+
+    S.append(Step("sms.compose_only", "sms", "permissions revoked: mode compose_only, the other tools refuse clearly, sms_compose still works",
+                  [Call("sms", "sms_thread_list", ok=False), Call("sms", "sms_send", {"to": denied_to, "text": denied_text + "!"}, ok=False),
+                   Call("sms", "sms_send_status", {"id": "1"}, ok=False), Call("sms", "sms_compose", {"to": denied_to, "text": mark + " draft"})],
+                  pre=revoke, post=regrant, verify=v_compose_only))
+
+    def back(c):
+        now = c.state("sms")
+        return [eq("after `pm grant` the mode is full again", ["full", {"read_sms": True, "send_sms": True}], [now["mode"], now["permissions"]])]
+
+    S.append(("sms.permissions_back", "sms: permissions granted again, mode full", back))
+    S += plugin_off_steps(ctx, "sms", pkg, Call("sms", "sms_thread_list"), "outbox_keys", "sms")
+
+    def restore(c):
+        want = c.vars.get("_sms_settings0")
+        if not want:
+            return [truth("the settings from before the run are known", "recorded by sms.prepare", False, None)]
+        st = L.SmsState(c.adb)
+        for key, value in want.items():
+            st.set(key, value)
+        return [eq("the sms settings are as they were before the run", want, c.state("sms")["settings"])]
+
+    S.append(("sms.restore", "sms: settings restored", restore))
+    return S
+
+
 def scripted_steps(ctx):
     """Steps (`Step`) and check steps (a `(id, title, fn)` tuple, no prompt) in order; the audit of an app comes right after its steps
     (ConsentDebugReceiver keeps the latest 50 requests only). Only the apps this run drives (ctx.apps)."""
-    builders = {"alarm": alarm_steps, "calendar": calendar_steps, "notes": notes_steps, "todo": todo_steps}
+    builders = {"alarm": alarm_steps, "calendar": calendar_steps, "notes": notes_steps, "todo": todo_steps, "sms": sms_steps}
     plan = []
     for app in ctx.apps:
         if app in builders:

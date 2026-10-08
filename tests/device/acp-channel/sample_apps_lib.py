@@ -438,9 +438,11 @@ class SmsState:
 
     def snapshot(self):
         d = dump_pages(self.adb, self.sample, "outbox")
-        return {"mode": d.get("mode"), "permissions": dict(d.get("permissions") or {}), "settings": dict(d.get("settings") or {}),
-                "outbox": [{"id": str(o["id"]), "to": o["to"], "text": o["text"], "parts": o.get("parts"), "state": o["state"], "sent_parts": o.get("sent_parts"),
-                            "delivered_parts": o.get("delivered_parts"), "error": o.get("error")} for o in d["outbox"]],
+        outbox = [{"id": str(o["id"]), "to": o["to"], "text": o["text"], "parts": o.get("parts"), "state": o["state"], "sent_parts": o.get("sent_parts"),
+                   "delivered_parts": o.get("delivered_parts"), "error": o.get("error")} for o in d["outbox"]]
+        return {"mode": d.get("mode"), "permissions": dict(d.get("permissions") or {}), "settings": dict(d.get("settings") or {}), "outbox": outbox,
+                # (id, to, text) of every outbox row: what was sent, without the state that moves by itself. "Nothing was sent" compares these.
+                "outbox_keys": [(o["id"], o["to"], o["text"]) for o in outbox],
                 "drafts": [{"id": str(x["id"]), "to": x["to"], "text": x.get("text")} for x in d.get("drafts") or []]}
 
     def reset(self):
@@ -847,3 +849,18 @@ def find_sms_peer(adb, spec="auto"):
         return str(spec)
     others = [x for x in adb.devices() if is_emulator(x) and x != adb.serial]
     return others[0].split("-", 1)[1] if others else None
+
+
+# ---------------------------------------------------------------------- the sms app on an emulator
+
+def emu_sms_send(adb, sender, text):
+    """An incoming SMS on an emulator (`adb -s emulator-NNNN emu sms send <from> <text>`): it lands in the system SMS store like a real one."""
+    out = adb.run("emu", "sms", "send", sender, text, check=False)
+    if "KO" in out:
+        raise DriverError("emu sms send %s failed: %s" % (sender, out.strip()[:200]))
+    return out
+
+
+def sms_permissions(adb, grant):
+    """Grant / revoke READ_SMS and SEND_SMS of the sms app from the shell (what the user does in the app's permission screen)."""
+    return [adb.sh("pm %s %s %s" % ("grant" if grant else "revoke", SAMPLES["sms"].package, perm), check=False) for perm in SMS_PERMISSIONS]
