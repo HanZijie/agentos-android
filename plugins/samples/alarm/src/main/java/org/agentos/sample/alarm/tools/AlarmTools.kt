@@ -22,6 +22,7 @@ import org.agentos.sample.alarm.data.AlarmRepository
 import org.agentos.sample.alarm.data.EVERY_DAY
 import org.agentos.sample.alarm.data.WEEKDAYS
 import org.agentos.sample.alarm.data.WEEKEND
+import org.agentos.sample.alarm.schedule.SystemAlarmInfo
 
 /**
  * 闹钟的 MCP 工具（docs/sample-apps.md 4.1 节）。名字和必填参数是契约，不能改。
@@ -33,6 +34,7 @@ import org.agentos.sample.alarm.data.WEEKEND
 class AlarmTools(
     private val repository: AlarmRepository,
     private val ring: RingControl,
+    private val systemAlarms: SystemAlarmInfo,
 ) {
     val tools: List<ToolDef> = listOf(
         alarmList(),
@@ -44,6 +46,7 @@ class AlarmTools(
         alarmNext(),
         alarmDismiss(),
         alarmSnooze(),
+        alarmSystemNext(),
     )
 
     fun find(name: String): ToolDef? = tools.firstOrNull { it.name == name }
@@ -199,6 +202,32 @@ class AlarmTools(
                     put("alarm", next.alarm.toJson())
                     put("next_fire_at", at.iso())
                     put("fires_in_minutes", Duration.between(now, at).toMinutes())
+                },
+            )
+        }
+    }
+
+    private fun alarmSystemNext() = tool(
+        name = "alarm_system_next",
+        title = "Next alarm on the phone (any app)",
+        description = "Get the next alarm of ANY alarm app on this phone (the system's next alarm clock, the one the status bar shows), " +
+            "not only this app's: next_fire_at (ISO-8601 with offset), fires_in_minutes and owned_by_this_app " +
+            "(true when this Alarm app set it, false when another app such as the Clock app did). " +
+            "Returns JSON null when no alarm is set anywhere. Read-only; use alarm_next for this app's own next alarm.",
+        schema = schema {},
+        annotations = ToolAnnotations(readOnlyHint = true),
+    ) { _ ->
+        val next = systemAlarms.next()
+        if (next == null) {
+            ToolOutput.jsonNull()
+        } else {
+            val now = repository.now()
+            val at = next.triggerAtMillis.toZoned(now)
+            ToolOutput.json(
+                buildJsonObject {
+                    put("next_fire_at", at.iso())
+                    put("fires_in_minutes", Duration.between(now, at).toMinutes())
+                    put("owned_by_this_app", next.isOwnedBy(systemAlarms.ownPackage))
                 },
             )
         }

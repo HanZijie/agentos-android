@@ -8,6 +8,9 @@ description: Use when the user wants to set, change, turn on or off, remove or c
 The Alarm app on this phone keeps the alarms. Every change you make is applied to the system alarm clock immediately and
 shows up in the app's list at once. Alarms ring with sound, vibration and a full-screen page, even on the lock screen.
 
+**Set alarms only with this app's tools.** Do not open another clock app or send a "set alarm" intent: two apps would both
+ring. This app is the single source for alarms you create or change.
+
 ## Tools
 
 | Tool | Use it to |
@@ -21,6 +24,7 @@ shows up in the app's list at once. Alarms ring with sound, vibration and a full
 | `alarm_next` | Which alarm rings next, and in how many minutes. Returns `null` when nothing is on. |
 | `alarm_dismiss` | Stop the alarm that is ringing right now. Errors if nothing is ringing. |
 | `alarm_snooze` | Silence the ringing alarm and let it ring again after its snooze length. |
+| `alarm_system_next` | Read-only. The next alarm of **any** alarm app on the phone (what the status bar shows), with `owned_by_this_app`. Returns `null` when no alarm is set anywhere. |
 
 ## Formats (get these right)
 
@@ -40,6 +44,12 @@ shows up in the app's list at once. Alarms ring with sound, vibration and a full
 - **"Turn off the Monday alarm for now"** -> find it, `alarm_set_enabled {"id":"...","enabled":false}` (do not remove it).
 - **"Remove all my alarms"** -> `alarm_list`, then confirm with the user before calling `alarm_delete` once per alarm.
 - **"What's my next alarm?"** -> `alarm_next`.
+- **"What time do I get up tomorrow?" / "Do I have an alarm?"** -> call both `alarm_next` (this app's own alarms) and
+  `alarm_system_next` (the whole phone). If `alarm_system_next` is earlier and `owned_by_this_app` is `false`, another clock
+  app set it: tell the user that alarm exists outside this app and that you cannot list, change or delete it.
+- **"Remind me about the 3 pm meeting" / any reminder tied to an event** -> not an alarm. Put it on the calendar event's
+  `reminder_minutes`. Create an alarm only when the user wants something to *ring at a clock time* ("wake me at 7"). One thing
+  gets one entry, never both an event reminder and an alarm.
 
 ## Gotchas
 
@@ -48,4 +58,5 @@ shows up in the app's list at once. Alarms ring with sound, vibration and a full
 - Changing `time`, `days` or `enabled` ends any snooze in progress.
 - A one-time alarm switches itself off after it rings; `alarm_set_enabled true` arms it again for the next occurrence.
 - `alarm_dismiss` and `alarm_snooze` only work while an alarm is actually ringing; otherwise they return an error saying so.
+- `alarm_system_next` is a mirror, not a handle: it has no id and nothing in it can be edited with the tools above.
 - Errors come back as `isError` with one sentence (bad time format, unknown id, missing parameter). Fix the argument and retry; do not repeat the same call.
