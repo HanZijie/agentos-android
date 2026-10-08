@@ -144,14 +144,13 @@ internal object ConsentText {
 
     /**
      * 这条请求能选哪些：高风险只有“允许一次”和“拒绝”；“始终允许”需要有来源插件、写级、并且写回通道可用。
-     * **第三方 App 发起的请求只有“允许一次”和“拒绝”**（docs/third-party-acp.md 4.4）：不管风险等级、`rememberable` 写了什么，
-     * 都不给“本会话内不再询问”和“始终允许”——第三方不能借用户的一次点击换来以后的静默调用。
+     * 调用方是谁在这里**不看**：所有调用方一视同仁（docs/third-party-acp.md 4.4）。要对某类调用方拿掉“本会话内不再询问”或“始终允许”，
+     * 由 `CallerPolicy` 在生成请求时把 [ConsentRequest.rememberable] / [ConsentRequest.alwaysAllowOffered] 设为 false。
      */
     fun allowedChoices(request: ConsentRequest, alwaysAvailable: Boolean): List<ConsentChoice> = buildList {
-        val thirdParty = request.caller.kind == CallerKind.APP
         add(ConsentChoice.ALLOW_ONCE)
-        if (!thirdParty && request.rememberable && RiskPolicy.maySessionRemember(request.risk)) add(ConsentChoice.ALLOW_FOR_SESSION)
-        if (!thirdParty && alwaysAvailable && request.source != null && request.risk == ToolRisk.WRITE && RiskPolicy.mayAlwaysAllow(request.risk)) add(ConsentChoice.ALWAYS_ALLOW)
+        if (request.rememberable && RiskPolicy.maySessionRemember(request.risk)) add(ConsentChoice.ALLOW_FOR_SESSION)
+        if (alwaysAvailable && request.alwaysAllowOffered && request.source != null && request.risk == ToolRisk.WRITE && RiskPolicy.mayAlwaysAllow(request.risk)) add(ConsentChoice.ALWAYS_ALLOW)
         add(ConsentChoice.DENY)
     }
 }

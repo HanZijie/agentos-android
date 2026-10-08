@@ -10,6 +10,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.agentos.runtime.RuntimeConfig
+import org.agentos.runtime.broker.CallerPolicy
+import org.agentos.runtime.broker.OpenCallerPolicy
+import org.agentos.runtime.broker.StrictCallerPolicy
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.ports.CallerIdentity
@@ -63,8 +66,8 @@ class ToolScopeStoreTest {
         Unit
     }
 
-    private fun runtime(jev: JevProvider? = null, file: java.io.File? = null): TestRuntime {
-        val config = RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), jev = jev, quota = TestRuntime.UNLIMITED_QUOTA)
+    private fun runtime(jev: JevProvider? = null, file: java.io.File? = null, policy: CallerPolicy = OpenCallerPolicy): TestRuntime {
+        val config = RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), jev = jev, quota = TestRuntime.UNLIMITED_QUOTA, callerPolicy = policy)
         val rt = if (file == null) TestRuntime(FakeScripts.always(script), config = config)
         else TestRuntime(FakeScripts.always(script), databaseFile = file, host = FakeHostPort(databaseFile = file), config = config)
         register(rt)
@@ -123,7 +126,7 @@ class ToolScopeStoreTest {
     }
 
     @Test
-    fun `a third-party session that was created without a scope still has no tools after a restart`() {
+    fun `a third-party session that was created without a scope has the whole catalog after a restart`() {
         val first = runtime()
         var sessionId = ""
         run(first) { sessionId = first.engine.createSession(TestRuntime.APP, null).id }
@@ -131,8 +134,27 @@ class ToolScopeStoreTest {
         run(second) {
             val t = second.engine.submit(TestRuntime.APP, sessionId, TestRuntime.text("go"))
             second.engine.awaitTask(t.id)
-            assertEquals(emptyList(), second.core!!.configs.last().tools)
-            assertTrue(second.host.tools.invocations.isEmpty())
+            assertEquals(listOf("alarm_create", "event_create", "note_delete"), second.core!!.configs.last().tools.map { it.name }.sorted())
+        }
+        second.host.deleteDatabase()
+    }
+
+    @Test
+    fun `strict policy - the same session has no tools, and the policy is read at use time so a restart with another policy changes it`() {
+        val first = runtime(policy = StrictCallerPolicy)
+        var sessionId = ""
+        run(first) {
+            sessionId = first.engine.createSession(TestRuntime.APP, null).id
+            val t = first.engine.submit(TestRuntime.APP, sessionId, TestRuntime.text("go"))
+            first.engine.awaitTask(t.id)
+            assertEquals(emptyList(), first.core!!.configs.last().tools)
+            assertTrue(first.host.tools.invocations.isEmpty())
+        }
+        val second = runtime(file = first.databaseFile, policy = OpenCallerPolicy)
+        run(second) {
+            val t = second.engine.submit(TestRuntime.APP, sessionId, TestRuntime.text("go"))
+            second.engine.awaitTask(t.id)
+            assertEquals(3, second.core!!.configs.last().tools.size)
         }
         second.host.deleteDatabase()
     }
@@ -153,20 +175,28 @@ class ToolScopeStoreTest {
     }
 
     @Test
-    fun `a damaged stored scope reads as no tools for a third-party session, not as no restriction`() {
-        val first = runtime()
-        var sessionId = ""
-        run(first) { sessionId = first.engine.createSession(TestRuntime.APP, null, memoScope).id }
-        rawSql(first.databaseFile, "UPDATE sessions SET tool_scope = 'garbage' WHERE id = '$sessionId'")
-        val second = runtime(file = first.databaseFile)
-        run(second) {
-            assertEquals(emptyList(), second.engine.session(TestRuntime.APP, sessionId).toolScope)
-            val t = second.engine.submit(TestRuntime.APP, sessionId, TestRuntime.text("go"))
-            second.engine.awaitTask(t.id)
-            assertEquals(emptyList(), second.core!!.configs.last().tools)
-            assertTrue(second.host.tools.invocations.isEmpty())
+    fun `a damaged stored scope reads as no tools, not as no restriction - for every kind of caller and every policy`() {
+        for (policy in listOf(OpenCallerPolicy, StrictCallerPolicy)) {
+            val first = runtime(policy = policy)
+            val ids = mutableMapOf<String, String>()
+            run(first) {
+                ids["app"] = first.engine.createSession(TestRuntime.APP, null, memoScope).id
+                ids["self"] = first.engine.createSession(TestRuntime.SELF, null, memoScope).id
+            }
+            rawSql(first.databaseFile, "UPDATE sessions SET tool_scope = 'garbage'")
+            val second = runtime(file = first.databaseFile, policy = policy)
+            run(second) {
+                for ((who, caller) in listOf("app" to TestRuntime.APP, "self" to TestRuntime.SELF)) {
+                    val id = ids.getValue(who)
+                    assertEquals(emptyList(), second.engine.session(caller, id).toolScope, "$who $policy")
+                    val t = second.engine.submit(caller, id, TestRuntime.text("go"))
+                    second.engine.awaitTask(t.id)
+                    assertEquals(emptyList(), second.core!!.configs.last().tools, "$who $policy")
+                }
+                assertTrue(second.host.tools.invocations.isEmpty())
+            }
+            second.host.deleteDatabase()
         }
-        second.host.deleteDatabase()
     }
 
     // ------------------------------------------------------------------ 迁移
@@ -206,7 +236,7 @@ class ToolScopeStoreTest {
             assertEquals(listOf("alarm_create", "event_create", "note_delete"), second.core!!.configs.last().tools.map { it.name }.sorted(), "AgentOS's own old session keeps every tool")
             val app = second.engine.submit(TestRuntime.APP, appSession, TestRuntime.text("go"))
             second.engine.awaitTask(app.id)
-            assertEquals(emptyList(), second.core!!.configs.last().tools, "an old third-party session has none")
+            assertEquals(listOf("alarm_create", "event_create", "note_delete"), second.core!!.configs.last().tools.map { it.name }.sorted(), "an old third-party session has the whole catalog, like any session with no scope")
             // and new sessions can carry a scope
             assertEquals(ToolScope.normalize(memoScope), second.engine.createSession(TestRuntime.APP, null, memoScope).toolScope)
         }

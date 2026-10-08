@@ -20,6 +20,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.agentos.runtime.RuntimeConfig
+import org.agentos.runtime.broker.CallerPolicy
+import org.agentos.runtime.broker.OpenCallerPolicy
+import org.agentos.runtime.broker.StrictCallerPolicy
 import org.agentos.runtime.errors.RpcCodes
 import org.agentos.runtime.ports.ToolRef
 import org.agentos.runtime.ports.ToolResult
@@ -48,8 +51,12 @@ class ThirdPartyAcpTest {
     private val delete = ToolSource("notes", "main", "note_delete")
     private val scope = listOf(ToolRef("alarm", "alarm_create"))
 
-    private fun <T> test(quota: CallerQuotaConfig = CallerQuotaConfig(), block: suspend CoroutineScope.(AcpPair, TestRuntime) -> T) = runBlocking {
-        val rt = TestRuntime(FakeScripts.directives(), config = RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), quota = quota))
+    private fun <T> test(
+        quota: CallerQuotaConfig = CallerQuotaConfig(),
+        policy: CallerPolicy = OpenCallerPolicy,
+        block: suspend CoroutineScope.(AcpPair, TestRuntime) -> T,
+    ) = runBlocking {
+        val rt = TestRuntime(FakeScripts.directives(), config = RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), quota = quota, callerPolicy = policy))
         rt.host.tools.registerSimple("alarm_create", ToolRisk.WRITE, alarm) { ToolResult.text("alarm set") }
         rt.host.tools.registerSimple("note_delete", ToolRisk.HIGH, delete) { ToolResult.text("deleted") }
         rt.start()
@@ -103,14 +110,36 @@ class ThirdPartyAcpTest {
         assertEquals(listOf("alarm_create"), rt.core!!.configs.last().tools.map { it.name })
     }
 
+    /**
+     * DOCUMENTED BEHAVIOUR (user decision 2026-10-08): over the wire, a third-party app that sends no toolScope gets the whole catalog and the
+     * ordinary confirmation rules. Strict is the opt-in alternative (next test); do not turn this one around.
+     */
     @Test
-    fun `a session of a third-party app without a scope has no tools`() = test { pair, rt ->
+    fun `DOCUMENTED - a session of a third-party app without a scope can use every catalog tool`() = test { pair, rt ->
         pair.initialize()
         val session = pair.newSession()
         assertNull(rt.engine.session(TestRuntime.APP, session.sessionId.value).toolScope)
         pair.prompt(session, directive("tools" to tools("alarm_create", "note_delete")))
+        assertEquals(listOf("alarm_create", "note_delete"), rt.core!!.configs.last().tools.map { it.name }.sorted())
+        assertEquals(listOf("alarm_create", "note_delete"), rt.host.tools.invocations.map { it.name }, "both ran, each after the user was asked")
+        assertEquals(listOf("alarm_create", "note_delete"), rt.host.consent.requests.map { it.toolName })
+    }
+
+    @Test
+    fun `strict policy - a session of a third-party app without a scope has no tools`() = test(policy = StrictCallerPolicy) { pair, rt ->
+        pair.initialize()
+        val session = pair.newSession()
+        pair.prompt(session, directive("tools" to tools("alarm_create", "note_delete")))
         assertTrue(rt.host.tools.invocations.isEmpty())
         assertEquals(emptyList(), rt.core!!.configs.last().tools)
+    }
+
+    @Test
+    fun `strict policy - the same app with a scope has exactly that scope`() = test(policy = StrictCallerPolicy) { pair, rt ->
+        pair.initialize()
+        val session = pair.newSession(toolScopeMeta(ToolRef("alarm", "alarm_create")))
+        pair.prompt(session, directive("tools" to tools("note_delete", "alarm_create")))
+        assertEquals(listOf("alarm_create"), rt.host.tools.invocations.map { it.name })
     }
 
     @Test

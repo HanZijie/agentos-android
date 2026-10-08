@@ -18,9 +18,11 @@ data class ToolRef(val plugin: String, val tool: String)
  * What a session may use (docs/third-party-acp.md 4.5): **narrowing only**. The tools a session can really use are the scope intersected with
  * the current catalog (user policy, enabled plugins), so an entry that does not exist is simply never matched, and nothing tells the caller.
  *
- * - [ALL]: no restriction. What AgentOS itself (`SELF`) and the desktop get when they did not ask for a scope; today's behaviour, unchanged.
- * - [only] / [NONE]: exactly these tools. A scope can be given to any caller, and then it applies to that caller too.
- * - A third-party app ([CallerKind.APP]) that did not give a scope has **no tools at all** ([forCaller]).
+ * - [ALL]: no restriction. What any caller gets when it did not ask for a scope (AgentOS itself, the desktop, and by default also a
+ *   third-party app: `CallerPolicy`, docs/third-party-acp.md 4.4); today's behaviour, unchanged.
+ * - [only] / [NONE]: exactly these tools. A scope can be given by any caller, and then it applies to that caller.
+ * - Whether a caller that did not give a scope may get [ALL] is not decided here but by `CallerPolicy` (the strict one gives a third-party
+ *   app [NONE]).
  *
  * The match is on (plugin, tool); the server name is not part of it. Tools that do not come from a plugin (no [ToolSource]) are never in a
  * restricted scope.
@@ -40,11 +42,12 @@ class ToolScope private constructor(private val refs: Set<ToolRef>?) {
      */
     val allowsBuiltinTools: Boolean get() = refs == null
 
-    /**
-     * The scope to apply for a caller of this [kind]: a third-party app never gets [ALL] (it would be a wiring mistake: a session of an app
-     * is created with a scope, or without one = no tools), so fail closed.
-     */
-    fun forCaller(kind: CallerKind): ToolScope = if (kind == CallerKind.APP && refs == null) NONE else this
+    /** What both scopes allow: [ALL] is the identity, so `ALL.intersect(x) == x`. The broker uses it so that a policy can only narrow a scope. */
+    fun intersect(other: ToolScope): ToolScope = when {
+        refs == null -> other
+        other.refs == null -> this
+        else -> ToolScope(refs.intersect(other.refs))
+    }
 
     override fun equals(other: Any?) = other is ToolScope && other.refs == refs
 

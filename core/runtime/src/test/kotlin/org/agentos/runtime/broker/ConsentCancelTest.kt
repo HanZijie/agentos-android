@@ -50,10 +50,10 @@ class ConsentCancelTest {
             rt.start()
             try {
                 withTimeout(15_000) {
-                    val s = rt.engine.createSession(TestRuntime.SELF, null)
-                    val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
+                    val s = rt.engine.createSession(TestRuntime.APP, null)
+                    val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
                     asked.await()
-                    rt.engine.cancel(TestRuntime.SELF, s.id)
+                    rt.engine.cancel(TestRuntime.APP, s.id)
                     withdrawn.await()
                     val done = rt.engine.awaitTask(t.id)
                     assertEquals(TaskState.CANCELLED, done.state)

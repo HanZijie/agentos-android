@@ -29,8 +29,6 @@ import org.agentos.runtime.RuntimeConfig
 import org.agentos.runtime.errors.RpcCodes
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.ports.ToolInvocationResult
-import org.agentos.runtime.ports.ToolRef
-import org.agentos.runtime.ports.ToolSource
 import org.agentos.runtime.ports.ToolResult
 import org.agentos.runtime.ports.ToolRisk
 import org.agentos.runtime.router.JevProvider
@@ -56,7 +54,7 @@ class AcpAgentSideTest {
             FakeScripts.directives(),
             config = RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), jev = jev, quota = TestRuntime.UNLIMITED_QUOTA),
         )
-        rt.host.tools.registerSimple("add", source = ToolSource("calc", "main", "add")) { args ->
+        rt.host.tools.registerSimple("add") { args ->
             ToolResult.text(((args["a"] as JsonPrimitive).content.toInt() + (args["b"] as JsonPrimitive).content.toInt()).toString())
         }
         rt.start()
@@ -120,8 +118,7 @@ class AcpAgentSideTest {
     @Test
     fun `tool calls appear as tool_call then tool_call_update in_progress and completed`() = test { pair ->
         pair.initialize()
-        // a third-party app: the session names the tool it may use (docs/third-party-acp.md 4.5), and the user is asked (the fake user says yes)
-        val session = pair.newSession(toolScopeMeta(ToolRef("calc", "add")))
+        val session = pair.newSession()
         val tools = kotlinx.serialization.json.buildJsonArray {
             add(buildJsonObject { put("name", "add"); put("arguments", buildJsonObject { put("a", 2); put("b", 3) }) })
         }
@@ -163,12 +160,12 @@ class AcpAgentSideTest {
      */
     @Test
     fun `a prompt sent right after a cancelled turn is not cancelled by that session cancel`() = test { pair ->
-        pair.rt.host.tools.register("slow_stop", ToolRisk.READ, source = ToolSource("slow", "main", "slow_stop")) {
+        pair.rt.host.tools.register("slow_stop", ToolRisk.READ) {
             withContext(NonCancellable) { delay(1_000) }
             ToolInvocationResult.Completed(ToolResult.text("stopped late"))
         }
         pair.initialize()
-        val session = pair.newSession(toolScopeMeta(ToolRef("slow", "slow_stop")))
+        val session = pair.newSession()
         val sid = session.sessionId.value
         // 同一会话里先跑一个停得慢的任务（同一个调用方，直接提交给运行时），卡在工具调用里
         val blocker = pair.rt.engine.submit(

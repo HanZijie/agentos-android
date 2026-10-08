@@ -19,7 +19,6 @@ import org.agentos.runtime.errors.ErrorInfo
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.events.PendingEvent
 import org.agentos.runtime.ports.CallerIdentity
-import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.CatalogTool
 import org.agentos.runtime.ports.ConsentDecision
 import org.agentos.runtime.ports.ConsentRequest
@@ -57,9 +56,10 @@ import java.util.concurrent.ConcurrentHashMap
  * - 是否确认由 [RiskPolicy.consentRequirement] 决定：READ 直接执行；HIGH 每次确认；WRITE 默认每次确认，
  *   用户策略设为“始终允许”（依据 `policy`）或本会话内选过“不再询问”（依据 `remembered`）时直接执行；
  *   Hook 的 allow 不能跳过确认，Hook 的 ask 一定确认；
- * - **第三方 App（[CallerKind.APP]）**（docs/third-party-acp.md 4.4、4.5）：每次工具调用都确认（读级也确认），不看“始终允许”，不看“本会话内不再询问”，
- *   确认框里也不提供这两个选项；工具只能用会话的 [ToolScope] 里列出的（没有 scope = 没有任何工具）。范围外的工具和不存在的工具一样：
- *   [declarations] 不列出，[authorize] / [execute] 按 TOOL_NOT_IN_CATALOG 拒绝，文字相同。AgentOS 自己和电脑端的行为不变。
+ * - **会话的 [ToolScope]**（docs/third-party-acp.md 4.5）：调用方在 `session/new` 里可以把会话缩小到几个工具（任何调用方都可以，只能缩小）；
+ *   没带 = 目录里全部工具。范围外的工具和不存在的工具一样：[declarations] 不列出，[authorize] / [execute] 按 TOOL_NOT_IN_CATALOG 拒绝，文字相同；
+ * - **谁在调用**只通过 [CallerPolicy] 影响范围和确认（4.4）：默认的 [OpenCallerPolicy] 对所有调用方一视同仁；[StrictCallerPolicy]（默认关）
+ *   让第三方 App 没有 scope 就没有工具、每次确认、不提供“始终允许”和“本会话内不再询问”。策略只能加严（这里强制：范围取交集，确认只升不降）。
  */
 interface CapabilityBroker {
     /**
@@ -67,6 +67,12 @@ interface CapabilityBroker {
      * 默认 [ToolScope.ALL]：不限制，当前目录里用户策略没有禁用的全部工具。
      */
     fun declarations(scope: ToolScope = ToolScope.ALL): List<ToolDeclaration>
+
+    /**
+     * 这个调用方在会话创建时要求的范围 [requested]（[ToolScope.ALL] = 没要求）经 [CallerPolicy] 之后实际生效的范围；只会比 [requested] 更小。
+     * 调度器在任务开始时用它算 [declarations] 的参数和 [ToolContext.scope]。
+     */
+    fun scopeFor(caller: CallerIdentity, requested: ToolScope): ToolScope
 
     suspend fun authorize(ctx: ToolContext, call: ToolCall): ToolCallDecision
 
@@ -87,13 +93,13 @@ class ToolContext(
     val taskId: String,
     val caller: CallerIdentity,
     val cancelRequested: Deferred<Unit>? = null,
-    /** 这个会话创建时定下的工具范围（[org.agentos.runtime.store.SessionRecord.scope]）；默认不限制。 */
+    /**
+     * 这个会话创建时定下的工具范围（[org.agentos.runtime.store.SessionRecord.scope]，调度器已经按创建者和提交者各过一遍 [CallerPolicy]）；
+     * 默认不限制。Broker 每次校验时还会按 [ToolContext.caller] 再过一遍策略，所以直接构造的上下文也不会比策略允许的更宽。
+     */
     val scope: ToolScope = ToolScope.ALL,
     val commit: suspend (block: (StoreTx) -> Unit) -> Unit,
-) {
-    /** 实际生效的范围：第三方 App 没有 scope 时是“没有任何工具”（[ToolScope.forCaller]）。Broker 只看这个。 */
-    val effectiveScope: ToolScope get() = scope.forCaller(caller.kind)
-}
+)
 
 data class BrokerConfig(
     /** 一次工具调用的超时。超时后按“结果未知”处理（已经发出）。 */
@@ -105,6 +111,8 @@ data class BrokerConfig(
 class DefaultCapabilityBroker(
     private val host: HostPort,
     private val config: BrokerConfig = BrokerConfig(),
+    /** 范围和确认里“取决于谁在调用”的那部分规则的唯一入口；默认放开（所有调用方一视同仁）。 */
+    private val callerPolicy: CallerPolicy = OpenCallerPolicy,
 ) : CapabilityBroker {
     /** 用户选了“本会话内不再询问”的工具：sessionId → 工具名。 */
     private val rememberedAllow = ConcurrentHashMap<String, MutableSet<String>>()
@@ -118,6 +126,20 @@ class DefaultCapabilityBroker(
             .filter { policy.resolve(it.source).enabled && scope.allows(it.source) }
             .map { ToolDeclaration(it.name, it.description, it.inputSchema, it.title) }
         return if (skillsAvailable() && scope.allowsBuiltinTools) tools.filter { it.name != READ_SKILL } + readSkillDeclaration() else tools
+    }
+
+    /** 策略的答案与请求的范围取交集：策略只能缩小，不能放大。策略出错时失败关闭：没有任何工具。 */
+    override fun scopeFor(caller: CallerIdentity, requested: ToolScope): ToolScope = try {
+        requested.intersect(callerPolicy.scopeFor(caller, requested))
+    } catch (e: Exception) {
+        ToolScope.NONE
+    }
+
+    /** 策略对这次调用的意见；策略出错时失败关闭：要确认，不提供“始终允许”和“本会话内不再询问”。 */
+    private fun termsFor(caller: CallerIdentity, tool: CatalogTool, base: ConsentRequirement): ConsentTerms = try {
+        callerPolicy.requiresConsent(caller, tool, base)
+    } catch (e: Exception) {
+        ConsentTerms(ConsentRequirement.ASK, offerSessionRemember = false, offerAlwaysAllow = false)
     }
 
     private fun skillsAvailable() = host.skills.catalog.value.skills.isNotEmpty()
@@ -138,7 +160,7 @@ class DefaultCapabilityBroker(
     }
 
     override suspend fun authorize(ctx: ToolContext, call: ToolCall): ToolCallDecision {
-        val (tool, policy) = availableTool(call.name, ctx.effectiveScope)
+        val (tool, policy) = availableTool(call.name, scopeFor(ctx.caller, ctx.scope))
             ?: return reject(ctx, call, ErrorCode.TOOL_NOT_IN_CATALOG, "Tool ${call.name} is not available.")
 
         val hook = host.hooks.dispatch(
@@ -174,14 +196,13 @@ class DefaultCapabilityBroker(
         }
         hook.updatedInput?.let { rewrittenInput[call.toolCallId] = it }
 
-        // 第三方 App：每次调用都确认，不看“始终允许”和“本会话内不再询问”（4.4）。AgentOS 自己和电脑端照旧。
-        val thirdParty = ctx.caller.kind == CallerKind.APP
-        val remembered = !thirdParty && rememberedAllow[ctx.sessionId]?.contains(tool.name) == true
-        val need = RiskPolicy.consentRequirement(
-            tool.risk, policy.approval, remembered, hookAsk = hook.decision == HookDecision.ASK, alwaysAsk = thirdParty,
-        )
+        val remembered = rememberedAllow[ctx.sessionId]?.contains(tool.name) == true
+        val base = RiskPolicy.consentRequirement(tool.risk, policy.approval, remembered, hookAsk = hook.decision == HookDecision.ASK)
+        // 调用方策略（4.4）：只能加严。要问就问；不问的原因（读 / 策略 / 记住）仍然是基础规则算出来的那个
+        val terms = termsFor(ctx.caller, tool, base)
+        val need = if (base == ConsentRequirement.ASK || terms.requirement == ConsentRequirement.ASK) ConsentRequirement.ASK else base
         return when (need) {
-            ConsentRequirement.ASK -> askUser(ctx, call, tool)
+            ConsentRequirement.ASK -> askUser(ctx, call, tool, terms)
             ConsentRequirement.NOT_NEEDED_READ -> ToolCallDecision.Allow
             ConsentRequirement.ALWAYS_BY_POLICY, ConsentRequirement.REMEMBERED_IN_SESSION -> {
                 recordConsent(ctx, call, tool, null, "allow", need.reason!!, false)
@@ -190,7 +211,7 @@ class DefaultCapabilityBroker(
         }
     }
 
-    private suspend fun askUser(ctx: ToolContext, call: ToolCall, tool: CatalogTool): ToolCallDecision {
+    private suspend fun askUser(ctx: ToolContext, call: ToolCall, tool: CatalogTool, terms: ConsentTerms): ToolCallDecision {
         val requestId = Ids.request()
         ctx.commit { tx ->
             tx.events.append(
@@ -218,8 +239,9 @@ class DefaultCapabilityBroker(
                 caller = ctx.caller,
                 argumentsPreview = call.arguments.toString().take(PREVIEW_CHARS),
                 argumentsTruncated = call.arguments.toString().length > PREVIEW_CHARS,
-                rememberable = ctx.caller.kind != CallerKind.APP && RiskPolicy.maySessionRemember(tool.risk),
+                rememberable = terms.offerSessionRemember && RiskPolicy.maySessionRemember(tool.risk),
                 source = tool.source,
+                alwaysAllowOffered = terms.offerAlwaysAllow,
             )
         val decision = askWhileRunning(ctx, request)
         if (decision == null) {
@@ -229,7 +251,7 @@ class DefaultCapabilityBroker(
         }
         return when (decision) {
             is ConsentDecision.Allow -> {
-                val remember = decision.rememberForSession && ctx.caller.kind != CallerKind.APP && RiskPolicy.maySessionRemember(tool.risk)
+                val remember = decision.rememberForSession && request.rememberable
                 if (remember) rememberedAllow.getOrPut(ctx.sessionId) { ConcurrentHashMap.newKeySet() }.add(tool.name)
                 recordConsent(ctx, call, tool, requestId, "allow", "user", remember)
                 ToolCallDecision.Allow
@@ -287,7 +309,7 @@ class DefaultCapabilityBroker(
     }
 
     override suspend fun execute(ctx: ToolContext, call: ToolCall): ToolResult {
-        val tool = availableTool(call.name, ctx.effectiveScope)?.first
+        val tool = availableTool(call.name, scopeFor(ctx.caller, ctx.scope))?.first
         if (tool == null) {
             val decision = reject(ctx, call, ErrorCode.TOOL_NOT_IN_CATALOG, "Tool ${call.name} is not available.")
             return ToolResult.text(decision.reason, isError = true)

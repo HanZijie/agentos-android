@@ -110,8 +110,8 @@ class SkillsEndToEndTest {
     }
 
     private suspend fun TestRuntime.turn(): List<org.agentos.runtime.events.EventEnvelope> {
-        val s = engine.createSession(TestRuntime.SELF, null)
-        val t = engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
+        val s = engine.createSession(TestRuntime.APP, null)
+        val t = engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
         assertEquals(TaskState.COMPLETED, engine.awaitTask(t.id).state)
         return engine.readEvents(s.id)
     }

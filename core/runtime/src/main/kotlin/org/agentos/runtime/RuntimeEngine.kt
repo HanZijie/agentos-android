@@ -20,8 +20,10 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.acp.AcpConfig
 import org.agentos.runtime.acp.AcpServer
 import org.agentos.runtime.broker.BrokerConfig
+import org.agentos.runtime.broker.CallerPolicy
 import org.agentos.runtime.broker.CapabilityBroker
 import org.agentos.runtime.broker.DefaultCapabilityBroker
+import org.agentos.runtime.broker.OpenCallerPolicy
 import org.agentos.runtime.errors.AgentOsException
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.events.EventEnvelope
@@ -63,6 +65,11 @@ data class RuntimeConfig(
     val acp: AcpConfig = AcpConfig(),
     /** 第三方 App 的配额（docs/third-party-acp.md 4.6）：只对 `CallerKind.APP` 生效。 */
     val quota: CallerQuotaConfig = CallerQuotaConfig(),
+    /**
+     * 范围和确认里取决于“谁在调用”的规则（docs/third-party-acp.md 4.4）。**默认 [OpenCallerPolicy]**：所有调用方一视同仁；
+     * 换成 [StrictCallerPolicy]（或 `CallerPolicy.named("strict")`）就是第三方 App 没有 toolScope 没工具、每次确认、没有“始终允许”。
+     */
+    val callerPolicy: CallerPolicy = OpenCallerPolicy,
     val version: String = "0.1.0",
 )
 
@@ -89,7 +96,7 @@ class RuntimeEngine internal constructor(
     private lateinit var cores: CoreSessions
     private lateinit var scheduler: Scheduler
     private lateinit var router: SessionRouter
-    val broker: CapabilityBroker = DefaultCapabilityBroker(host, config.broker)
+    val broker: CapabilityBroker = DefaultCapabilityBroker(host, config.broker, config.callerPolicy)
 
     /**
      * 第三方 App 的配额与用量（docs/third-party-acp.md 4.6）。`:agent` 接线时用 [CallerQuota.addListener] 订阅“一次 prompt 结束”

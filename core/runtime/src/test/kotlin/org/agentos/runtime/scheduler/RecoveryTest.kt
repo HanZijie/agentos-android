@@ -55,10 +55,10 @@ class RecoveryTest {
             }
             first.start()
             val e = first.engine
-            val paying = e.createSession(TestRuntime.SELF, null)
+            val paying = e.createSession(TestRuntime.APP, null)
             val other = e.createSession(TestRuntime.OTHER_APP, null)
-            val payTask = e.submit(TestRuntime.SELF, paying.id, TestRuntime.text("pay 42"))
-            val followUp = e.submit(TestRuntime.SELF, paying.id, TestRuntime.text("thanks"))
+            val payTask = e.submit(TestRuntime.APP, paying.id, TestRuntime.text("pay 42"))
+            val followUp = e.submit(TestRuntime.APP, paying.id, TestRuntime.text("thanks"))
             val otherTask = e.submit(TestRuntime.OTHER_APP, other.id, TestRuntime.text("hello")) // maxRunningSessions = 1：排队
             invoked.await()
             first.awaitEvent(paying.id) { it.eventType == EventTypes.TOOL_DISPATCHED }
@@ -81,7 +81,7 @@ class RecoveryTest {
             assertEquals("runtime_restarted", recovery.payload["reason"]!!.jsonPrimitive.content)
             val unknownCalls = recovery.payload["unknownToolCalls"]!!.jsonArray.map { it.jsonObject["toolCallId"]!!.jsonPrimitive.content }
             assertEquals(listOf("call_charge"), unknownCalls)
-            assertEquals(SessionState.PAUSED, e2.session(TestRuntime.SELF, paying.id).state)
+            assertEquals(SessionState.PAUSED, e2.session(TestRuntime.APP, paying.id).state)
 
             // 另一个会话排队的任务照常执行
             assertEquals(TaskState.COMPLETED, e2.awaitTask(otherTask.id).state)
@@ -89,13 +89,13 @@ class RecoveryTest {
             assertEquals(0, replays, "the unknown tool call is not replayed")
             assertEquals(1, second.turnsStarted(), "only the other session's queued task ran")
             assertEquals(TaskState.QUEUED, e2.task(followUp.id)!!.state, "the paused session does not run its queue")
-            val err = assertFailsWith<AgentOsException> { e2.submit(TestRuntime.SELF, paying.id, TestRuntime.text("again")) }
+            val err = assertFailsWith<AgentOsException> { e2.submit(TestRuntime.APP, paying.id, TestRuntime.text("again")) }
             assertEquals(ErrorCode.RECOVERY_REQUIRED, err.info.code)
             val sys = e2.readEvents(EventTypes.SYSTEM_STREAM).last { it.eventType == EventTypes.RUNTIME_RECOVERED }
             assertEquals(1, sys.payload["interrupted"]!!.jsonPrimitive.content.toInt())
 
             // ---- 用户放弃：任务失败（abandoned），会话恢复，排队的任务继续；工具仍然没有被重放
-            e2.abandonRecovery(TestRuntime.SELF, paying.id, payTask.id)
+            e2.abandonRecovery(TestRuntime.APP, paying.id, payTask.id)
             val abandoned = e2.task(payTask.id)!!
             assertEquals(TaskState.FAILED, abandoned.state)
             assertEquals(ErrorCode.ABANDONED, abandoned.error!!.code)

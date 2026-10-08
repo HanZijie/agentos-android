@@ -51,13 +51,18 @@ class ToolScopeTest {
     }
 
     @Test
-    fun `a third-party app never gets ALL, everybody else keeps what they have`() {
-        assertEquals(ToolScope.NONE, ToolScope.ALL.forCaller(CallerKind.APP))
-        assertEquals(ToolScope.ALL, ToolScope.ALL.forCaller(CallerKind.SELF))
-        assertEquals(ToolScope.ALL, ToolScope.ALL.forCaller(CallerKind.DESKTOP))
-        assertEquals(ToolScope.ALL, ToolScope.ALL.forCaller(CallerKind.SYSTEM))
-        val narrow = ToolScope.only(listOf(ToolRef("alarm", "alarm_create")))
-        for (kind in CallerKind.entries) assertEquals(narrow, narrow.forCaller(kind), "a scope that was given applies to $kind too")
+    fun `intersect - ALL is the identity, and the result is never wider than either side`() {
+        val a = ToolScope.only(listOf(ToolRef("alarm", "alarm_create"), ToolRef("calendar", "event_create")))
+        val b = ToolScope.only(listOf(ToolRef("calendar", "event_create"), ToolRef("notes", "note_delete")))
+        assertEquals(a, ToolScope.ALL.intersect(a))
+        assertEquals(a, a.intersect(ToolScope.ALL))
+        assertEquals(ToolScope.ALL, ToolScope.ALL.intersect(ToolScope.ALL))
+        assertEquals(ToolScope.only(listOf(ToolRef("calendar", "event_create"))), a.intersect(b))
+        assertEquals(a.intersect(b), b.intersect(a))
+        assertEquals(ToolScope.NONE, a.intersect(ToolScope.NONE))
+        assertEquals(ToolScope.NONE, ToolScope.NONE.intersect(ToolScope.ALL))
+        assertEquals(ToolScope.NONE, a.intersect(ToolScope.only(listOf(ToolRef("x", "y")))))
+        assertTrue(a.intersect(b).restricted)
     }
 
     @Test

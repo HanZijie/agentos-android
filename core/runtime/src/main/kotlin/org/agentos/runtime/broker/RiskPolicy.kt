@@ -69,7 +69,6 @@ object RiskPolicy {
 
     /**
      * 这次调用要不要请用户确认。规则按顺序：
-     * 0. [alwaysAsk]（调用方是第三方 App，docs/third-party-acp.md 4.4）：一定确认——读操作也确认，不看用户策略的“始终允许”，不看本会话的“不再询问”；
      * 1. Hook 的决定是 ask：一定确认（Hook 的 allow 不能跳过确认，ask 可以追加确认，连读操作也确认）；
      * 2. 读操作：不确认；
      * 3. 高风险：每次确认，不受“始终允许”和“本会话不再询问”影响；
@@ -78,16 +77,13 @@ object RiskPolicy {
      * @param approval 用户策略解析出的审批方式（[ApprovalPolicy.resolve]）
      * @param rememberedInSession 用户在本会话里对这个工具选过“本会话内不再询问”
      * @param hookAsk PreToolUse Hook 合并后的决定是 ask
-     * @param alwaysAsk 调用方是第三方 App：每次都确认。默认 false，其余调用方的结果与加这个参数之前一字不差。
      */
     fun consentRequirement(
         risk: ToolRisk,
         approval: ApprovalMode,
         rememberedInSession: Boolean = false,
         hookAsk: Boolean = false,
-        alwaysAsk: Boolean = false,
     ): ConsentRequirement = when {
-        alwaysAsk -> ConsentRequirement.ASK
         hookAsk -> ConsentRequirement.ASK
         risk == ToolRisk.READ -> ConsentRequirement.NOT_NEEDED_READ
         risk == ToolRisk.HIGH -> ConsentRequirement.ASK
@@ -102,6 +98,5 @@ object RiskPolicy {
         approval: ApprovalMode,
         rememberedInSession: Boolean = false,
         hookAsk: Boolean = false,
-        alwaysAsk: Boolean = false,
-    ): Boolean = !consentRequirement(risk, approval, rememberedInSession, hookAsk, alwaysAsk).skipsPrompt
+    ): Boolean = !consentRequirement(risk, approval, rememberedInSession, hookAsk).skipsPrompt
 }

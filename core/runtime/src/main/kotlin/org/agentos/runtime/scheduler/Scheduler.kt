@@ -305,13 +305,13 @@ internal class Scheduler(
     }
 
     /**
-     * 这个任务所在会话的工具范围（docs/third-party-acp.md 4.5）：会话创建时定下，之后不会变。第三方 App 的会话没有 scope 就是“没有任何工具”；
-     * 会话读不到时同样按“没有任何工具”处理（宁可少给）。
+     * 这个任务所在会话的工具范围（docs/third-party-acp.md 4.5）：会话创建时定下，之后不会变；没带 = [ToolScope.ALL]，对所有调用方一样。
+     * 调用方策略（4.4，默认放开）可以再收窄：会话是谁建的、这个任务是谁提的，两个身份各过一遍。会话读不到时按“没有任何工具”处理（宁可少给）。
      */
     private suspend fun sessionToolScope(task: TaskRecord): ToolScope {
         val session = store.read { it.sessions.get(task.sessionId) } ?: return ToolScope.NONE
-        // 会话是谁建的、这个任务是谁提的，两个身份里只要有第三方 App，就不给“不限”
-        return session.scope.forCaller(session.callerKind).forCaller(task.callerKind)
+        val creator = CallerIdentity(session.callerUid, session.callerKind)
+        return broker.scopeFor(CallerIdentity(task.callerUid, task.callerKind, task.callerLabel), broker.scopeFor(creator, session.scope))
     }
 
     /**

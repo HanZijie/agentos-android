@@ -44,8 +44,8 @@ class ReadSkillToolTest {
     }
 
     private suspend fun TestRuntime.turn(): Pair<TaskState, List<org.agentos.runtime.events.EventEnvelope>> {
-        val s = engine.createSession(TestRuntime.SELF, null)
-        val t = engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
+        val s = engine.createSession(TestRuntime.APP, null)
+        val t = engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
         val done = engine.awaitTask(t.id)
         return done.state to engine.readEvents(s.id)
     }

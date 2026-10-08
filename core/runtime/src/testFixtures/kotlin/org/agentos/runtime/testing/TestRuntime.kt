@@ -11,6 +11,8 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.AgentRuntimes
 import org.agentos.runtime.RuntimeConfig
 import org.agentos.runtime.RuntimeEngine
+import org.agentos.runtime.broker.CallerPolicy
+import org.agentos.runtime.broker.OpenCallerPolicy
 import org.agentos.runtime.events.EventEnvelope
 import org.agentos.runtime.ports.AgentCoreFactory
 import org.agentos.runtime.ports.CallerIdentity
@@ -75,6 +77,10 @@ class TestRuntime(
          * much as they need. Tests of the limits themselves (CallerQuotaTest, ThirdPartyQuotaTest) give their own `RuntimeConfig(quota = ...)`.
          */
         val UNLIMITED_QUOTA = CallerQuotaConfig(maxPromptChars = Int.MAX_VALUE, maxPromptsPerHour = Int.MAX_VALUE, maxConcurrentPrompts = Int.MAX_VALUE)
+
+        /** A [RuntimeConfig] with [callerPolicy] (default: the shipped default, open) and no per-app limits. */
+        fun config(callerPolicy: CallerPolicy = OpenCallerPolicy, quota: CallerQuotaConfig = UNLIMITED_QUOTA): RuntimeConfig =
+            RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), quota = quota, callerPolicy = callerPolicy)
 
         fun text(vararg parts: String): JsonArray = buildJsonArray {
             parts.forEach { t -> add(buildJsonObject { put("type", "text"); put("text", JsonPrimitive(t)) }) }

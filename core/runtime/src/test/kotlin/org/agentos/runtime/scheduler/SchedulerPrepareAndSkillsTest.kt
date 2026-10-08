@@ -50,11 +50,11 @@ class SchedulerPrepareAndSkillsTest {
     }
 
     private fun runtime(tools: FakeToolPort = FakeToolPort(), config: SchedulerConfig = SchedulerConfig(tickMillis = 20), scripts: (org.agentos.runtime.testing.FakeTurnContext) -> FakeTurnScript = { FakeTurnScript(listOf(listOf(FakeStep.Text("ok")))) }) =
-        TestRuntime(scripts, host = FakeHostPort(tools = tools), config = RuntimeConfig(scheduler = config))
+        TestRuntime(scripts, host = FakeHostPort(tools = tools), config = RuntimeConfig(scheduler = config, quota = TestRuntime.UNLIMITED_QUOTA))
 
     private suspend fun TestRuntime.oneTask(sessionId: String? = null): String {
-        val s = sessionId ?: engine.createSession(TestRuntime.SELF, null).id
-        val t = engine.submit(TestRuntime.SELF, s, TestRuntime.text("go"))
+        val s = sessionId ?: engine.createSession(TestRuntime.APP, null).id
+        val t = engine.submit(TestRuntime.APP, s, TestRuntime.text("go"))
         assertEquals(TaskState.COMPLETED, engine.awaitTask(t.id).state)
         return s
     }
@@ -118,11 +118,11 @@ class SchedulerPrepareAndSkillsTest {
         tools.behavior = { n, _ -> if (n == 1) gate.await() }
         val rt = runtime(tools, SchedulerConfig(tickMillis = 20, toolPrepareTimeoutMillis = 30_000))
         run(rt) {
-            val a = rt.engine.createSession(TestRuntime.SELF, null)
-            val b = rt.engine.createSession(TestRuntime.SELF, null)
-            val ta = rt.engine.submit(TestRuntime.SELF, a.id, TestRuntime.text("a"))
+            val a = rt.engine.createSession(TestRuntime.APP, null)
+            val b = rt.engine.createSession(TestRuntime.APP, null)
+            val ta = rt.engine.submit(TestRuntime.APP, a.id, TestRuntime.text("a"))
             rt.until { tools.calls.get() == 1 }
-            val tb = rt.engine.submit(TestRuntime.SELF, b.id, TestRuntime.text("b"))
+            val tb = rt.engine.submit(TestRuntime.APP, b.id, TestRuntime.text("b"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(tb.id).state, "b finished while a is still waiting in prepare")
             assertFalse(rt.engine.task(ta.id)!!.state == TaskState.COMPLETED)
             gate.complete(Unit)
@@ -200,17 +200,17 @@ class SchedulerPrepareAndSkillsTest {
         val rt = runtime(scripts = { c -> if (c.input.text == "hold") FakeTurnScript(listOf(listOf(FakeStep.AwaitAbort))) else FakeTurnScript(listOf(listOf(FakeStep.Text("ok")))) })
         rt.host.skills.register("notes", "Keep notes", provider = "notes", files = mapOf("SKILL.md" to "x"))
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.SELF, null)
-            val t1 = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("hold"))
+            val s = rt.engine.createSession(TestRuntime.APP, null)
+            val t1 = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("hold"))
             rt.until { rt.core?.configs?.size == 1 }
             // 目录在任务进行中变了
             rt.host.skills.register("calendar", "Events", provider = "calendar", files = mapOf("SKILL.md" to "x"))
             delay(100)
             assertEquals(1, rt.core!!.configs.size, "the running task was not reconfigured")
             assertFalse(rt.core!!.configs.single().systemPrompt.contains("\"name\":\"calendar\""))
-            rt.engine.cancel(TestRuntime.SELF, s.id)
+            rt.engine.cancel(TestRuntime.APP, s.id)
             rt.engine.awaitTask(t1.id)
-            val t2 = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("next"))
+            val t2 = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("next"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t2.id).state)
             assertTrue(rt.core!!.configs.last().systemPrompt.contains("\"name\":\"calendar\""), "the next task has the new catalog")
         }

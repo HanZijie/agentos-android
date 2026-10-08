@@ -23,7 +23,7 @@ class AutoConsentResponderTest {
 
     private fun req(id: String, risk: ToolRisk = ToolRisk.WRITE, args: String = "{}", timeout: Long = 60_000) =
         ConsentRequest(
-            id, "s", "t", "c-$id", "add_alarm", "添加闹钟", risk, CallerIdentity(10001, CallerKind.SELF, "AgentOS"), args,
+            id, "s", "t", "c-$id", "add_alarm", "添加闹钟", risk, CallerIdentity(10001, CallerKind.APP, "com.example.app"), args,
             rememberable = true, timeoutMillis = timeout, source = ToolSource("p", "s", "add_alarm"),
         )
 
