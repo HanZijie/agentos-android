@@ -57,6 +57,7 @@ class ScriptedRunTest(unittest.TestCase):
         self.assertEqual(["cal-default"], [r["id"] for r in phone.q("calendar.db", "SELECT id FROM calendars")])
         self.assertEqual([], phone.q("calendar.db", "SELECT * FROM events"))
         self.assertEqual([], phone.q("notes.db", "SELECT * FROM notes"), "the final reset leaves the notes app empty")
+        self.assertEqual([], phone.q("todo.db", "SELECT * FROM todos"), "... and the todo app")
         self.assertEqual({}, phone.orphans)
         self.assertEqual("off", phone.consent_mode)
         self.assertFalse(any(phone.enabled.values()), "plugins are switched off again at the end")
@@ -71,7 +72,9 @@ class ScriptedRunTest(unittest.TestCase):
         self.assertIn("tool_denied", denied["turn"]["tools"][0]["result"])
         high = [e for e in phone.consent_log if e["risk"] == "HIGH"]
         self.assertTrue(high)
-        self.assertEqual({"ALLOW_ONCE"}, {e["answeredWith"] for e in high}, "HIGH requests are allowed once, never remembered")
+        # HIGH requests are allowed once, never remembered; the only ones answered DENY are the declined todo_delete of todo.denied_delete
+        self.assertEqual({"ALLOW_ONCE"}, {e["answeredWith"] for e in high if e["answeredWith"] != "DENY"}, "HIGH requests are allowed once, never remembered")
+        self.assertEqual(["mcp__todo__todo__todo_delete"], [e["tool"] for e in high if e["answeredWith"] == "DENY"])
 
     def test_the_catalog_check_reports_risk_per_tool(self):
         _, _, report = run()
@@ -488,6 +491,13 @@ class FiveAppsSetupTest(unittest.TestCase):
         self.assertEqual("sms", skipped[0]["what"])
         self.assertEqual((["alarm", "calendar", "notes", "todo", "sms"], []), L.select_apps(FakePhone(serial="R5CT123456"), sms_on_device=True))
 
+    def test_only_selects_the_todo_app_and_the_others_still_pass_setup(self):
+        _, _, report = run(only={"todo"})
+        self.assertEqual({"todo"}, {s["sample"] for s in report["steps"] if s["sample"]})
+        self.assertTrue(report["ok"])
+        _, _, report = run(only={"notes", "todo"})
+        self.assertEqual({"notes", "todo"}, {s["sample"] for s in report["steps"] if s["sample"]})
+
     def test_the_plan_items_know_their_apps(self):
         self.assertEqual("todo", E.item_sample(("audit.todo", "t", None)))
         self.assertEqual("sms", E.item_sample(("sms.prepare", "t", None)))
@@ -526,6 +536,129 @@ class AlarmSystemNextTest(unittest.TestCase):
         self.assertTrue(any("rings no later" in c["name"] for c in bad), bad)
         _, _, report = run(FakePhone(faults={"system-next-owned-but-gone"}))
         self.assertEqual({"alarm.system_next_after_delete"}, failed(report) & {"alarm.system_next", "alarm.system_next_after_delete"})
+
+
+class TodoStepsTest(unittest.TestCase):
+    """The scripted todo plan: what the steps check, and that a todo app that misbehaves is named at its step."""
+
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def test_a_healthy_phone_passes_every_todo_step_and_the_plan_has_the_documented_sequence(self):
+        phone, env, report = run(only={"todo"})
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        ids = [s["id"] for s in report["steps"] if s["sample"] == "todo"]
+        for expect in ("todo.create_prd", "todo.create_timed", "todo.subtask", "todo.err.nested_subtask", "todo.err.bad_date", "todo.err.due_without_offset", "todo.done",
+                       "todo.done_again", "todo.reopen", "todo.list_default", "todo.list_include_done", "todo.list_overdue", "todo.list_due_range", "todo.search",
+                       "todo.summary", "todo.delete_parent", "todo.denied", "todo.denied_delete", "todo.plugin_off", "todo.plugin_on"):
+            self.assertIn(expect, ids)
+        self.assertEqual({"todo"}, {s["sample"] for s in report["steps"] if s["sample"]}, "--only todo runs the todo plan and nothing else")
+        self.assertTrue(self.step(report, "audit.todo")["ok"])
+        self.assertEqual([], phone.q("todo.db", "SELECT * FROM todos"), "the final reset leaves the todo app empty")
+
+    def test_the_three_prds_are_created_in_one_script_with_an_all_day_due_and_priority_high(self):
+        phone, env, report = run(only={"todo"})
+        step = self.step(report, "todo.create_prd")
+        self.assertEqual(3, len(step["turn"]["tools"]))
+        scripts = [json.loads(text) for _, text in env.bridge.prompts if "todo_create" in text]
+        prd = next(x for x in scripts if len(x["toolCalls"]) == 3)
+        for call in prd["toolCalls"]:
+            self.assertEqual("mcp__todo__todo__todo_create", call["name"])
+            self.assertEqual("high", call["arguments"]["priority"])
+            self.assertRegex(call["arguments"]["due"], r"^\d{4}-\d{2}-\d{2}$")
+            self.assertIn("写 PRD", call["arguments"]["title"])
+        timed = next(x for x in scripts if len(x["toolCalls"]) == 1 and "评审会材料" in x["toolCalls"][0]["arguments"].get("title", ""))
+        self.assertRegex(timed["toolCalls"][0]["arguments"]["due"], r"T17:00:00\+08:00$")
+
+    def test_the_invalid_dues_and_the_nested_subtask_are_expected_to_fail(self):
+        _, env, report = run(only={"todo"})
+        calls = [c for _, text in env.bridge.prompts if text.startswith("{") for c in json.loads(text).get("toolCalls", [])]
+        dues = [c["arguments"]["due"] for c in calls if "bad" in c["arguments"].get("title", "")]
+        self.assertIn("2026-02-30", dues)
+        self.assertTrue(any(len(d) > 10 and d.endswith("T17:00:00") for d in dues), "a time without offset: %s" % dues)
+        for sid in ("todo.err.nested_subtask", "todo.err.bad_date", "todo.err.due_without_offset"):
+            step = self.step(report, sid)
+            self.assertTrue(step["ok"], sid)
+            self.assertEqual("failed", step["turn"]["tools"][0]["status"])
+
+    def test_completed_at_is_checked_across_done_done_again_and_reopen(self):
+        _, _, report = run(only={"todo"})
+        done = self.step(report, "todo.done")
+        self.assertTrue(any("completed_at is written" in c["name"] and c["ok"] for c in done["checks"]))
+        again = self.step(report, "todo.done_again")
+        self.assertTrue(any("unchanged, completed_at included" in c["name"] and c["ok"] for c in again["checks"]))
+        reopen = self.step(report, "todo.reopen")
+        self.assertTrue(any(c["name"] == "first PRD: completed_at" and c["expected"] is None and c["ok"] for c in reopen["checks"]))
+
+    def test_the_list_steps_are_judged_against_the_dump(self):
+        _, _, report = run(only={"todo"})
+        names = {sid: [c["name"] for c in self.step(report, sid)["checks"]] for sid in ("todo.list_default", "todo.list_due_range", "todo.list_overdue", "todo.summary", "todo.delete_parent")}
+        self.assertTrue(any("done ones are hidden by default" in n for n in names["todo.list_default"]))
+        self.assertTrue(any("inclusive bounds" in n for n in names["todo.list_due_range"]))
+        self.assertTrue(any("whose due is over" in n for n in names["todo.list_overdue"]))
+        self.assertTrue(any("counts equal the dump's counts" in n for n in names["todo.summary"]))
+        self.assertTrue(any("deleted counts the todo and its subtasks" in n for n in names["todo.delete_parent"]))
+
+    def test_todo_delete_is_high_and_asked_once_and_the_audit_passes(self):
+        phone, _, report = run(only={"todo"})
+        deletes = [e for e in phone.consent_log if e["tool"].endswith("todo_delete")]
+        self.assertTrue(deletes)
+        self.assertEqual({"HIGH"}, {e["risk"] for e in deletes})
+        self.assertEqual(["ALLOW_ONCE", "DENY"], deletes[0]["options"])
+        denied = [e for e in deletes if e["answeredWith"] == "DENY"]
+        self.assertEqual(1, len(denied), "todo.denied_delete")
+        audit = self.step(report, "audit.todo")
+        self.assertTrue(audit["ok"], audit["checks"])
+        self.assertEqual(5, len(audit["checks"]))
+
+    def test_an_app_that_forgets_to_write_is_named_at_the_create_step(self):
+        _, _, report = run(FakePhone(faults={"todo-forgets-write"}), only={"todo"})
+        self.assertIn("todo.create_prd", failed(report))
+        line = next(l for l in report["summary"]["failures"] if l.startswith("FAIL todo.create_prd"))
+        self.assertIn("expected", line)
+
+    def test_an_app_that_accepts_a_time_without_offset_fails_that_step_only(self):
+        _, _, report = run(FakePhone(faults={"todo-accepts-bad-due"}), only={"todo"})
+        self.assertEqual({"todo.err.due_without_offset"}, {i for i in failed(report) if i.startswith("todo.")})
+
+    def test_an_app_that_allows_a_subtask_of_a_subtask_fails_that_step(self):
+        _, _, report = run(FakePhone(faults={"todo-nested-subtask-allowed"}), only={"todo"})
+        self.assertIn("todo.err.nested_subtask", failed(report))
+
+    def test_a_done_without_completed_at_a_delete_without_cascade_and_a_wrong_summary_are_caught(self):
+        _, _, report = run(FakePhone(faults={"todo-done-no-completed-at"}), only={"todo"})
+        self.assertIn("todo.done", failed(report))
+        _, _, report = run(FakePhone(faults={"todo-delete-no-cascade"}), only={"todo"})
+        self.assertIn("todo.delete_parent", failed(report))
+        _, _, report = run(FakePhone(faults={"todo-summary-wrong-count"}), only={"todo"})
+        self.assertIn("todo.summary", failed(report))
+
+    def test_leftovers_of_a_failed_todo_run_are_deleted_through_the_tools(self):
+        phone = FakePhone()
+        env = FakeEnv(phone)
+        parent = phone.t_todo_create({"title": "e2e-abc123 parent"})
+        phone.t_todo_create({"title": "e2e-abc123 child", "parent_id": parent["id"]})
+        phone.t_todo_create({"title": "someone else's"})
+        phone.enabled = {s.package: True for s in L.SAMPLES.values()}
+        phone.consent_mode = "allow"
+        ctx = L.Context(phone, env.ext, env.consent, L.BridgeSession.open(env.bridge), date(2026, 10, 7), "+08:00", "abc123")
+        self.assertEqual({"todo": [("todo_delete", {"id": parent["id"]})]}, S.leftovers(ctx))
+        self.assertEqual({"todo": ["todo_delete"]}, S.cleanup(ctx))
+        self.assertEqual(["someone else's"], [r["title"] for r in phone.q("todo.db", "SELECT title FROM todos")])
+
+    def test_no_reset_keeps_other_todos_and_the_list_steps_still_pass(self):
+        phone = FakePhone()
+        for i in range(3):
+            phone.t_todo_create({"title": "mine %d" % i, "due": "2026-10-14", "priority": "high"})
+        _, _, report = run(phone, reset=False, only={"todo"})
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertEqual(["mine 0", "mine 1", "mine 2"], [r["title"] for r in phone.q("todo.db", "SELECT title FROM todos ORDER BY seq")], "only this run's todos were removed")
+
+    def test_a_plugin_that_goes_away_takes_its_tools_with_it(self):
+        _, _, report = run(only={"todo"})
+        off = self.step(report, "todo.plugin_off")
+        self.assertTrue(off["ok"], off["checks"])
+        self.assertTrue(any("no todo tool is offered" in c["name"] for c in off["checks"]))
 
 
 class TodoSmsStateTest(unittest.TestCase):

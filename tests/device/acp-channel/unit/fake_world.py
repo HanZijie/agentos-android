@@ -688,6 +688,223 @@ class FakePhone:
             slots.append({"start": self._iso(cur), "end": self._iso(day1)})
         return {"date": a["date"], "timezone": "Asia/Shanghai", "slots": slots, "busy": []}
 
+    # ---- todo (the semantics of plugins/samples/todo/README.md, as far as the driver's expectations need them)
+    PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+    STATUSES = ("todo", "doing", "done", "shelved")
+
+    def _todo(self, a):
+        rows = self.q("todo.db", "SELECT * FROM todos WHERE id = ?", str(a.get("id", "")))
+        if not rows:
+            raise ToolError("No todo with id '%s'" % a.get("id"))
+        return rows[0]
+
+    def _parse_due(self, text, all_day=None):
+        """-> (due string as the app stores it, all_day). A date (all-day) or an ISO-8601 date-time WITH an offset; anything else is an error."""
+        t = str(text).strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):
+            try:
+                date.fromisoformat(t)
+            except ValueError:
+                raise ToolError("Invalid due '%s': not a calendar date" % t) from None
+            if all_day is False:
+                raise ToolError("due_all_day=false needs a time: pass due as an ISO-8601 date-time with UTC offset.")
+            return t, True
+        if "todo-accepts-bad-due" in self.faults and re.fullmatch(r"\d{4}-\d{2}-\d{2}T[\d:]+", t):
+            return t, False
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})", t):
+            raise ToolError("Invalid due '%s': use YYYY-MM-DD or an ISO-8601 date-time with a UTC offset, e.g. 2026-10-12T17:00:00+08:00" % t)
+        try:
+            dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        except ValueError:
+            raise ToolError("Invalid due '%s'" % t) from None
+        if all_day:
+            return t[:10], True
+        return dt.astimezone(TZ).replace(microsecond=0).isoformat(), False
+
+    def _due_cmp_key(self, due, all_day, bound, bound_all_day):
+        """Both sides as comparable values: instants when both are timed, local dates when one of them is a date."""
+        if all_day or bound_all_day:
+            local = due[:10] if all_day else datetime.fromisoformat(due).astimezone(TZ).date().isoformat()
+            return local, bound[:10] if bound_all_day else datetime.fromisoformat(bound).astimezone(TZ).date().isoformat()
+        return datetime.fromisoformat(due).timestamp(), datetime.fromisoformat(bound).timestamp()
+
+    def _todo_overdue(self, r):
+        if r["status"] not in ("todo", "doing") or not r["due"]:
+            return False
+        if r["due_all_day"]:
+            return r["due"] < self.today.isoformat()
+        return datetime.fromisoformat(r["due"]).timestamp() * 1000 < self.NOW_MS
+
+    def _compact_todo(self, r, rows):
+        out = self._todo_json(r)
+        if r["due"]:
+            out["due"], out["due_all_day"] = r["due"], bool(r["due_all_day"])
+        if json.loads(r["tags"]):
+            out["tags"] = json.loads(r["tags"])
+        if r["parent_id"]:
+            out["parent_id"] = r["parent_id"]
+        if r["completed_at"]:
+            out["completed_at"] = r["completed_at"]
+        if self._todo_overdue(r):
+            out["overdue"] = True
+        kids = [x for x in rows if x["parent_id"] == r["id"]]
+        if kids:
+            out["subtask_total"], out["subtask_done"] = len(kids), len([x for x in kids if x["status"] == "done"])
+        return out
+
+    def _check_enum(self, name, value, allowed):
+        if value not in allowed:
+            raise ToolError("Invalid %s '%s': use one of %s" % (name, value, ", ".join(allowed)))
+        return value
+
+    def t_todo_create(self, a):
+        title = a.get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ToolError("Missing required argument: title")
+        if len(title) > 200:
+            raise ToolError("title is too long (200 characters at most)")
+        priority = self._check_enum("priority", a.get("priority", "medium"), tuple(self.PRIORITY_RANK))
+        status = self._check_enum("status", a.get("status", "todo"), self.STATUSES)
+        due, all_day = (None, False)
+        if a.get("due"):
+            due, all_day = self._parse_due(a["due"], a.get("due_all_day"))
+        parent = a.get("parent_id") or None
+        if parent:
+            p = self._todo({"id": parent})
+            if p["parent_id"] and "todo-nested-subtask-allowed" not in self.faults:
+                raise ToolError("A subtask cannot have subtasks: only one level is supported")
+        tid = uuid.uuid4().hex[:8]
+        done_at = datetime.fromtimestamp(self.NOW_MS / 1000, tz=TZ).isoformat() if status == "done" else None
+        if "todo-forgets-write" not in self.faults:
+            self.q("todo.db", "INSERT INTO todos (id, title, notes, status, priority, due, due_all_day, tags, parent_id, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   tid, title.strip(), a.get("notes", ""), status, priority, due, 1 if all_day else 0, json.dumps(a.get("tags", []), ensure_ascii=False), parent, done_at)
+            return self._todo_json(self._todo({"id": tid}), full=True)
+        return {"id": tid, "title": title.strip(), "status": status, "priority": priority}
+
+    def t_todo_get(self, a):
+        r = self._todo(a)
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        out = self._todo_json(r, full=True)
+        out["subtasks"] = [self._compact_todo(x, rows) for x in rows if x["parent_id"] == r["id"]]
+        return out
+
+    def t_todo_update(self, a):
+        r = self._todo(a)
+        sets, vals = [], []
+        if "title" in a:
+            sets.append("title=?"), vals.append(a["title"])
+        if "notes" in a:
+            sets.append("notes=?"), vals.append(a["notes"])
+        if "priority" in a:
+            sets.append("priority=?"), vals.append(self._check_enum("priority", a["priority"], tuple(self.PRIORITY_RANK)))
+        if "tags" in a:
+            sets.append("tags=?"), vals.append(json.dumps(a["tags"], ensure_ascii=False))
+        if "status" in a:
+            sets.append("status=?"), vals.append(self._check_enum("status", a["status"], self.STATUSES))
+        if "due" in a:
+            if a["due"] == "":
+                sets += ["due=NULL", "due_all_day=0"]
+            else:
+                due, all_day = self._parse_due(a["due"], a.get("due_all_day"))
+                sets += ["due=?", "due_all_day=?"]
+                vals += [due, 1 if all_day else 0]
+        if not sets:
+            raise ToolError("Nothing to update: pass at least one of title, notes, priority, due, tags, parent_id, status.")
+        self.q("todo.db", "UPDATE todos SET %s WHERE id=?" % ", ".join(sets), *vals, r["id"])
+        return self._todo_json(self._todo({"id": r["id"]}), full=True)
+
+    def t_todo_set_status(self, a):
+        r = self._todo(a)
+        if "status" not in a:
+            raise ToolError("Missing required argument: status")
+        status = self._check_enum("status", a["status"], self.STATUSES)
+        if status != r["status"]:
+            done_at = datetime.fromtimestamp(self.NOW_MS / 1000, tz=TZ).isoformat() if status == "done" and "todo-done-no-completed-at" not in self.faults else None
+            self.q("todo.db", "UPDATE todos SET status=?, completed_at=? WHERE id=?", status, done_at, r["id"])
+        return self._todo_json(self._todo({"id": r["id"]}), full=True)
+
+    def t_todo_delete(self, a):
+        r = self._todo(a)
+        kids = [x for x in self.q("todo.db", "SELECT * FROM todos WHERE parent_id = ?", r["id"])]
+        if "todo-delete-no-cascade" in self.faults:
+            kids = []
+        for k in kids:
+            self.q("todo.db", "DELETE FROM todos WHERE id=?", k["id"])
+        self.q("todo.db", "DELETE FROM todos WHERE id=?", r["id"])
+        return {"deleted": 1 + len(kids), "id": r["id"], "title": r["title"], "subtasks_deleted": len(kids)}
+
+    def t_todo_list(self, a):
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        status = self._check_enum("status", a["status"], self.STATUSES) if a.get("status") else None
+        hits = []
+        for r in rows:
+            if status and r["status"] != status:
+                continue
+            if not status and r["status"] == "done" and not a.get("include_done"):
+                continue
+            if a.get("priority") and r["priority"] != a["priority"]:
+                continue
+            if a.get("tag") and a["tag"].lower() not in [t.lower() for t in json.loads(r["tags"])]:
+                continue
+            if a.get("parent_id") and r["parent_id"] != a["parent_id"]:
+                continue
+            if a.get("overdue_only") and not self._todo_overdue(r):
+                continue
+            for key, sign in (("due_after", 1), ("due_before", -1)):
+                if a.get(key):
+                    if not r["due"]:
+                        break
+                    bound, bound_all_day = self._parse_due(a[key])
+                    mine, theirs = self._due_cmp_key(r["due"], bool(r["due_all_day"]), bound, bound_all_day)
+                    if (mine < theirs) if sign == 1 else (mine > theirs):
+                        break
+            else:
+                hits.append(r)
+        hits.sort(key=lambda r: (self.PRIORITY_RANK[r["priority"]], r["due"] is None, self._due_cmp_key(r["due"], bool(r["due_all_day"]), r["due"], bool(r["due_all_day"]))[0] if r["due"] else 0))
+        limit, offset = int(a.get("limit", 50)), int(a.get("offset", 0))
+        page = hits[offset:offset + limit]
+        out = {"todos": [self._compact_todo(r, rows) for r in page], "total": len(hits), "offset": offset, "limit": limit, "count": len(page),
+               "has_more": offset + len(page) < len(hits)}
+        if out["has_more"]:
+            out["next_offset"] = offset + len(page)
+        return out
+
+    def t_todo_search(self, a):
+        q = a.get("query")
+        if not isinstance(q, str) or not q.strip():
+            raise ToolError("query must not be blank." if q is not None else "Missing required argument: query")
+        words = q.lower().split()
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        hits = []
+        for r in rows:
+            if a.get("status") and r["status"] != a["status"]:
+                continue
+            hay = {"title": r["title"].lower(), "notes": r["notes"].lower(), "tags": " ".join(json.loads(r["tags"])).lower()}
+            if all(any(w in v for v in hay.values()) for w in words):
+                hits.append((r, [k for k, v in hay.items() if any(w in v for w in words)]))
+        hits.sort(key=lambda x: "title" not in x[1])
+        limit = int(a.get("limit", 20))
+        res = []
+        for r, where in hits[:limit]:
+            item = self._compact_todo(r, rows)
+            item["matched_in"] = where
+            res.append(item)
+        return {"query": q.strip(), "results": res, "total": len(hits), "count": len(res), "has_more": len(hits) > limit}
+
+    def t_todo_summary(self, a):
+        rows = self.q("todo.db", "SELECT * FROM todos")
+        counts = {k: len([r for r in rows if r["status"] == k]) for k in self.STATUSES}
+        if "todo-summary-wrong-count" in self.faults:
+            counts["todo"] += 1
+        week_start = self.today - timedelta(days=self.today.weekday())
+        open_rows = [r for r in rows if r["status"] in ("todo", "doing") and r["due"]]
+        day_of = lambda r: r["due"][:10] if r["due_all_day"] else datetime.fromisoformat(r["due"]).astimezone(TZ).date().isoformat()  # noqa: E731
+        live = [r for r in open_rows if not self._todo_overdue(r)]
+        return {"total": len(rows), "counts": counts, "overdue": len([r for r in open_rows if self._todo_overdue(r)]),
+                "due_today": len([r for r in live if day_of(r) == self.today.isoformat()]),
+                "due_this_week": len([r for r in live if self.today.isoformat() <= day_of(r) <= (week_start + timedelta(days=6)).isoformat()]),
+                "today": self.today.isoformat(), "week_start": week_start.isoformat(), "week_end": (week_start + timedelta(days=6)).isoformat(), "time_zone": "Asia/Shanghai"}
+
     # ---- notes
     def _note(self, a):
         rows = self.q("notes.db", "SELECT * FROM notes WHERE id=?", a.get("id", ""))

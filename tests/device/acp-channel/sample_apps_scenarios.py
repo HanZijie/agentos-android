@@ -654,10 +654,235 @@ def notes_steps(ctx):
     return S
 
 
+# ---------------------------------------------------------------------- todo
+
+def mine(rows, mark, key="title"):
+    """The rows this run created (the marker is in their title): lists and searches are judged on these only, so that an app that was not reset
+    (--no-reset) does not change the verdict."""
+    return [r for r in rows if mark in (r.get(key) or "")]
+
+
+def ids_of(items):
+    return sorted(str(x.get("id")) for x in items or [])
+
+
+def search_hits(rows, query, status=None):
+    """todo_search's rule over the dump: every word must match somewhere in the title, the notes or the tags (case-insensitive); all statuses unless given."""
+    words = query.lower().split()
+    out = []
+    for r in rows:
+        if status and r["status"] != status:
+            continue
+        hay = [r["title"].lower(), (r["notes"] or "").lower(), " ".join(r["tags"]).lower()]
+        if all(any(w in h for h in hay) for w in words):
+            out.append(r)
+    return out
+
+
+def todo_steps(ctx):
+    mark = "e2e-" + ctx.run_id
+    pkg = L.SAMPLES["todo"].package
+    due = ctx.day(7).isoformat()                   # the PRDs are due on one day (an all-day due)
+    timed_day = ctx.day(8)
+    timed = ctx.local(timed_day, "17:00")          # a due with a time and the device's offset
+    past = ctx.day(-1).isoformat()                 # an all-day due that is over since this morning
+    prd = [mark + " 写 PRD：搜索改版", mark + " 写 PRD：会员体系", mark + " 写 PRD：数据看板"]
+    S = []
+
+    def v_prd(b, a, t, c):
+        out = [eq("three todos more", len(b["todos"]) + 3, len(a["todos"]))]
+        for i, tid in enumerate(var(c.vars, "prd_ids")):
+            out += fields("PRD todo %d" % (i + 1), find(a["todos"], tid), title=prd[i], status="todo", priority="high", due=due, due_all_day=True, parent_id=None,
+                          completed_at=None, tags=["e2e"])
+        return out
+
+    S.append(Step("todo.create_prd", "todo", "todo_create x3: 写 PRD, an all-day due, priority high",
+                  [Call("todo", "todo_create", {"title": t, "due": due, "priority": "high", "tags": ["e2e"]}) for t in prd],
+                  capture=lambda tools, c: {"prd_ids": [str(x.json()["id"]) for x in tools]}, verify=v_prd))
+
+    S.append(Step("todo.create_timed", "todo", "todo_create with a due that has a time and the device offset (priority defaults to medium)",
+                  [Call("todo", "todo_create", {"title": mark + " 评审会材料", "due": timed})],
+                  capture=lambda tools, c: {"timed_id": str(tools[0].json()["id"])},
+                  verify=lambda b, a, t, c: fields("timed todo", find(a["todos"], var(c.vars, "timed_id")), title=mark + " 评审会材料", status="todo", priority="medium",
+                                                   due_all_day=False, due_ms=c.epoch_ms(timed_day, "17:00"), tags=[], parent_id=None)
+                  + [eq("one todo more", len(b["todos"]) + 1, len(a["todos"]))]))
+
+    S.append(Step("todo.create_overdue", "todo", "todo_create with an all-day due that is already over (yesterday)",
+                  [Call("todo", "todo_create", {"title": mark + " 已逾期的事", "due": past, "priority": "low"})],
+                  capture=lambda tools, c: {"overdue_id": str(tools[0].json()["id"])},
+                  verify=lambda b, a, t, c: fields("overdue todo", find(a["todos"], var(c.vars, "overdue_id")), due=past, due_all_day=True, priority="low", status="todo")))
+
+    S.append(Step("todo.subtask", "todo", "todo_create with parent_id: a subtask under the first PRD",
+                  lambda v: [Call("todo", "todo_create", {"title": mark + " 提纲", "parent_id": var(v, "prd_ids")[0]})],
+                  capture=lambda tools, c: {"sub_id": str(tools[0].json()["id"])},
+                  verify=lambda b, a, t, c: fields("subtask", find(a["todos"], var(c.vars, "sub_id")), title=mark + " 提纲", parent_id=c.vars["prd_ids"][0], status="todo")
+                  + [eq("one todo more", len(b["todos"]) + 1, len(a["todos"]))]))
+
+    # ---- failure paths: the error goes to the model, nothing is written
+    S.append(Step("todo.err.nested_subtask", "todo", "a subtask of a subtask is refused (one level only), nothing written",
+                  lambda v: [Call("todo", "todo_create", {"title": mark + " 孙任务", "parent_id": var(v, "sub_id")}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.missing_title", "todo", "todo_create without title: error, nothing written",
+                  [Call("todo", "todo_create", {}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.bad_date", "todo", "todo_create with a due that is no calendar date (2026-02-30): error, nothing written",
+                  [Call("todo", "todo_create", {"title": mark + " bad", "due": "2026-02-30"}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.due_without_offset", "todo", "todo_create with a time but no offset: error (no guessing of the time zone), nothing written",
+                  [Call("todo", "todo_create", {"title": mark + " bad", "due": "%sT17:00:00" % timed_day.isoformat()}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.unknown_id", "todo", "todo_get with an id that does not exist: error",
+                  [Call("todo", "todo_get", {"id": "ffffffff"}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.set_status_unknown_id", "todo", "todo_set_status on an id that does not exist: error, nothing written",
+                  [Call("todo", "todo_set_status", {"id": "ffffffff", "status": "done"}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.missing_status", "todo", "todo_set_status without status: error, nothing written",
+                  lambda v: [Call("todo", "todo_set_status", {"id": var(v, "prd_ids")[1]}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.update_nothing", "todo", "todo_update with no field to change: error, nothing written",
+                  lambda v: [Call("todo", "todo_update", {"id": var(v, "prd_ids")[1]}, ok=False)], verify=unchanged("todos", "todo")))
+    S.append(Step("todo.err.search_without_query", "todo", "todo_search without query: error",
+                  [Call("todo", "todo_search", {}, ok=False)], verify=unchanged("todos", "todo")))
+
+    # ---- status flow on the first PRD: doing, done (completed_at), done again (nothing moves), back to todo (completed_at cleared)
+    def status_step(sid, status, title, extra):
+        S.append(Step("todo." + sid, "todo", title, lambda v: [Call("todo", "todo_set_status", {"id": var(v, "prd_ids")[0], "status": status})],
+                      verify=lambda b, a, t, c: fields("first PRD", find(a["todos"], c.vars["prd_ids"][0]), status=status) + extra(b, a, t, c)))
+
+    status_step("doing", "doing", "todo_set_status doing", lambda b, a, t, c: fields("first PRD", find(a["todos"], c.vars["prd_ids"][0]), completed_at=None))
+
+    def v_done(b, a, t, c):
+        row = find(a["todos"], c.vars["prd_ids"][0])
+        shown = (t.tools[0].json() or {}).get("completed_at")
+        return [truth("completed_at is written by todo_set_status done", "an ISO-8601 time", bool(row and row["completed_at"]), row and row["completed_at"]),
+                eq("the tool result shows the same completed_at", row and row["completed_at"], shown)]
+
+    status_step("done", "done", "todo_set_status done writes completed_at", v_done)
+    S.append(Step("todo.done_again", "todo", "todo_set_status done on a done todo changes nothing (completed_at stays)",
+                  lambda v: [Call("todo", "todo_set_status", {"id": var(v, "prd_ids")[0], "status": "done"})],
+                  verify=lambda b, a, t, c: [eq("todos unchanged, completed_at included", b["todos"], a["todos"])]))
+    status_step("reopen", "todo", "todo_set_status back to todo clears completed_at", lambda b, a, t, c: fields("first PRD", find(a["todos"], c.vars["prd_ids"][0]), completed_at=None))
+    S.append(Step("todo.done_third", "todo", "todo_set_status done on the third PRD (it stays done for the list steps)",
+                  lambda v: [Call("todo", "todo_set_status", {"id": var(v, "prd_ids")[2], "status": "done"})],
+                  verify=lambda b, a, t, c: fields("third PRD", find(a["todos"], c.vars["prd_ids"][2]), status="done")
+                  + [truth("it has completed_at", "an ISO-8601 time", bool((find(a["todos"], c.vars["prd_ids"][2]) or {}).get("completed_at")), None)]))
+
+    # ---- update
+    S.append(Step("todo.update", "todo", "todo_update: title, priority, notes, tags (due and status stay)",
+                  lambda v: [Call("todo", "todo_update", {"id": var(v, "prd_ids")[1], "title": prd[1] + "（改）", "priority": "low", "notes": "e2e notes", "tags": ["e2e", "工作"]})],
+                  verify=lambda b, a, t, c: fields("second PRD", find(a["todos"], c.vars["prd_ids"][1]), title=prd[1] + "（改）", priority="low", notes="e2e notes",
+                                                  tags=["e2e", "工作"], due=due, due_all_day=True, status="todo")))
+    S.append(Step("todo.clear_due", "todo", 'todo_update due "" clears the due date',
+                  lambda v: [Call("todo", "todo_update", {"id": var(v, "prd_ids")[1], "due": ""})],
+                  verify=lambda b, a, t, c: fields("second PRD", find(a["todos"], c.vars["prd_ids"][1]), due=None, due_all_day=False, title=prd[1] + "（改）")))
+
+    def v_get(b, a, t, c):
+        r = t.tools[0].json() or {}
+        row = find(a["todos"], c.vars["prd_ids"][0])
+        return [eq("todo_get id", c.vars["prd_ids"][0], r.get("id")),
+                eq("todo_get shows the same status / priority / due as the app's dump", [row["status"], row["priority"], row["due"]], [r.get("status"), r.get("priority"), r.get("due")]),
+                eq("todo_get lists the subtask", [c.vars["sub_id"]], ids_of(r.get("subtasks")))]
+
+    S.append(Step("todo.get", "todo", "todo_get returns the todo with its subtasks",
+                  lambda v: [Call("todo", "todo_get", {"id": var(v, "prd_ids")[0]})], verify=v_get))
+
+    # ---- list / search / summary: judged against the app's dump (ground truth), on this run's rows
+    def v_list_default(b, a, t, c):
+        r = t.tools[0].json() or {}
+        open_rows = [x for x in a["todos"] if x["status"] != "done"]
+        out = [eq("todo_list total is the number of todos that are not done (done ones are hidden by default)", len(open_rows), r.get("total")),
+               truth("no done todo in the list", "none", not any(x.get("status") == "done" for x in r.get("todos", [])), [x.get("id") for x in r.get("todos", []) if x.get("status") == "done"])]
+        if not r.get("has_more"):
+            out.append(eq("the list holds exactly the open todos of this run", ids_of(mine(open_rows, mark)), ids_of(mine(r.get("todos", []), mark))))
+        return out
+
+    S.append(Step("todo.list_default", "todo", "todo_list without arguments hides done todos", [Call("todo", "todo_list")], verify=v_list_default))
+
+    def v_list_done(b, a, t, c):
+        r = t.tools[0].json() or {}
+        return [eq("todo_list include_done total is every todo", len(a["todos"]), r.get("total")),
+                truth("the done PRD is in it", c.vars["prd_ids"][2], c.vars["prd_ids"][2] in ids_of(r.get("todos", [])) or bool(r.get("has_more")), ids_of(r.get("todos", [])))]
+
+    S.append(Step("todo.list_include_done", "todo", "todo_list include_done:true shows everything", [Call("todo", "todo_list", {"include_done": True})], verify=v_list_done))
+
+    def v_list_status(b, a, t, c):
+        r = t.tools[0].json() or {}
+        return [eq("status:done lists the done todos of this run", ids_of(mine([x for x in a["todos"] if x["status"] == "done"], mark)), ids_of(mine(r.get("todos", []), mark)))]
+
+    S.append(Step("todo.list_status", "todo", "todo_list status:done", [Call("todo", "todo_list", {"status": "done"})], verify=v_list_status))
+
+    def v_overdue(b, a, t, c):
+        r = t.tools[0].json() or {}
+        return [eq("overdue_only returns the one todo of this run whose due is over (the future ones are not in it)", [c.vars["overdue_id"]], ids_of(mine(r.get("todos", []), mark)))]
+
+    S.append(Step("todo.list_overdue", "todo", "todo_list overdue_only", [Call("todo", "todo_list", {"overdue_only": True})], verify=v_overdue))
+
+    def v_range(b, a, t, c):
+        r = t.tools[0].json() or {}
+        want = [x for x in mine(a["todos"], mark) if x["due"] == due and x["due_all_day"]]
+        return [eq("due_after = due_before = the PRD date (inclusive bounds, include_done) returns exactly the todos due that day", ids_of(want), ids_of(mine(r.get("todos", []), mark))),
+                truth("the timed todo of the next day and the overdue one are not in it", "neither", not ({c.vars["timed_id"], c.vars["overdue_id"]} & set(ids_of(r.get("todos", [])))), ids_of(r.get("todos", [])))]
+
+    S.append(Step("todo.list_due_range", "todo", "todo_list due_after / due_before (inclusive) with include_done",
+                  [Call("todo", "todo_list", {"due_after": due, "due_before": due, "include_done": True})], verify=v_range))
+
+    S.append(Step("todo.list_subtasks", "todo", "todo_list parent_id returns the subtasks of that todo",
+                  lambda v: [Call("todo", "todo_list", {"parent_id": var(v, "prd_ids")[0], "include_done": True})],
+                  verify=lambda b, a, t, c: [eq("only the subtask", [c.vars["sub_id"]], ids_of((t.tools[0].json() or {}).get("todos")))]))
+
+    def v_search(b, a, t, c):
+        first, second = t.tools[0].json() or {}, t.tools[1].json() or {}
+        return [eq("todo_search finds the todos whose title, notes or tags have every word", ids_of(mine(search_hits(a["todos"], mark + " PRD"), mark)), ids_of(mine(first.get("results", []), mark))),
+                eq("todo_search status:done narrows it to the done one", ids_of(mine(search_hits(a["todos"], mark, "done"), mark)), ids_of(mine(second.get("results", []), mark))),
+                truth("a hit says where it matched", "matched_in on every result", all(x.get("matched_in") for x in first.get("results", [])), [x.get("matched_in") for x in first.get("results", [])])]
+
+    S.append(Step("todo.search", "todo", "todo_search (all words, any status) and with status:done",
+                  [Call("todo", "todo_search", {"query": mark + " PRD"}), Call("todo", "todo_search", {"query": mark, "status": "done"})], verify=v_search))
+
+    def v_summary(b, a, t, c):
+        r = t.tools[0].json() or {}
+        counts = r.get("counts") or {}
+        return [eq("todo_summary counts equal the dump's counts", a["counts"], counts),
+                eq("todo_summary total equals the number of todos in the dump (subtasks included)", len(a["todos"]), r.get("total")),
+                eq("the counts add up to total", r.get("total"), sum(counts.values())),
+                truth("one todo of this run is overdue", ">= 1", isinstance(r.get("overdue"), int) and r["overdue"] >= 1, r.get("overdue")),
+                truth("due_today / due_this_week are numbers", "integers", all(isinstance(r.get(k), int) for k in ("due_today", "due_this_week")), [r.get("due_today"), r.get("due_this_week")]),
+                eq("today is the device's date", c.today.isoformat(), r.get("today"))]
+
+    S.append(Step("todo.summary", "todo", "todo_summary: counts equal the dump's", [Call("todo", "todo_summary")], verify=v_summary))
+
+    # ---- delete: the parent takes its subtasks with it
+    def v_delete_parent(b, a, t, c):
+        r = t.tools[0].json() or {}
+        pid, sid = c.vars["prd_ids"][0], c.vars["sub_id"]
+        kids = [x for x in b["todos"] if x["parent_id"] == pid]
+        return [eq("deleted counts the todo and its subtasks", 1 + len(kids), r.get("deleted")), eq("subtasks_deleted", len(kids), r.get("subtasks_deleted")),
+                truth("the todo and its subtask are gone from the dump", "no rows", find(a["todos"], pid) is None and find(a["todos"], sid) is None, None),
+                eq("two todos less", len(b["todos"]) - 1 - len(kids), len(a["todos"]))]
+
+    S.append(Step("todo.delete_parent", "todo", "todo_delete (high risk) on a todo with a subtask: both are deleted",
+                  lambda v: [Call("todo", "todo_delete", {"id": var(v, "prd_ids")[0]})], verify=v_delete_parent))
+    S.append(Step("todo.delete_leaf", "todo", "todo_delete on a todo without subtasks",
+                  lambda v: [Call("todo", "todo_delete", {"id": var(v, "timed_id")})],
+                  verify=lambda b, a, t, c: [eq("deleted", 1, (t.tools[0].json() or {}).get("deleted")), truth("the row is gone", "no row", find(a["todos"], c.vars["timed_id"]) is None, None),
+                                             eq("one todo less", len(b["todos"]) - 1, len(a["todos"]))]))
+
+    # ---- declined confirmations (new session, mode=deny): the data stays
+    S.append(Step("todo.denied", "todo", "confirmation declined: tool_denied, nothing written",
+                  [Call("todo", "todo_create", {"title": mark + " denied"}, ok=False, error_has="tool_denied")],
+                  pre=deny_pre, post=deny_post, verify=declined("todo", "todo_create", unchanged("todos", "todo"))))
+    S.append(Step("todo.denied_delete", "todo", "todo_delete declined (high risk): tool_denied, the todo stays",
+                  lambda v: [Call("todo", "todo_delete", {"id": var(v, "prd_ids")[1]}, ok=False, error_has="tool_denied")],
+                  pre=deny_pre, post=deny_post,
+                  verify=declined("todo", "todo_delete", lambda b, a, t, c: [eq("todos unchanged", b["todos"], a["todos"]),
+                                                                              truth("the todo is still there", c.vars["prd_ids"][1], find(a["todos"], c.vars["prd_ids"][1]) is not None, None)])))
+    S += plugin_off_steps(ctx, "todo", pkg, Call("todo", "todo_summary"), "todos", "todo")
+    return S
+
+
 def scripted_steps(ctx):
     """Steps (`Step`) and check steps (a `(id, title, fn)` tuple, no prompt) in order; the audit of an app comes right after its steps
-    (ConsentDebugReceiver keeps the latest 50 requests only)."""
-    return alarm_steps(ctx) + [consent_audit_step("alarm")] + calendar_steps(ctx) + [consent_audit_step("calendar")] + notes_steps(ctx) + [consent_audit_step("notes")]
+    (ConsentDebugReceiver keeps the latest 50 requests only). Only the apps this run drives (ctx.apps)."""
+    builders = {"alarm": alarm_steps, "calendar": calendar_steps, "notes": notes_steps, "todo": todo_steps}
+    plan = []
+    for app in ctx.apps:
+        if app in builders:
+            plan += builders[app](ctx) + [consent_audit_step(app)]
+    return plan
 
 
 # ---------------------------------------------------------------------- leftovers
@@ -675,6 +900,9 @@ def leftovers(ctx):
     n = ctx.state("notes")["notes"]
     out["notes"] = [("note_trash", {"id": x["id"]}) for x in n if mark in x["content"] and x["status"] != "trashed"] \
         + [("note_delete", {"id": x["id"]}) for x in n if mark in x["content"]]
+    if "todo" in ctx.apps:
+        # a parent takes its subtasks with it; the todos of this run all carry the marker, so the top-level ones are enough
+        out["todo"] = [("todo_delete", {"id": x["id"]}) for x in ctx.state("todo")["todos"] if mark in x["title"] and not x["parent_id"]]
     return {k: v for k, v in out.items() if v}
 
 
