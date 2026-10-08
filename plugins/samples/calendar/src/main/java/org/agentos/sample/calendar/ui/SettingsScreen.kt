@@ -119,7 +119,7 @@ fun SettingsScreen(
             title = { Text(stringResource(R.string.settings_default_calendar)) },
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                    ChoiceRow(stringResource(R.string.settings_default_auto_choice), null, automatic) { onSetDefault(null); picking = false }
+                    ChoiceRow(autoLabel, stringResource(R.string.settings_default_auto_hint), automatic) { onSetDefault(null); picking = false }
                     for (c in choices) {
                         ChoiceRow(c.name, fmt.originLabel(c), !automatic && c.id == data.defaultWriteId) { onSetDefault(c); picking = false }
                     }

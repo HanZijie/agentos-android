@@ -75,6 +75,8 @@ class DebugReceiver : BroadcastReceiver() {
     private fun dump(context: Context, repo: CalendarRepository, intent: Intent): JsonObject {
         val offset = intent.getIntExtra("offset", 0).coerceAtLeast(0)
         val limit = intent.getIntExtra("limit", DebugDump.DEFAULT_LIMIT).coerceIn(1, DebugDump.MAX_LIMIT)
+        // permission may have been granted / revoked from outside since the last read: look again before reporting
+        repo.reloadCalendars()
         val scheduler = CalendarGraph.scheduler(context)
         val armed = scheduler.armed()?.let { (at, id, lead) -> ArmedReminder(at, id, lead, scheduler.isAlarmRegistered()) }
         return DebugDump.build(repo, CalendarGraph.tools(context), armed, offset, limit)
