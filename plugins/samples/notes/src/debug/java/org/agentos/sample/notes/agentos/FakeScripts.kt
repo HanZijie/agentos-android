@@ -11,7 +11,7 @@ object FakeScripts {
     private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
 
     val names: List<String> = listOf(
-        "success", "first_run", "reject", "no_time", "no_model", "auth_timeout", "denied", "disconnect",
+        "success", "success_todo", "first_run", "reject", "no_time", "no_model", "auth_timeout", "denied", "disconnect",
         "busy", "rate_limited", "too_large", "failed", "not_installed",
         "no_confirm", "hold_auth", "hold_running", "hold_approval", "slow", "hold_forever",
     )
@@ -19,6 +19,8 @@ object FakeScripts {
     fun byName(name: String, now: ZonedDateTime = ZonedDateTime.now()): FakeScript? = when (name) {
         // 日程 + 闹钟都成功
         "success" -> script(prompt = work(now, event = Outcome.CREATED, alarm = Outcome.CREATED))
+        // 日程 + 待办 + 闹钟三类都成功（截图和待办卡片的测试用）
+        "success_todo" -> script(prompt = work(now, event = Outcome.CREATED, alarm = Outcome.CREATED, todo = Outcome.CREATED))
         // 第一次使用：先等授权，再成功
         "first_run" -> script(connect = listOf(FakeStep.AuthWait, FakeStep.Delay(3_000)), prompt = work(now, Outcome.CREATED, Outcome.CREATED))
         // 用户在 AgentOS 里为这两个工具设了“始终允许”：没有 PENDING_APPROVAL，直接 RUNNING → COMPLETED（闹钟连 RUNNING 都没有，只有结果）
@@ -89,10 +91,11 @@ object FakeScripts {
         FakeScript(connect = connect, prompt = prompt)
 
     /** 读文字 → 日程（确认 → 创建 → 结果）→ 闹钟（同样）→ 总结。[event] / [alarm] 为 null 表示这一项不出现。 */
-    private fun work(now: ZonedDateTime, event: Outcome?, alarm: Outcome?): List<FakeStep> = buildList {
+    private fun work(now: ZonedDateTime, event: Outcome?, alarm: Outcome?, todo: Outcome? = null): List<FakeStep> = buildList {
         add(FakeStep.Delay(500))
         add(text("我找到了两个需要安排的时间：周五下午 3 点的会议，和每周一早上 7 点的跑步。"))
         if (event != null) addAll(toolFlow("e1", "event_create", event, eventResult(now)))
+        if (todo != null) addAll(toolFlow("t1", "todo_create", todo, todoResult(now)))
         if (alarm != null) addAll(toolFlow("a1", "alarm_create", alarm, alarmResult(now)))
         add(FakeStep.Delay(400))
         add(text("处理好了。"))
@@ -123,12 +126,18 @@ object FakeScripts {
     private fun argsFor(tool: String): String? = when (tool) {
         "event_create" -> """{"title":"和王总开会","start":"明天 15:00","location":"3 号会议室","reminder_minutes":[15]}"""
         "alarm_create" -> """{"time":"07:00","label":"跑步","days":["mon"]}"""
+        "todo_create" -> """{"title":"写三份 PRD","due":"2026-10-14","priority":"high"}"""
         else -> null
     }
 
     fun eventResult(now: ZonedDateTime): String {
         val start = now.plusDays(1).withHour(15).withMinute(0).withSecond(0).withNano(0)
         return """{"id":"e1","series_id":"e1","calendar_id":"1","calendar_name":"我的日历","title":"和王总开会","start":"${ISO.format(start)}","end":"${ISO.format(start.plusHours(1))}","all_day":false,"location":"3 号会议室","reminder_minutes":[15],"recurrence":"none","timezone":"${now.zone.id}"}"""
+    }
+
+    fun todoResult(now: ZonedDateTime): String {
+        val due = now.plusDays(5).toLocalDate()
+        return """{"id":"t1","title":"写三份 PRD","status":"todo","priority":"high","due":"$due","due_all_day":true,"tags":[],"overdue":false}"""
     }
 
     fun alarmResult(now: ZonedDateTime): String {
