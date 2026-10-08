@@ -34,6 +34,7 @@ object NotesGraph {
             scope = appScope,
             gatewayFactory = { GatewayProvider.create(appContext) },
             marker = PrefsRunMarker(appContext.getSharedPreferences("notes_agentos", Context.MODE_PRIVATE)),
+            promptFor = { text, now, locale -> GatewayProvider.promptFor(appContext, text, now, locale) },
         )
     }
 

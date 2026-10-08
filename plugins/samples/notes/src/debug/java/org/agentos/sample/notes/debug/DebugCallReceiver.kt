@@ -38,7 +38,8 @@ import org.agentos.sample.notes.tools.ToolOutput
  *   result code：1 = Done；2 = Error / 已停止 / 超时 / 参数不对；3 = 还在进行（pending）。
  *   `--es cmd ask_agent_status` 读最近一次的汇总（result code 3 = 还在进行，1 = 已结束或还没跑过）；
  *   `--es cmd ask_agent_stop` 点“停止”；
- *   `--es cmd fake_gateway --es script <名字|off>` 切换假网关脚本（名字见 FakeScripts.names；默认 off = 真网关）。
+ *   `--es cmd fake_gateway --es script <名字|off>` 切换假网关脚本（名字见 FakeScripts.names；默认 off = 真网关）；
+ *   `--es cmd raw_prompt --ez on true|false`：打开后发给 AgentOS 的提示词就是 `--es text` 的内容本身，用来让测试假模型的 JSON 脚本驱动真 SDK。
  *   汇总里没有任何密钥，也没有备忘全文。
  *
  * 不返回任何密钥；这个类和 NotesDump 只在 debug 包里被引用（release 里 R8 会去掉）。
@@ -81,6 +82,10 @@ class DebugCallReceiver : BroadcastReceiver() {
                         NotesGraph.agentSchedule.stop()
                         buildJsonObject { put("ok", true) }.toString()
                     }
+                    cmd == "raw_prompt" -> {
+                        GatewayProvider.setRawPrompt(context, intent.getBooleanExtra("on", false))
+                        buildJsonObject { put("ok", true); put("raw_prompt", GatewayProvider.rawPrompt(context)) }.toString()
+                    }
                     cmd == "fake_gateway" -> {
                         if (GatewayProvider.setScript(context, script)) {
                             buildJsonObject { put("ok", true); put("script", script ?: "off"); put("scripts", FakeScripts.names.joinToString(",")) }.toString()
@@ -91,7 +96,7 @@ class DebugCallReceiver : BroadcastReceiver() {
                     }
                     cmd != null -> {
                         code = 2
-                        error("unknown cmd: $cmd (use dump, reset, ask_agent, ask_agent_status, ask_agent_stop or fake_gateway)")
+                        error("unknown cmd: $cmd (use dump, reset, ask_agent, ask_agent_status, ask_agent_stop, fake_gateway or raw_prompt)")
                     }
                     else -> callTool(tool!!, args).also { if (it.contains("\"ok\":false")) code = 2 }
                 }
