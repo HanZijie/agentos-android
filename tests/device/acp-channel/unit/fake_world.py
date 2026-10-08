@@ -1,7 +1,8 @@
 """A fake phone for testing the acceptance driver without a device (A12).
 
 It models what the driver touches, with the same shapes as the real thing:
-  - the three apps' SQLite databases (same tables and columns as the real stores) changed by simple Python versions of the tools, and the apps' debug
+  - the five apps' state (SQLite databases for alarm / calendar / notes / todo, same tables and columns as the real stores for the first three; plain
+    Python state for sms: outbox, drafts, settings, permissions and the system inbox) changed by simple Python versions of the tools, and the apps' debug
     `dump` / `reset` receivers with the real JSON shapes (the driver never reads the databases: it has no way to, a real phone has no sqlite3);
   - the catalog the model is offered: after `enable` / `disable` the plugins' tools appear and disappear one plugin after the other, not together
     (`list_delay` / `drop_delay`: how many catalog reads later a plugin's tools show up / go away; 0 = at once, the default), as the real host does;
@@ -34,7 +35,7 @@ class ToolError(Exception):
 
 
 class FakePhone:
-    def __init__(self, today=date(2026, 10, 7), faults=None):
+    def __init__(self, today=date(2026, 10, 7), faults=None, serial="emulator-5554", other_devices=None):
         self.dir = tempfile.mkdtemp(prefix="fake-phone-")
         self.today = today
         self.faults = set(faults or [])
@@ -56,6 +57,11 @@ class FakePhone:
         self.log = []          # every adb shell / run call, for assertions
         self.model_requests = []
         self._next_alarm = 1
+        self.serial = serial
+        self.other_devices = list(other_devices or [])      # serials `adb devices` lists besides this one (a second emulator to send an SMS to)
+        self.sms = {"outbox": [], "drafts": [], "inbox": [], "next_id": 1, "settings": {"mask_codes": True, "allow_short_numbers": False, "rate_limit": 5},
+                    "granted": {"android.permission.READ_SMS": True, "android.permission.SEND_SMS": True}}
+        self.sms_tool_calls = []        # (tool, args) of the debug `tool` receiver
         self._init_dbs()
 
     @property
@@ -82,6 +88,10 @@ class FakePhone:
         c.execute("CREATE TABLE calendars (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, color INTEGER NOT NULL, visible INTEGER NOT NULL DEFAULT 1, is_default INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)")
         c.execute("CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL, calendar_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', all_day INTEGER NOT NULL DEFAULT 0, start_utc INTEGER NOT NULL, end_utc INTEGER NOT NULL, tz TEXT NOT NULL, start_day INTEGER NOT NULL DEFAULT 0, end_day INTEGER NOT NULL DEFAULT 0, color INTEGER, reminders TEXT NOT NULL DEFAULT '', recurrence TEXT NOT NULL DEFAULT 'none', recurrence_until INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)")
         c.execute("INSERT INTO calendars VALUES ('cal-default', '日历', 1, 1, 1, 0)")
+        c.commit()
+        c.close()
+        c = sqlite3.connect(self.db_path("todo.db"))
+        c.execute("CREATE TABLE todos (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'todo', priority TEXT NOT NULL DEFAULT 'medium', due TEXT, due_all_day INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '[]', parent_id TEXT, completed_at TEXT)")
         c.commit()
         c.close()
         c = sqlite3.connect(self.db_path("notes.db"))
@@ -119,7 +129,9 @@ class FakePhone:
         return {"ro.product.model": "FakePhone", "ro.build.version.sdk": "36", "ro.build.version.release": "16", "ro.build.fingerprint": "fake"}.get(name, "")
 
     adb = "fake-adb"
-    serial = "fake:0"
+
+    def devices(self):
+        return [self.serial] + self.other_devices
 
     # ------------------------------------------------------------------ debug receivers
     def _broadcast(self, cmd):
@@ -142,6 +154,10 @@ class FakePhone:
             data = self._consent(extras)
         elif comp.endswith("DesktopGatewayDebugReceiver"):
             data = self._gateway(extras)
+        elif comp.startswith("org.agentos.sample.todo/"):
+            data = self._todo_app(extras)
+        elif comp.startswith("org.agentos.sample.sms/"):
+            data = self._sms_app(extras)
         elif comp.endswith("/.debug.DebugToolReceiver"):
             data = self._alarm_app(extras)
         elif comp.endswith("/.debug.DebugCallReceiver"):
@@ -213,7 +229,7 @@ class FakePhone:
                 if "hide-" + t in self.faults:
                     continue
                 n = scripted_tools.tool_name(s.name, s.name, t)
-                out[n] = "HIGH" if t.endswith("_delete") else ("WRITE" if "risk-read" not in self.faults else "READ")
+                out[n] = "HIGH" if L.expected_risk(t) == "HIGH" else ("WRITE" if "risk-read" not in self.faults else "READ")
         return out
 
     def _consent(self, ex):
@@ -296,6 +312,67 @@ class FakePhone:
                            "archived": r["status"] == 1, "trashed": r["status"] == 2, "created_at": "2026-10-07T12:00:00+08:00", "updated_at": "2026-10-07T12:00:00+08:00",
                            "content_length": len(r["content"]), "revision": r["revision"]} for r in page],
                 "tags": [{"name": k, "count": v} for k, v in sorted(tags.items())], "total": len(rows), "offset": offset, "count": len(page), "next_offset": nxt}
+
+    def _todo_json(self, r, full=False):
+        """A todo the way todo_get / dump print it (full) or in the compact list form."""
+        out = {"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]}
+        if full:
+            out.update({"due": r["due"], "due_all_day": bool(r["due_all_day"]), "tags": json.loads(r["tags"]), "parent_id": r["parent_id"],
+                        "completed_at": r["completed_at"], "overdue": False, "created_at": "2026-10-07T12:00:00+08:00", "updated_at": "2026-10-07T12:00:00+08:00",
+                        "notes": r["notes"]})
+        return out
+
+    def _todo_app(self, ex):
+        cmd = ex.get("cmd")
+        if cmd == "reset":
+            n = len(self.q("todo.db", "SELECT id FROM todos"))
+            if "todo-reset-noop" not in self.faults:
+                self.q("todo.db", "DELETE FROM todos")
+            left = len(self.q("todo.db", "SELECT id FROM todos"))
+            return {"cleared": n, "remaining": left, "remaining_in_db": left}
+        if cmd != "dump":
+            return {"ok": False, "error": "unknown cmd: %s (use dump or reset)" % cmd}
+        if "dump-fails-todo" in self.faults:
+            return {"ok": False, "error": "boom"}
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        offset, limit, nxt = self._page(ex, len(rows))
+        page = rows[offset:offset + limit]
+        counts = {k: len([r for r in rows if r["status"] == k]) for k in ("todo", "doing", "done", "shelved")}
+        return {"todos": [self._todo_json(r, full=True) for r in page], "counts": counts, "total": len(rows), "offset": offset, "count": len(page),
+                "next_offset": nxt, "now": "2026-10-07T12:00:00+08:00", "time_zone": "Asia/Shanghai"}
+
+    # ---- sms app: the outbox / drafts / settings / permissions are the app's own records; the inbox is the system SMS store (not in the dump)
+    def sms_mode(self):
+        read, send = (self.sms["granted"][p] for p in L.SMS_PERMISSIONS)
+        return "full" if read and send else "compose_only" if not read and not send else "partial"
+
+    def _sms_app(self, ex):
+        cmd = ex.get("cmd")
+        st = self.sms
+        if cmd == "reset":
+            n, d = len(st["outbox"]), len(st["drafts"])
+            if "sms-reset-noop" not in self.faults:
+                st["outbox"], st["drafts"] = [], []
+            return {"cleared": n, "outbox_remaining": len(st["outbox"]), "drafts_cleared": d}
+        if cmd == "set":
+            key, value = ex.get("key"), ex.get("value")
+            if key in ("mask_codes", "allow_short_numbers"):
+                st["settings"][key] = str(value).lower() == "true"
+            elif key == "rate_limit":
+                st["settings"][key] = int(value)
+            else:
+                return {"error": "unknown key '%s'; use mask_codes, allow_short_numbers or rate_limit" % key}
+            return dict(st["settings"])
+        if cmd != "dump":
+            return {"error": "unknown cmd '%s'; use dump, reset or set" % cmd}
+        if "dump-fails-sms" in self.faults:
+            return {"error": "IllegalStateException: boom"}
+        rows = st["outbox"]
+        offset, limit, nxt = self._page(ex, len(rows))
+        return {"mode": self.sms_mode(), "permissions": {"read_sms": st["granted"][L.SMS_PERMISSIONS[0]], "send_sms": st["granted"][L.SMS_PERMISSIONS[1]]},
+                "settings": dict(st["settings"]), "outbox": [dict(o, created_at="2026-10-07T12:00:00+08:00", updated_at="2026-10-07T12:00:00+08:00") for o in rows[offset:offset + limit]],
+                "drafts": [dict(d, created_at="2026-10-07T12:00:00+08:00") for d in st["drafts"]], "total": len(rows), "offset": offset, "count": len(rows[offset:offset + limit]),
+                "next_offset": nxt, "now": "2026-10-07T12:00:00+08:00", "time_zone": "Asia/Shanghai"}
 
     NOW_MS = int(datetime(2026, 10, 7, 12, 0, tzinfo=TZ).timestamp() * 1000)
 

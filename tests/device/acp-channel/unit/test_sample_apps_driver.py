@@ -82,7 +82,7 @@ class ScriptedRunTest(unittest.TestCase):
         self.assertEqual("HIGH", delete["actual"])
         listing = [c for n, c in names.items() if "note_list is offered" in n][0]
         self.assertEqual("WRITE", listing["expected"], "no annotation lowers a third-party tool below WRITE")
-        self.assertEqual(1 + 29, len(cat["checks"]), "one check that every documented tool was offered, then one risk check per tool")
+        self.assertEqual(1 + 44, len(cat["checks"]), "one check that every documented tool was offered (44 tools of the five apps), then one risk check per tool")
 
 
 class ConsentBehaviourTest(unittest.TestCase):
@@ -392,6 +392,139 @@ def _alarm_phone_with_data(faults):
     return phone
 
 
+class TodoSmsStateTest(unittest.TestCase):
+    """The state readers of the todo and sms apps: dump shapes of the two apps (their READMEs), stable fields, paging, reset."""
+
+    def add_todo(self, phone, title, **kw):
+        row = dict(id=title[:8].ljust(8, "0"), notes="", status="todo", priority="medium", due=None, due_all_day=0, tags="[]", parent_id=None, completed_at=None)
+        row.update(kw, title=title)
+        phone.q("todo.db", "INSERT INTO todos (id, title, notes, status, priority, due, due_all_day, tags, parent_id, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                row["id"], row["title"], row["notes"], row["status"], row["priority"], row["due"], row["due_all_day"], row["tags"], row["parent_id"], row["completed_at"])
+
+    def test_the_documented_tools_are_forty_four_with_the_two_new_apps(self):
+        self.assertEqual(["alarm", "calendar", "notes", "todo", "sms"], list(L.SAMPLES))
+        self.assertEqual(44, sum(len(s.tools) for s in L.SAMPLES.values()))
+        self.assertIn("alarm_system_next", L.SAMPLES["alarm"].tools)
+        self.assertEqual("org.agentos.sample.todo", L.SAMPLES["todo"].package)
+        self.assertEqual("org.agentos.sample.sms", L.SAMPLES["sms"].package)
+        self.assertEqual("org.agentos.sample.todo/.debug.DebugToolReceiver", L.SAMPLES["todo"].component)
+        self.assertEqual("org.agentos.sample.sms/.debug.DebugToolReceiver", L.SAMPLES["sms"].component)
+        self.assertEqual("todo-debug.apk", L.SAMPLES["todo"].apk_name)
+        self.assertEqual(["alarm", "calendar", "notes", "todo", "sms"], list(L.STATE_READERS))
+
+    def test_risk_follows_risk_policy_for_third_party_tools(self):
+        # readOnlyHint never lowers a third-party tool below WRITE (also sms_thread_list); destructiveHint (the *_delete tools and sms_send) raises it to HIGH
+        for tool in ("todo_list", "todo_summary", "todo_create", "todo_set_status", "sms_thread_list", "sms_message_list", "sms_search", "sms_send_status",
+                     "sms_compose", "alarm_system_next"):
+            self.assertEqual("WRITE", L.expected_risk(tool), tool)
+        for tool in ("todo_delete", "sms_send", "alarm_delete", "event_delete", "note_delete"):
+            self.assertEqual("HIGH", L.expected_risk(tool), tool)
+
+    def test_the_todo_snapshot_has_the_driver_shape_without_clocks(self):
+        phone = FakePhone()
+        self.add_todo(phone, "PRD one", priority="high", due="2026-10-14", due_all_day=1, tags='["e2e"]')
+        self.add_todo(phone, "timed", due="2026-10-15T17:00:00+08:00", status="done", completed_at="2026-10-07T12:00:00+08:00")
+        self.add_todo(phone, "child", parent_id="PRD one0")
+        snap = L.TodoState(phone).snapshot()
+        a, b, c = snap["todos"]
+        self.assertEqual(("PRD one0", "PRD one", "todo", "high", "2026-10-14", True, None, ["e2e"], None), (a["id"], a["title"], a["status"], a["priority"], a["due"], a["due_all_day"], a["due_ms"], a["tags"], a["parent_id"]))
+        self.assertEqual(L.iso_ms("2026-10-15T09:00:00Z"), b["due_ms"], "a timed due also comes as an instant")
+        self.assertEqual("2026-10-07T12:00:00+08:00", b["completed_at"])
+        self.assertEqual("PRD one0", c["parent_id"])
+        for row in snap["todos"]:
+            for gone in ("created_at", "updated_at", "overdue"):
+                self.assertNotIn(gone, row)
+        self.assertEqual({"todo": 2, "doing": 0, "done": 1, "shelved": 0}, snap["counts"])
+
+    def test_the_todo_dump_is_read_page_by_page_and_reset_empties_the_app(self):
+        phone = FakePhone()
+        for i in range(5):
+            self.add_todo(phone, "t%d" % i)
+        old = L.DUMP_PAGE
+        L.DUMP_PAGE = 2
+        try:
+            snap = L.TodoState(phone).snapshot()
+        finally:
+            L.DUMP_PAGE = old
+        self.assertEqual(["t%d" % i for i in range(5)], [t["title"] for t in snap["todos"]])
+        self.assertEqual(3, len([c for c in phone.log if "org.agentos.sample.todo/.debug.DebugToolReceiver" in c and "--es cmd dump" in c]))
+        ok, data = L.TodoState(phone).reset()
+        self.assertTrue(ok, data)
+        self.assertEqual({"cleared": 5, "remaining": 0, "remaining_in_db": 0}, data)
+        self.assertEqual([], L.TodoState(phone).snapshot()["todos"])
+        phone2 = FakePhone(faults={"todo-reset-noop"})
+        self.add_todo(phone2, "x")
+        bad, data = L.TodoState(phone2).reset()
+        self.assertFalse(bad)
+        self.assertEqual(1, data["remaining_in_db"])
+
+    def test_a_failing_todo_dump_is_an_error_not_an_empty_list(self):
+        with self.assertRaises(L.StateReadError) as cm:
+            L.TodoState(FakePhone(faults={"dump-fails-todo"})).snapshot()
+        self.assertIn("todo dump failed", str(cm.exception))
+
+    def test_the_sms_snapshot_has_mode_permissions_settings_outbox_and_drafts(self):
+        phone = FakePhone()
+        phone.sms["outbox"] = [{"id": "2", "to": "5616", "text": "b", "parts": 1, "state": "delivered", "sent_parts": 1, "delivered_parts": 1, "error": None},
+                               {"id": "1", "to": "5616", "text": "a", "parts": 1, "state": "queued", "sent_parts": 0, "delivered_parts": 0, "error": None}]
+        phone.sms["drafts"] = [{"id": "1", "to": "5616", "text": "draft"}]
+        snap = L.SmsState(phone).snapshot()
+        self.assertEqual("full", snap["mode"])
+        self.assertEqual({"read_sms": True, "send_sms": True}, snap["permissions"])
+        self.assertEqual({"mask_codes": True, "allow_short_numbers": False, "rate_limit": 5}, snap["settings"])
+        self.assertEqual(["2", "1"], [o["id"] for o in snap["outbox"]], "newest first, as the app dumps it")
+        self.assertEqual("delivered", snap["outbox"][0]["state"])
+        self.assertEqual([{"id": "1", "to": "5616", "text": "draft"}], snap["drafts"])
+        for row in snap["outbox"]:
+            self.assertNotIn("created_at", row)
+        phone.sms["granted"] = {p: False for p in L.SMS_PERMISSIONS}
+        self.assertEqual("compose_only", L.SmsState(phone).snapshot()["mode"])
+        phone.sms["granted"][L.SMS_PERMISSIONS[0]] = True
+        self.assertEqual("partial", L.SmsState(phone).snapshot()["mode"])
+
+    def test_the_sms_reset_clears_only_the_outbox_and_the_drafts_and_never_the_settings(self):
+        phone = FakePhone()
+        phone.sms["outbox"] = [{"id": "1", "to": "5616", "text": "a", "parts": 1, "state": "sent", "sent_parts": 1, "delivered_parts": 0, "error": None}]
+        phone.sms["drafts"] = [{"id": "1", "to": "5616", "text": "d"}]
+        phone.sms["inbox"] = [{"address": "+12025550143", "body": "hello"}]
+        L.SmsState(phone).set("allow_short_numbers", True)
+        ok, data = L.SmsState(phone).reset()
+        self.assertTrue(ok, data)
+        self.assertEqual({"cleared": 1, "outbox_remaining": 0, "drafts_cleared": 1}, data)
+        self.assertEqual(1, len(phone.sms["inbox"]), "the system SMS store is not touched")
+        self.assertTrue(phone.sms["settings"]["allow_short_numbers"])
+        phone2 = FakePhone(faults={"sms-reset-noop"})
+        phone2.sms["outbox"] = [{"id": "1", "to": "5616", "text": "a", "parts": 1, "state": "sent", "sent_parts": 1, "delivered_parts": 0, "error": None}]
+        ok, data = L.SmsState(phone2).reset()
+        self.assertFalse(ok)
+        self.assertEqual(1, data["outbox_remaining"])
+
+    def test_settings_are_changed_with_the_debug_set_command_and_typed_values(self):
+        phone = FakePhone()
+        state = L.SmsState(phone)
+        self.assertEqual({"mask_codes": True, "allow_short_numbers": True, "rate_limit": 5}, state.set("allow_short_numbers", True))
+        self.assertEqual({"mask_codes": False, "allow_short_numbers": True, "rate_limit": 5}, state.set("mask_codes", False))
+        self.assertEqual(30, state.set("rate_limit", 30)["rate_limit"])
+        self.assertTrue(any("--es cmd set --es key mask_codes --es value false" in c for c in phone.log), [c for c in phone.log if "cmd set" in c])
+        with self.assertRaises(L.StateReadError):
+            state.set("volume", 3)
+
+    def test_the_sms_dump_is_paged_through_next_offset(self):
+        phone = FakePhone()
+        phone.sms["outbox"] = [{"id": str(i), "to": "5616", "text": "m%d" % i, "parts": 1, "state": "sent", "sent_parts": 1, "delivered_parts": 0, "error": None} for i in range(5, 0, -1)]
+        old = L.DUMP_PAGE
+        L.DUMP_PAGE = 2
+        try:
+            snap = L.SmsState(phone).snapshot()
+        finally:
+            L.DUMP_PAGE = old
+        self.assertEqual(["5", "4", "3", "2", "1"], [o["id"] for o in snap["outbox"]])
+
+    def test_devices_lists_the_serial_and_the_other_emulators(self):
+        self.assertEqual(["emulator-5554"], FakePhone().devices())
+        self.assertEqual(["emulator-5554", "emulator-5556"], FakePhone(other_devices=["emulator-5556"]).devices())
+
+
 class CalendarDumpTest(unittest.TestCase):
     """The calendar is read through its own dump / reset like the other two (no copying of its database), and its single armed reminder alarm is checked."""
 
@@ -629,7 +762,7 @@ class CatalogRaceTest(unittest.TestCase):
         self.assertTrue(all(c.ok for c in out), [c for c in out if not c.ok])
         out = S.setup_catalog(ctx)
         self.assertTrue(all(c.ok for c in out), [c for c in out if not c.ok])
-        self.assertEqual(1 + 29, len(out))
+        self.assertEqual(1 + 44, len(out))
 
     def test_a_tool_that_never_appears_is_named_with_its_plugin_after_the_wait(self):
         phone = self.staggered(faults={"hide-note_trash", "hide-event_get"})
