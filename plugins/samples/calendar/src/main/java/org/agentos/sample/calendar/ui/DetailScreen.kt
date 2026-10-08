@@ -33,7 +33,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,10 +43,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.agentos.sample.calendar.R
 import org.agentos.sample.calendar.data.EventSeries
-import org.agentos.sample.calendar.data.Occurrences
+import org.agentos.sample.calendar.data.Occurrence
+import org.agentos.sample.calendar.data.Recurrence
 import java.time.Instant
 import java.time.ZoneId
 
@@ -56,19 +57,13 @@ import java.time.ZoneId
 fun DetailScreen(
     data: CalendarData,
     fmt: Fmt,
-    occurrenceId: String,
+    occurrence: Occurrence,
     onBack: () -> Unit,
     onEdit: (EventSeries) -> Unit,
     onDelete: (EventSeries) -> Unit,
 ) {
-    val (seriesId, key) = Occurrences.splitId(occurrenceId)
-    val series = data.events.firstOrNull { it.id == seriesId }
-    // 事件在别处（比如 MCP）被删掉了：自动退出
-    LaunchedEffect(series == null) { if (series == null) onBack() }
-    if (series == null) return
-    val occurrence = remember(series, key, data.zone) {
-        (if (key != null) Occurrences.findByKey(series, key, data.zone) else null) ?: Occurrences.first(series, data.zone)
-    }
+    val series = occurrence.series
+    val custom = series.recurrence == Recurrence.CUSTOM
     val color = data.colorOf(series)
     val tint by animateColorAsState(color.copy(alpha = 0.16f), label = "tint")
     var confirmDelete by remember { mutableStateOf(false) }
@@ -76,7 +71,8 @@ fun DetailScreen(
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize()) {
             ScreenTopBar("", onBack) {
-                IconButton(onClick = { onEdit(series) }) { Icon(Icons.Rounded.Edit, stringResource(R.string.action_edit)) }
+                // custom 重复规则这里改不了（改了会破坏系列），只能看和删
+                if (!custom) IconButton(onClick = { onEdit(series) }) { Icon(Icons.Rounded.Edit, stringResource(R.string.action_edit)) }
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Rounded.Delete, stringResource(R.string.action_delete)) }
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -97,7 +93,11 @@ fun DetailScreen(
                         DetailRow(
                             Icons.Rounded.Repeat,
                             fmt.recurrenceLabel(series.recurrence),
-                            if (until != null) stringResource(R.string.repeat_until_date, fmt.dayMedium(until)) else stringResource(R.string.repeat_forever),
+                            when {
+                                custom -> series.rrule
+                                until != null -> stringResource(R.string.repeat_until_date, fmt.dayMedium(until))
+                                else -> stringResource(R.string.repeat_forever)
+                            },
                         )
                     }
                     if (series.location.isNotBlank()) DetailRow(Icons.Rounded.LocationOn, series.location)
@@ -108,7 +108,10 @@ fun DetailScreen(
                             Spacer(Modifier.width(16.dp))
                             Box(Modifier.size(12.dp).clip(CircleShape).background(Color(cal.color)))
                             Spacer(Modifier.width(10.dp))
-                            Text(cal.name, style = MaterialTheme.typography.bodyLarge)
+                            Column(Modifier.weight(1f)) {
+                                Text(cal.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(fmt.originLabel(cal), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                     if (series.reminders.isNotEmpty()) {
@@ -117,17 +120,27 @@ fun DetailScreen(
                     if (series.description.isNotBlank()) DetailRow(Icons.AutoMirrored.Rounded.Subject, series.description)
                 }
                 if (series.isRecurring) {
-                    Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.Top) {
-                        Icon(Icons.Rounded.Info, null, Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.series_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    InfoNote(stringResource(if (custom) R.string.series_custom_note else R.string.series_note))
+                }
+                if (data.calendar(series.calendarId)?.system == true && series.reminders.isNotEmpty()) {
+                    InfoNote(stringResource(R.string.reminders_by_system_note))
                 }
                 Spacer(Modifier.height(24.dp))
             }
         }
     }
-    if (confirmDelete) DeleteEventDialog(series, onDismiss = { confirmDelete = false }, onConfirm = { confirmDelete = false; onDelete(series) })
+    if (confirmDelete) {
+        DeleteEventDialog(series, data.calendar(series.calendarId), fmt, onDismiss = { confirmDelete = false }, onConfirm = { confirmDelete = false; onDelete(series) })
+    }
+}
+
+@Composable
+private fun InfoNote(text: String) {
+    Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.Top) {
+        Icon(Icons.Rounded.Info, null, Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable

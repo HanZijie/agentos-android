@@ -6,7 +6,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-/** 自己的 SQLite（calendar.db），不碰系统 CalendarContract。时间列都是 UTC 毫秒；全天日程另存 epoch day。 */
+/** 本机日历的 SQLite（calendar.db），和系统 CalendarContract 并存、互不相干。时间列都是 UTC 毫秒；全天日程另存 epoch day。 */
 class SqliteCalendarStore(context: Context, name: String? = DB_NAME) : SQLiteOpenHelper(context, name, null, VERSION), CalendarStore {
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -21,7 +21,8 @@ class SqliteCalendarStore(context: Context, name: String? = DB_NAME) : SQLiteOpe
                 color INTEGER NOT NULL,
                 visible INTEGER NOT NULL DEFAULT 1,
                 is_default INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                name_key TEXT
             )""",
         )
         db.execSQL(
@@ -49,7 +50,20 @@ class SqliteCalendarStore(context: Context, name: String? = DB_NAME) : SQLiteOpe
         db.execSQL("CREATE INDEX idx_events_start ON events(start_utc)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            // v2（R3）：默认日历的名字不再冻结在创建时的语言里，改存标记 name_key。
+            // 旧库里默认日历的名字恰好是中文 / 英文默认名的，当作“没被用户改过”，标成 default；别的名字不动。数据（日历、日程、id）都不变。
+            db.execSQL("ALTER TABLE calendars ADD COLUMN name_key TEXT")
+            val legacyDefaults = ArrayList<String>()
+            db.rawQuery("SELECT id, name, is_default FROM calendars", null).use { c ->
+                while (c.moveToNext()) {
+                    if (LegacyDefaultNames.isSystemDefault(c.getString(1).orEmpty(), c.getInt(2) != 0)) legacyDefaults += c.getString(0)
+                }
+            }
+            for (id in legacyDefaults) db.execSQL("UPDATE calendars SET name_key = ? WHERE id = ?", arrayOf(CalendarInfo.NAME_KEY_DEFAULT, id))
+        }
+    }
 
     override fun loadCalendars(): List<CalendarInfo> = readableDatabase.query("calendars", null, null, null, null, null, "is_default DESC, created_at ASC").use { c ->
         buildList {
@@ -58,6 +72,7 @@ class SqliteCalendarStore(context: Context, name: String? = DB_NAME) : SQLiteOpe
                     CalendarInfo(
                         id = c.str("id"), name = c.str("name"), color = c.int("color"),
                         visible = c.int("visible") != 0, isDefault = c.int("is_default") != 0, createdAt = c.long("created_at"),
+                        nameKey = if (c.isNull(c.getColumnIndexOrThrow("name_key"))) null else c.str("name_key"),
                     ),
                 )
             }
@@ -92,6 +107,7 @@ class SqliteCalendarStore(context: Context, name: String? = DB_NAME) : SQLiteOpe
             put("visible", if (calendar.visible) 1 else 0)
             put("is_default", if (calendar.isDefault) 1 else 0)
             put("created_at", calendar.createdAt)
+            if (calendar.nameKey != null) put("name_key", calendar.nameKey) else putNull("name_key")
         }
         // 不能用 REPLACE（先删后插会触发级联删除这个日历的日程）：先 IGNORE 插入，已存在再 UPDATE
         writableDatabase.insertWithOnConflict("calendars", null, v, SQLiteDatabase.CONFLICT_IGNORE)
@@ -145,6 +161,6 @@ class SqliteCalendarStore(context: Context, name: String? = DB_NAME) : SQLiteOpe
 
     companion object {
         const val DB_NAME = "calendar.db"
-        const val VERSION = 1
+        const val VERSION = 2
     }
 }

@@ -53,11 +53,20 @@ import org.agentos.sample.calendar.data.Occurrence
 
 /** 搜索：标题 / 地点 / 备注的包含匹配；结果每个系列一条（最近将发生的那次），按时间排序。 */
 @Composable
-fun SearchScreen(data: CalendarData, fmt: Fmt, onBack: () -> Unit, onOpen: (Occurrence) -> Unit) {
+fun SearchScreen(data: CalendarData, fmt: Fmt, vm: CalendarViewModel, onBack: () -> Unit, onOpen: (Occurrence) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
-    val results = remember(data, query) { data.search(query, System.currentTimeMillis()) }
+    // 搜索在后台跑（系统日历要查库）；隐藏的日历不参与；输入停顿一小会儿再查。null = 还没出结果
+    var results by remember { mutableStateOf<List<Occurrence>?>(null) }
+    LaunchedEffect(query, data.snapshot.version, data.calendars) {
+        if (query.isBlank()) {
+            results = emptyList()
+        } else {
+            kotlinx.coroutines.delay(150)
+            results = vm.search(query.trim()).filter { data.calendar(it.series.calendarId)?.visible != false }
+        }
+    }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize().imePadding()) {
@@ -89,13 +98,14 @@ fun SearchScreen(data: CalendarData, fmt: Fmt, onBack: () -> Unit, onOpen: (Occu
             }
             when {
                 query.isBlank() -> EmptyState(stringResource(R.string.empty_search_title), stringResource(R.string.empty_search_hint), Modifier.fillMaxWidth())
-                results.isEmpty() -> EmptyState(stringResource(R.string.no_results_title), stringResource(R.string.no_results_hint, query.trim()), Modifier.fillMaxWidth())
+                results == null -> Unit
+                results.orEmpty().isEmpty() -> EmptyState(stringResource(R.string.no_results_title), stringResource(R.string.no_results_hint, query.trim()), Modifier.fillMaxWidth())
                 else -> LazyColumn(
                     Modifier.weight(1f).navigationBarsPadding(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(results, key = { it.id }) { o ->
+                    items(results.orEmpty(), key = { it.id }) { o ->
                         Column(Modifier.animateItem()) {
                             Text(
                                 fmt.dayMedium(o.firstDay) + (fmt.relativeDay(o.firstDay, data.today)?.let { " · $it" } ?: ""),

@@ -20,14 +20,19 @@ import kotlin.concurrent.thread
  * Debug builds only. Every command is an adb broadcast to this receiver:
  *
  *   adb shell am broadcast -n org.agentos.sample.calendar/.debug.DebugReceiver -a x --es cmd seed
- *   ... --es cmd remind_test --ei start_in 2 --ei lead 1     (event starting in N minutes, reminder M minutes before)
+ *   ... --es cmd remind_test --ei start_in 2 --ei lead 1     (local event starting in N minutes, reminder M minutes before)
  *   ... --es cmd dump [--ei offset N --ei limit M]           (read-only state dump, JSON in the broadcast result data)
- *   ... --es cmd reset                                       (delete everything and cancel the reminder alarm)
+ *   ... --es cmd reset                                       (delete what THIS APP created and cancel the reminder alarm)
  *   ... --es cmd clear                                       (older name of reset's data part; logs only)
+ *   ... --es cmd set_default [--es id <calendar id>]         (choose the default write calendar; no id = automatic)
+ *   ... --es cmd provider_setup | provider_teardown          (emulator only: fake account calendars in the system calendar database)
+ *   ... --es cmd provider_probe                              (emulator only: the C1 experiments, see README)
  *
- * seed / clear / remind_test report in logcat (tag CalendarDebug). dump and reset put one JSON string in the broadcast
- * result data (result code 1 = ok, 2 = error) and never log it. The receiver requires android.permission.DUMP, so only
- * the shell (adb) can send these.
+ * What reset / seed / clear touch: the app's own (local) calendars and events, and, in the system calendar database, only events
+ * carrying this app's CUSTOM_APP_PACKAGE tag. They never delete other apps' or synced events, never delete a system calendar, and are
+ * not compiled into release builds. seed / clear / remind_test report in logcat (tag CalendarDebug). dump and reset put one JSON
+ * string in the broadcast result data (result code 1 = ok, 2 = error) and never log it. The receiver requires
+ * android.permission.DUMP, so only the shell (adb) can send these.
  */
 class DebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -41,6 +46,10 @@ class DebugReceiver : BroadcastReceiver() {
                     "remind_test" -> remindTest(repo, intent.getIntExtra("start_in", 2), intent.getIntExtra("lead", 1))
                     "dump" -> answer(pending, 1, dump(context, repo, intent))
                     "reset" -> answer(pending, 1, reset(context, repo))
+                    "set_default" -> answer(pending, 1, setDefault(repo, intent.getStringExtra("id")))
+                    "provider_setup" -> answer(pending, 1, providerSetup(context, repo))
+                    "provider_teardown" -> answer(pending, 1, providerTeardown(context, repo))
+                    "provider_probe" -> answer(pending, 1, ProviderProbe.run(context))
                     else -> Log.w(TAG, "unknown cmd: $cmd")
                 }
             } catch (e: Exception) {
@@ -68,29 +77,67 @@ class DebugReceiver : BroadcastReceiver() {
     }
 
     private fun reset(context: Context, repo: CalendarRepository): JsonObject {
-        val cleared = repo.events.value.size
-        clear(repo)
+        val foreignBefore = repo.foreignEventCount()
+        val cleared = clear(repo)
+        repo.setDefaultWriteCalendar(null)
         // The reschedule after a data change is debounced (250 ms); do it now and wait for the result so the answer is final.
         val scheduler = CalendarGraph.scheduler(context)
         scheduler.reschedule()
+        repo.reloadCalendars()
         return buildJsonObject {
-            put("cleared", cleared)
-            put("calendars_remaining", repo.calendars.value.size)
+            // events this app created: local ones plus the tagged ones in the system calendar database
+            put("cleared", cleared.local + cleared.system)
+            // the app's own calendars (the default one is always left; the driver expects exactly 1)
+            put("calendars_remaining", repo.calendars.value.count { !it.system })
             put("remaining_scheduled", if (scheduler.isAlarmRegistered()) 1 else 0)
+            put("system_events_cleared", cleared.system)
+            put("system_calendars_untouched", repo.calendars.value.count { it.system })
+            put("other_events_untouched", foreignBefore)
         }
     }
 
-    private fun clear(repo: CalendarRepository) {
-        repo.events.value.forEach { repo.deleteEvent(it.id) }
-        repo.calendars.value.filter { !it.isDefault }.forEach { repo.deleteCalendar(it.id) }
-        Log.i(TAG, "cleared")
+    /** Deletes what this app created (own events + tagged system events) and the app's extra calendars. Other apps' data is not touched. */
+    private fun clear(repo: CalendarRepository): CalendarRepository.Cleared {
+        val cleared = repo.clearOwnedEvents()
+        repo.calendars.value.filter { !it.system && !it.isDefault }.forEach { repo.deleteCalendar(it.id) }
+        Log.i(TAG, "cleared: ${cleared.local} local + ${cleared.system} tagged system events")
+        return cleared
+    }
+
+    private fun setDefault(repo: CalendarRepository, id: String?): JsonObject {
+        repo.reloadCalendars()
+        repo.setDefaultWriteCalendar(id)
+        return buildJsonObject { put("default_write_calendar", repo.defaultWriteCalendar().id) }
+    }
+
+    /** Emulator only: three fake account calendars (Google writable, CalDAV read-only, LOCAL type) in the system calendar database. */
+    private fun providerSetup(context: Context, repo: CalendarRepository): JsonObject {
+        ProviderFixtures.deleteTestCalendars(context)
+        val g = ProviderFixtures.createCalendar(context, "AgentOS 测试 Google", "agentos-test-g@example.com", "com.google", 700, 0xFF4A7BDB.toInt())
+        val c = ProviderFixtures.createCalendar(context, "AgentOS 测试 只读", "agentos-test-c@example.com", "bitfire.at.davdroid", 200, 0xFF5BA55B.toInt())
+        val l = ProviderFixtures.createCalendar(context, "AgentOS 测试 本地", "agentos-test-local", "LOCAL", 700, 0xFFF2A33A.toInt())
+        repo.reloadCalendars()
+        repo.refresh()
+        return buildJsonObject {
+            put("google", "sys:$g")
+            put("caldav_read_only", "sys:$c")
+            put("local_type", "sys:$l")
+        }
+    }
+
+    private fun providerTeardown(context: Context, repo: CalendarRepository): JsonObject {
+        val n = ProviderFixtures.deleteTestCalendars(context)
+        repo.setDefaultWriteCalendar(null)
+        repo.reloadCalendars()
+        repo.refresh()
+        return buildJsonObject { put("calendars_removed", n) }
     }
 
     private fun remindTest(repo: CalendarRepository, startIn: Int, lead: Int) {
         val start = repo.time.nowMs() + startIn * 60_000L
         val e = repo.saveEvent(
             EventSeries(
-                id = "", calendarId = repo.defaultCalendar.id, title = "提醒测试：${startIn} 分钟后开始", location = "会议室 A",
+                id = "", calendarId = repo.localDefaultCalendar.id, title = "提醒测试：${startIn} 分钟后开始", location = "会议室 A",
                 startUtc = start, endUtc = start + 30 * 60_000L, zoneId = repo.zone.id, reminders = listOf(lead),
             ),
         )
@@ -101,7 +148,7 @@ class DebugReceiver : BroadcastReceiver() {
         clear(repo)
         val zone = repo.zone
         val today = LocalDate.now(zone)
-        val personal = repo.defaultCalendar.id
+        val personal = repo.localDefaultCalendar.id
         val work = repo.createCalendar("工作", Palette.colors[4]).id
         val family = repo.createCalendar("家庭", Palette.colors[2]).id
         val fit = repo.createCalendar("运动", Palette.colors[1]).id
@@ -142,7 +189,7 @@ class DebugReceiver : BroadcastReceiver() {
         allDay("房租到期", 9, 0, personal, Recurrence.MONTHLY, Palette.colors[0])
         timed("项目复盘", -2, "14:00", "15:00", work, "线上")
         timed("跨夜发布窗口", 4, "22:00", "02:00", work, "值班", "发布完成后在群里同步。", endDay = 5)
-        Log.i(TAG, "seeded: ${repo.calendars.value.size} calendars, ${repo.events.value.size} events")
+        Log.i(TAG, "seeded: ${repo.calendars.value.size} calendars, ${repo.localEvents.value.size} events")
     }
 
     private companion object {
