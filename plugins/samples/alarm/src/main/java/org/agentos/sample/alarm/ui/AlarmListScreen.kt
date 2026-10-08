@@ -442,6 +442,15 @@ private fun AlarmCard(
                 )
             }
             Spacer(Modifier.height(10.dp))
+                        // 中文习惯“上午 7:30”：标记在前还是在后由系统的时间格式决定（见 Format.kt）
+                        parts.prefix?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 9.dp, end = 6.dp),
+                            )
+                        }
             Row(
                 Modifier.fillMaxWidth().alpha(contentAlpha),
                 verticalAlignment = Alignment.CenterVertically,
