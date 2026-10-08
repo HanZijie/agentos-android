@@ -73,6 +73,12 @@ class SamplePluginsConformanceTest {
             listOf("note_list", "note_get", "note_create", "note_update", "note_append", "note_search", "note_trash", "note_restore", "note_delete", "tag_list"),
             "org.agentos.sample.notes.agent.NotesMcpService",
         ),
+        // docs/next-apps-plan.md 第 4 节（sample-apps.md 第 4 节还没有这一条）
+        Spec(
+            "sms", "sms", "sms", "org.agentos.sample.sms",
+            listOf("sms_thread_list", "sms_message_list", "sms_search", "sms_send", "sms_send_status", "sms_compose"),
+            "org.agentos.sample.sms.agent.SmsMcpService",
+        ),
     )
 
     private fun spec(dir: String) = specs.single { it.dir == dir }
@@ -193,18 +199,22 @@ class SamplePluginsConformanceTest {
     @Test fun `alarm - plugin json is accepted with the documented names (skipped when plugins-samples-alarm is absent)`() = checkManifest("alarm")
     @Test fun `calendar - plugin json is accepted with the documented names (skipped when plugins-samples-calendar is absent)`() = checkManifest("calendar")
     @Test fun `notes - plugin json is accepted with the documented names (skipped when plugins-samples-notes is absent)`() = checkManifest("notes")
+    @Test fun `sms - plugin json is accepted with the documented names (skipped when plugins-samples-sms is absent)`() = checkManifest("sms")
 
     @Test fun `alarm - the app manifest exports the bound MCP service (skipped when plugins-samples-alarm is absent)`() = checkAndroidManifest("alarm")
     @Test fun `calendar - the app manifest exports the bound MCP service (skipped when plugins-samples-calendar is absent)`() = checkAndroidManifest("calendar")
     @Test fun `notes - the app manifest exports the bound MCP service (skipped when plugins-samples-notes is absent)`() = checkAndroidManifest("notes")
+    @Test fun `sms - the app manifest exports the bound MCP service (skipped when plugins-samples-sms is absent)`() = checkAndroidManifest("sms")
 
     @Test fun `alarm - SKILL md is valid and covers every required tool (skipped when plugins-samples-alarm is absent)`() = checkSkills("alarm")
     @Test fun `calendar - SKILL md is valid and covers every required tool (skipped when plugins-samples-calendar is absent)`() = checkSkills("calendar")
     @Test fun `notes - SKILL md is valid and covers every required tool (skipped when plugins-samples-notes is absent)`() = checkSkills("notes")
+    @Test fun `sms - SKILL md is valid and covers every required tool (skipped when plugins-samples-sms is absent)`() = checkSkills("sms")
 
     @Test fun `alarm - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-alarm is absent)`() = checkTools("alarm")
     @Test fun `calendar - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-calendar is absent)`() = checkTools("calendar")
     @Test fun `notes - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-notes is absent)`() = checkTools("notes")
+    @Test fun `sms - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-sms is absent)`() = checkTools("sms")
 
     // ------------------------------------------------------------------ 不依赖 App 文件的检查（总是运行）
 
@@ -220,12 +230,12 @@ class SamplePluginsConformanceTest {
             val names = Regex("(?m)^\\| `([a-z][a-z0-9_]*)` \\|").findAll(body).map { it.groupValues[1] }.toList()
             assertEquals(spec(part.groupValues[1]).tools, names, "tool table of ${part.groupValues[1]} in docs/sample-apps.md")
         }
-        assertEquals(listOf(8, 11, 10), specs.map { it.tools.size })
+        assertEquals(listOf(8, 11, 10), specs.take(3).map { it.tools.size }) // alarm, calendar, notes：sample-apps.md 第 4 节只有这三个
     }
 
     @Test
     fun `the 29 documented tools get distinct valid model-facing names`() {
-        val ids = specs.flatMap { s -> s.tools.map { ToolId(s.plugin, s.server, it) } }
+        val ids = specs.take(3).flatMap { s -> s.tools.map { ToolId(s.plugin, s.server, it) } }
         val names = ToolNaming.assign(ids)
         assertEquals(29, names.values.toSet().size)
         for ((id, n) in names) {
