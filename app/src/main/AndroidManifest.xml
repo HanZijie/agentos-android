@@ -147,6 +147,20 @@
             android:launchMode="singleTask"
             android:excludeFromRecents="true"
             android:theme="@style/Theme.AgentOS" />
+        <!-- 第三方 App 把用户带到待决对话框的入口（docs/third-party-acp.md 4.2）。**导出，且是这个 App 里除 AcpService 和桌面入口外
+             唯一导出的组件**：没有 intent-filter（只能用显式组件名启动），不读 Intent，没有待决时立刻结束（见类注释） -->
+        <activity
+            android:name=".ui.consent.ApprovalFrontActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.AgentOS.Transparent">
+            <!-- SDK（AgentOs.bringApprovalToFront）用这个 action + setPackage 启动；只有 action，没有 data / 别的 category 要求 -->
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.SHOW_APPROVAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".settings.JevSourceActivity"
             android:exported="false"
@@ -159,6 +173,11 @@
             android:theme="@style/Theme.AgentOS" />
         <activity
             android:name=".settings.plugins.PluginDetailActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AgentOS" />
+        <!-- 已授权的应用（docs/third-party-acp.md 4.2）：不导出 -->
+        <activity
+            android:name=".settings.callers.AuthorizedAppsActivity"
             android:exported="false"
             android:theme="@style/Theme.AgentOS" />
         <activity

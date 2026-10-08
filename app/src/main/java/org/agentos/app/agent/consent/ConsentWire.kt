@@ -26,9 +26,37 @@ import org.agentos.runtime.consent.ConsentView
 object ConsentWire {
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** 前台队列里的一项：工具确认（[Card]）或第三方 App 的授权提示（[AuthRequest]），按到达先后排。 */
+    sealed interface Pending {
+        val requestId: String
+        /** 到达时间：deadline 减去超时（排队时间计入 deadline，所以这就是入队时刻）。 */
+        val arrivalMillis: Long
+        val deadlineMillis: Long
+    }
+
+    /**
+     * 第三方 App 第一次（或换了签名后）要使用 AgentOS 时的授权提示（docs/third-party-acp.md 4.2）。由 `:agent` 里的 CallerRegistry
+     * 经 [AuthorizationSurface] 交来；所有字段都是不可信输入（App 名、包名由 App 自己决定），界面按纯文本显示。
+     *
+     * @property appLabel 注册表解析到的 App 名；null 时主进程自己解析。
+     * @property signingDigest 签名摘要（SHA-256 小写十六进制），界面只显示前 12 位。
+     * @property signatureChanged 这个包名以前被允许/拒绝过、但签名与那时不同：卡片上要写明。
+     */
+    data class AuthRequest(
+        override val requestId: String,
+        val packageName: String,
+        val appLabel: String?,
+        val signingDigest: String,
+        val signatureChanged: Boolean,
+        override val deadlineMillis: Long,
+        val timeoutMillis: Long,
+    ) : Pending {
+        override val arrivalMillis: Long get() = deadlineMillis - timeoutMillis
+    }
+
     /** 主进程显示用的一条待确认请求。和 [ConsentView] 一一对应，只保留界面要的字段。 */
     data class Card(
-        val requestId: String,
+        override val requestId: String,
         val title: String,
         val initiatorLine: String,
         val callerKind: String,
@@ -42,11 +70,13 @@ object ConsentWire {
         val riskLabel: String,
         val riskDescription: String,
         val options: List<Option>,
-        val deadlineMillis: Long,
+        override val deadlineMillis: Long,
         val timeoutMillis: Long,
         val queuePosition: Int,
         val queueSize: Int,
-    ) {
+    ) : Pending {
+        override val arrivalMillis: Long get() = deadlineMillis - timeoutMillis
+
         /** 能用在通知按钮上的选项：只有“允许一次”和“拒绝”（“始终允许”“本会话内不再询问”要在对话框里看清楚再选）。 */
         fun allowsOnce(): Boolean = options.any { it.choice == ConsentChoice.ALLOW_ONCE }
     }
@@ -91,6 +121,26 @@ object ConsentWire {
 
     fun encodeViews(views: List<ConsentView>): String = JsonArray(views.map { encodeView(it) }).toString()
 
+    /** 授权提示。`kind` 区分它和工具确认（工具确认没有这个键，按旧格式读）。 */
+    fun encodeAuth(r: AuthRequest): JsonObject = buildJsonObject {
+        put("kind", KIND_AUTH)
+        put("requestId", r.requestId)
+        put("packageName", r.packageName)
+        put("appLabel", r.appLabel)
+        put("signingDigest", r.signingDigest)
+        put("signatureChanged", r.signatureChanged)
+        put("deadlineMillis", r.deadlineMillis)
+        put("timeoutMillis", r.timeoutMillis)
+    }
+
+    fun encodeAuthString(r: AuthRequest): String = encodeAuth(r).toString()
+
+    /** 登记监听者时的快照：工具确认和授权提示按到达先后合在一起（稳定排序：同一时刻保持各自原来的顺序）。 */
+    fun encodePending(views: List<ConsentView>, auths: List<AuthRequest>): String {
+        val items = views.map { it.deadlineMillis - it.timeoutMillis to encodeView(it) } + auths.map { it.arrivalMillis to encodeAuth(it) }
+        return JsonArray(items.sortedBy { it.first }.map { it.second }).toString()
+    }
+
     fun encodeViewString(v: ConsentView): String = encodeView(v).toString()
 
     fun encodeResolution(r: ConsentResolution): String = buildJsonObject {
@@ -98,6 +148,8 @@ object ConsentWire {
         put("choice", r.choice?.name)
         put("notice", r.notice)
     }.toString()
+
+    const val KIND_AUTH = "authorization"
 
     // ---------------------------------------------------------------- 主进程侧：解码
 
@@ -112,6 +164,31 @@ object ConsentWire {
     } catch (e: Exception) {
         emptyList()
     }
+
+    /** 快照/新请求里的一项：有 `kind":"authorization"` 的是授权提示，其余按工具确认读。读不懂的返回 null（不显示）。 */
+    fun parsePending(text: String?): Pending? = try {
+        text?.let { pendingOf(json.parseToJsonElement(it) as JsonObject) }
+    } catch (e: Exception) {
+        null
+    }
+
+    fun parsePendings(text: String?): List<Pending> = try {
+        (json.parseToJsonElement(text ?: "[]") as JsonArray).mapNotNull { (it as? JsonObject)?.let(::pendingOf) }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun pendingOf(o: JsonObject): Pending? = if (str(o, "kind") == KIND_AUTH) authOf(o) else cardOf(o)
+
+    private fun authOf(o: JsonObject): AuthRequest? = AuthRequest(
+        requestId = str(o, "requestId")?.takeIf { it.isNotEmpty() } ?: return null,
+        packageName = str(o, "packageName")?.takeIf { it.isNotEmpty() } ?: return null,
+        appLabel = str(o, "appLabel"),
+        signingDigest = str(o, "signingDigest").orEmpty(),
+        signatureChanged = (o["signatureChanged"] as? JsonPrimitive)?.boolean == true,
+        deadlineMillis = (o["deadlineMillis"] as? JsonPrimitive)?.long ?: return null,
+        timeoutMillis = (o["timeoutMillis"] as? JsonPrimitive)?.long ?: 60_000L,
+    )
 
     fun parseResolution(text: String?): Resolution? = try {
         val o = json.parseToJsonElement(text ?: "") as JsonObject

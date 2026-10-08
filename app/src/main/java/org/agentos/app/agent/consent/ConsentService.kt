@@ -19,6 +19,11 @@ class ConsentService : Service() {
 class ConsentActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getStringExtra(EXTRA_REQUEST) ?: return
+        // 第三方 App 授权提示通知上的“拒绝”（没有“允许”：授权要在对话框里看清包名和签名）
+        if (intent.getBooleanExtra(EXTRA_AUTH_DENY, false)) {
+            AgentProcess.get(context).consentBridge.denyAuthorizationFromNotification(id)
+            return
+        }
         val choice = ConsentWire.parseChoice(intent.getStringExtra(EXTRA_CHOICE)) ?: return
         // 通知只能给这两个；别的值（被篡改的 PendingIntent 不可能，但防御）一律不处理
         if (choice != org.agentos.runtime.consent.ConsentChoice.ALLOW_ONCE && choice != org.agentos.runtime.consent.ConsentChoice.DENY) return
@@ -28,5 +33,6 @@ class ConsentActionReceiver : BroadcastReceiver() {
     companion object {
         const val EXTRA_REQUEST = "requestId"
         const val EXTRA_CHOICE = "choice"
+        const val EXTRA_AUTH_DENY = "authDeny"
     }
 }
