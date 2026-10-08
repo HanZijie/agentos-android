@@ -36,10 +36,14 @@ import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Inventory2
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.automirrored.rounded.StickyNote2
 import androidx.compose.material.icons.rounded.ViewAgenda
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -60,10 +64,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -74,12 +80,14 @@ import org.agentos.sample.notes.data.Note
 import org.agentos.sample.notes.data.NoteColor
 import org.agentos.sample.notes.ui.HomeUi
 import org.agentos.sample.notes.ui.NotesViewModel
+import org.agentos.sample.notes.ui.LanguageSettings
 import org.agentos.sample.notes.ui.Scope
 import org.agentos.sample.notes.ui.components.ColorPickerSheet
 import org.agentos.sample.notes.ui.components.ConfirmDialog
 import org.agentos.sample.notes.ui.components.EmptyKind
 import org.agentos.sample.notes.ui.components.EmptyState
 import org.agentos.sample.notes.ui.components.NotesSnackbar
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(vm: NotesViewModel, ui: HomeUi, grid: Boolean, snackbar: SnackbarHostState) {
@@ -87,6 +95,12 @@ fun HomeScreen(vm: NotesViewModel, ui: HomeUi, grid: Boolean, snackbar: Snackbar
     var colorTarget by remember { mutableStateOf<Note?>(null) }
     var deleteTarget by remember { mutableStateOf<Note?>(null) }
     var confirmEmptyTrash by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val languageUnavailable = stringResource(R.string.language_unavailable)
+    val openLanguage: () -> Unit = {
+        if (!LanguageSettings.open(context)) coroutineScope.launch { snackbar.showSnackbar(languageUnavailable) }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -118,6 +132,7 @@ fun HomeScreen(vm: NotesViewModel, ui: HomeUi, grid: Boolean, snackbar: Snackbar
             onColor = { colorTarget = it },
             onDelete = { deleteTarget = it },
             onEmptyTrash = { confirmEmptyTrash = true },
+            onLanguage = openLanguage,
         )
     }
 
@@ -200,6 +215,7 @@ private fun HomeContent(
     onColor: (Note) -> Unit,
     onDelete: (Note) -> Unit,
     onEmptyTrash: () -> Unit,
+    onLanguage: () -> Unit,
 ) {
     val scope = ui.scope
     val columns = if (!grid) 1 else if (LocalConfiguration.current.screenWidthDp >= 600) 3 else 2
@@ -240,6 +256,7 @@ private fun HomeContent(
                 onSearch = vm::openSearch,
                 onToggleGrid = vm::toggleGrid,
                 onEmptyTrash = onEmptyTrash,
+                onLanguage = onLanguage,
             )
         }
         if (ui.tags.isNotEmpty()) {
@@ -294,6 +311,7 @@ private fun HomeHeader(
     onSearch: () -> Unit,
     onToggleGrid: () -> Unit,
     onEmptyTrash: () -> Unit,
+    onLanguage: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 0.dp, top = 14.dp, bottom = 8.dp)) {
@@ -332,6 +350,7 @@ private fun HomeHeader(
                     )
                 }
             }
+            OverflowMenu(onLanguage)
             Spacer(Modifier.width(6.dp))
         }
         if (scope != Scope.TRASH) {
@@ -348,6 +367,28 @@ private fun HomeHeader(
                     Text(stringResource(R.string.home_search_hint), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
                 }
             }
+        }
+    }
+}
+
+/** 右上角的“更多”菜单；目前只有“语言”（跳系统的应用语言设置）。 */
+@Composable
+private fun OverflowMenu(onLanguage: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.action_more), tint = scheme.onSurfaceVariant)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.menu_language), maxLines = 1) },
+                leadingIcon = { Icon(Icons.Rounded.Language, null, tint = scheme.onSurfaceVariant) },
+                onClick = {
+                    open = false
+                    onLanguage()
+                },
+            )
         }
     }
 }
