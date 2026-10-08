@@ -640,8 +640,13 @@ class Step:
 class Context:
     """Everything a step needs: the device pieces, the variables captured by earlier steps, the dates."""
 
-    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print, gateway=None, exclusive=False):
+    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print, gateway=None, exclusive=False, apps=None, sms_peer=None):
         self.adb, self.ext, self.consent, self.session, self.gateway = adb, ext, consent, session, gateway
+        # the sample apps this run drives (all five; the sms app only on emulators or with --sms-on-device, see [select_apps])
+        self.apps = list(apps) if apps is not None else list(SAMPLES)
+        # the number (= console port) of a second emulator the sms app can send to, None when there is none: then the send / delivery steps are not run
+        self.sms_peer = sms_peer
+        self.skipped = []           # [{"what", "reason"}]: parts of the acceptance that were not run (they go into the report)
         # the apps were reset before the run: what is in them is this run's data only (the calendar's single armed alarm is then one of this run's events)
         self.exclusive = exclusive
         self.today, self.tz_offset, self.run_id, self.log = today, tz_offset, run_id, log
@@ -812,3 +817,33 @@ def device_today_and_offset(adb):
     if not re.fullmatch(r"[+-]\d{4}", z):
         raise DriverError("cannot read the device time zone: %r" % z)
     return today, "%s%s:%s" % (z[0], z[1:3], z[3:5])
+
+
+# ---------------------------------------------------------------------- which apps run on which device
+
+def is_emulator(serial):
+    return str(serial).startswith("emulator-")
+
+
+def select_apps(adb, sms_on_device=False):
+    """-> (apps, skipped). The sms app sends and reads real text messages: its steps run on emulators only (serial `emulator-NNNN`; the incoming messages
+    come from `adb emu sms send`, the recipient is another emulator), on a real phone only with --sms-on-device. Otherwise it is left out of everything
+    (not installed, not enabled, not reset, no steps) and the report says so."""
+    apps = list(SAMPLES)
+    skipped = []
+    if "sms" in apps and not is_emulator(adb.serial) and not sms_on_device:
+        apps.remove("sms")
+        skipped.append({"what": "sms", "reason": "%s is not an emulator: the sms app reads and sends real text messages, so its steps run on emulators only "
+                                                  "(--sms-on-device allows a real phone)" % adb.serial})
+    return apps, skipped
+
+
+def find_sms_peer(adb, spec="auto"):
+    """The number of the emulator the sms steps send to: `spec` is a console port ("5616"), "none", or "auto" = the first other emulator `adb devices`
+    lists (an emulator's number is its console port: `emulator-5616` is reached as 5616). None when there is none."""
+    if spec == "none":
+        return None
+    if spec not in (None, "auto"):
+        return str(spec)
+    others = [x for x in adb.devices() if is_emulator(x) and x != adb.serial]
+    return others[0].split("-", 1)[1] if others else None

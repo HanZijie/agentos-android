@@ -392,6 +392,142 @@ def _alarm_phone_with_data(faults):
     return phone
 
 
+class FiveAppsSetupTest(unittest.TestCase):
+    """setup.reset / discover / enable / catalog / teardown cover the five apps; the sms app only runs on emulators (or with --sms-on-device)."""
+
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def test_the_setup_covers_all_five_apps_on_an_emulator(self):
+        phone, env, report = run()
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertEqual(["alarm", "calendar", "notes", "todo", "sms"], report["apps"])
+        self.assertEqual([], report["skipped"])
+        discover = self.step(report, "setup.discover")
+        self.assertEqual(10, len(discover["checks"]), "five plugins: discovered + off by default each")
+        for name in ("todo", "sms"):
+            self.assertTrue(any("plugin %s is discovered (package org.agentos.sample.%s)" % (name, name) in c["name"] for c in discover["checks"]))
+            self.assertTrue(any("plugin %s is off by default" % name in c["name"] for c in discover["checks"]))
+        enable = self.step(report, "setup.enable")
+        self.assertEqual(5 + 1, len(enable["checks"]))
+        self.assertTrue(any("all 44 tools present" in str(c["expected"]) for c in enable["checks"]))
+        reset = self.step(report, "setup.reset")
+        self.assertTrue(any("todo: reset" in c["name"] for c in reset["checks"]) and any("sms: reset" in c["name"] for c in reset["checks"]))
+        self.assertTrue(any("the 5 apps are empty" in c["name"] for c in reset["checks"]))
+        self.assertEqual("teardown.reset", report["steps"][-1]["id"])
+        self.assertTrue(report["steps"][-1]["ok"])
+        self.assertFalse(any(phone.enabled.values()), "all five plugins are switched off again")
+
+    def test_the_catalog_check_has_the_risk_of_every_new_tool(self):
+        _, _, report = run()
+        cat = {c["name"]: c for c in self.step(report, "setup.catalog")["checks"]}
+        def risk(tool):
+            c = next(c for n, c in cat.items() if n.startswith("%s is offered as" % tool))
+            self.assertTrue(c["ok"], c)
+            return c["actual"]
+        self.assertEqual("HIGH", risk("sms_send"))
+        self.assertEqual("HIGH", risk("todo_delete"))
+        for tool in ("todo_create", "todo_update", "todo_set_status", "todo_list", "todo_get", "todo_search", "todo_summary", "sms_thread_list", "sms_message_list",
+                     "sms_search", "sms_send_status", "sms_compose", "alarm_system_next"):
+            self.assertEqual("WRITE", risk(tool), tool)
+
+    def test_a_missing_new_tool_or_a_lowered_sms_send_is_named(self):
+        _, _, report = run(FakePhone(faults={"hide-todo_summary", "hide-sms_compose"}))
+        bad = next(c for c in self.step(report, "setup.catalog")["checks"] if not c["ok"] and "every documented tool" in c["name"])
+        self.assertEqual({"todo": ["todo_summary"], "sms": ["sms_compose"]}, bad["actual"]["missing"])
+        _, _, report = run(FakePhone(faults={"risk-read"}))
+        low = [c["name"] for c in self.step(report, "setup.catalog")["checks"] if not c["ok"]]
+        self.assertTrue(any("sms_thread_list is offered" in n for n in low) and any("todo_list is offered" in n for n in low), low)
+
+    def test_the_reset_check_names_a_todo_or_sms_app_that_stays_full(self):
+        phone = FakePhone(faults={"todo-reset-noop", "sms-reset-noop"})
+        phone.q("todo.db", "INSERT INTO todos (id, title) VALUES ('a', 'x')")
+        phone.sms["outbox"] = [{"id": "1", "to": "5616", "text": "a", "parts": 1, "state": "sent", "sent_parts": 1, "delivered_parts": 0, "error": None}]
+        _, _, report = run(phone)
+        self.assertIn("setup.reset", failed(report))
+        names = [c["name"] for c in self.step(report, "setup.reset")["checks"] if not c["ok"]]
+        self.assertTrue(any("todo: reset" in n for n in names) and any("sms: reset" in n for n in names) and any("apps are empty" in n for n in names), names)
+
+    def test_on_a_real_phone_the_sms_app_is_left_out_of_everything_and_the_report_says_so(self):
+        phone = FakePhone(serial="38290DLJH0007B")
+        _, env, report = run(phone)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertEqual(["alarm", "calendar", "notes", "todo"], report["apps"])
+        self.assertEqual(1, len(report["skipped"]))
+        self.assertEqual("sms", report["skipped"][0]["what"])
+        self.assertIn("emulators only", report["skipped"][0]["reason"])
+        self.assertTrue(any(n.startswith("skipped sms:") for n in report["notes"]))
+        self.assertFalse([c for c in phone.log if "org.agentos.sample.sms" in c], "the sms app is not even asked for its state on a real phone")
+        self.assertFalse(phone.enabled["org.agentos.sample.sms"])
+        self.assertEqual(5 * 2 - 2, len(self.step(report, "setup.discover")["checks"]))
+        self.assertTrue(all(s["sample"] != "sms" for s in report["steps"]))
+
+    def test_sms_on_device_allows_a_real_phone_explicitly(self):
+        phone = FakePhone(serial="38290DLJH0007B")
+        _, _, report = run(phone, sms_on_device=True)
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        self.assertEqual(["alarm", "calendar", "notes", "todo", "sms"], report["apps"])
+        self.assertEqual([], report["skipped"])
+
+    def test_the_sms_peer_is_the_port_of_another_emulator(self):
+        phone = FakePhone(other_devices=["38290DLJH0007B", "emulator-5616", "emulator-5618"])
+        self.assertEqual("5616", L.find_sms_peer(phone, "auto"), "a real phone is never a peer; the first other emulator is")
+        self.assertEqual("5618", L.find_sms_peer(phone, "5618"))
+        self.assertIsNone(L.find_sms_peer(phone, "none"))
+        self.assertIsNone(L.find_sms_peer(FakePhone(other_devices=["38290DLJH0007B"]), "auto"))
+        self.assertIsNone(L.find_sms_peer(FakePhone(), "auto"))
+        _, _, report = run(FakePhone(other_devices=["emulator-5616"]))
+        self.assertEqual("5616", report["smsPeer"])
+        _, _, report = run(FakePhone(other_devices=["emulator-5616"]), sms_peer="none")
+        self.assertIsNone(report["smsPeer"])
+
+    def test_select_apps_by_serial(self):
+        self.assertEqual((["alarm", "calendar", "notes", "todo", "sms"], []), L.select_apps(FakePhone(serial="emulator-5604")))
+        apps, skipped = L.select_apps(FakePhone(serial="R5CT123456"))
+        self.assertNotIn("sms", apps)
+        self.assertEqual("sms", skipped[0]["what"])
+        self.assertEqual((["alarm", "calendar", "notes", "todo", "sms"], []), L.select_apps(FakePhone(serial="R5CT123456"), sms_on_device=True))
+
+    def test_the_plan_items_know_their_apps(self):
+        self.assertEqual("todo", E.item_sample(("audit.todo", "t", None)))
+        self.assertEqual("sms", E.item_sample(("sms.prepare", "t", None)))
+        self.assertEqual("alarm", E.item_sample(("audit.alarm", "t", None)))
+        self.assertEqual(["alarm"], E.item_apps(("audit.alarm", "t", None)))
+
+
+class AlarmSystemNextTest(unittest.TestCase):
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def test_the_steps_run_and_compare_with_alarm_next(self):
+        _, _, report = run()
+        step = self.step(report, "alarm.system_next")
+        self.assertTrue(step["ok"], [c for c in step["checks"] if not c["ok"]])
+        self.assertEqual(["mcp__alarm__alarm__alarm_next", "mcp__alarm__alarm__alarm_system_next"], [t["name"] for t in step["turn"]["tools"]])
+        self.assertTrue(any("owned by this app" in c["name"] for c in step["checks"]))
+        after = self.step(report, "alarm.system_next_after_delete")
+        self.assertTrue(after["ok"], after["checks"])
+        self.assertEqual("null", after["turn"]["tools"][0]["result"])
+
+    def test_another_apps_earlier_alarm_is_fine_when_it_is_not_owned_by_this_app(self):
+        phone = FakePhone()
+        phone.other_alarm = "2026-10-08T06:00:00+08:00"
+        _, _, report = run(phone)
+        self.assertTrue(self.step(report, "alarm.system_next")["ok"])
+        self.assertTrue(any("owned by another app" in c["name"] for c in self.step(report, "alarm.system_next")["checks"]))
+        after = self.step(report, "alarm.system_next_after_delete")
+        self.assertTrue(after["ok"], "the Clock app's alarm is the phone's next one, not owned by this app: allowed")
+
+    def test_a_wrong_shape_a_wrong_owner_and_a_ghost_alarm_are_caught(self):
+        _, _, report = run(FakePhone(faults={"system-next-bad-shape"}))
+        self.assertFalse(self.step(report, "alarm.system_next")["ok"])
+        _, _, report = run(FakePhone(faults={"system-next-later-and-not-mine"}))
+        bad = [c for c in self.step(report, "alarm.system_next")["checks"] if not c["ok"]]
+        self.assertTrue(any("rings no later" in c["name"] for c in bad), bad)
+        _, _, report = run(FakePhone(faults={"system-next-owned-but-gone"}))
+        self.assertEqual({"alarm.system_next_after_delete"}, failed(report) & {"alarm.system_next", "alarm.system_next_after_delete"})
+
+
 class TodoSmsStateTest(unittest.TestCase):
     """The state readers of the todo and sms apps: dump shapes of the two apps (their READMEs), stable fields, paging, reset."""
 

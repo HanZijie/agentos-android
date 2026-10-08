@@ -245,16 +245,28 @@ def setup_model(live, tunnel=False):
 
 
 def setup_reset(ctx):
-    """Start from empty apps: the debug `reset` of the three sample apps (everything in them is removed), then read the state back."""
+    """Start from empty apps: the debug `reset` of the sample apps this run drives (everything in them is removed; the sms app only loses its own outbox and
+    drafts, never the system SMS store), then read the state back."""
     out = []
-    for r in L.reset_apps(ctx.adb):
+    for r in L.reset_apps(ctx.adb, only=ctx.apps):
         out.append(truth("%s: reset" % r["app"], "the app reports it is empty" + (" and nothing is registered with AlarmManager" if r["app"] == "alarm" else ""), r["ok"], r["detail"]))
-    cal = ctx.state("calendar")
-    snap = {"alarm": len(ctx.state("alarm")["alarms"]), "notes": len(ctx.state("notes")["notes"]), "calendar events": len(cal["events"])}
-    out.append(truth("the three apps are empty after the reset", "0 alarms, 0 notes, 0 events", not any(snap.values()), snap))
-    out.append(truth("calendar: only the default calendar is left and no reminder alarm is armed", "1 default calendar, no registered reminder",
-                     len(cal["calendars"]) == 1 and cal["calendars"][0]["is_default"] and not any(r["registered"] for r in cal["reminders"]),
-                     {"calendars": [(c["name"], c["is_default"]) for c in cal["calendars"]], "reminders": cal["reminders"]}))
+    snap = {}
+    if "alarm" in ctx.apps:
+        snap["alarm"] = len(ctx.state("alarm")["alarms"])
+    if "notes" in ctx.apps:
+        snap["notes"] = len(ctx.state("notes")["notes"])
+    cal = ctx.state("calendar") if "calendar" in ctx.apps else None
+    if cal is not None:
+        snap["calendar events"] = len(cal["events"])
+    if "todo" in ctx.apps:
+        snap["todos"] = len(ctx.state("todo")["todos"])
+    if "sms" in ctx.apps:
+        snap["sms outbox"] = len(ctx.state("sms")["outbox"])
+    out.append(truth("the %d apps are empty after the reset" % len(ctx.apps), "0 in each of %s" % ", ".join(snap), not any(snap.values()), snap))
+    if cal is not None:
+        out.append(truth("calendar: only the default calendar is left and no reminder alarm is armed", "1 default calendar, no registered reminder",
+                         len(cal["calendars"]) == 1 and cal["calendars"][0]["is_default"] and not any(r["registered"] for r in cal["reminders"]),
+                         {"calendars": [(c["name"], c["is_default"]) for c in cal["calendars"]], "reminders": cal["reminders"]}))
     return out
 
 
@@ -262,7 +274,7 @@ def setup_discover(allow_enabled):
     def fn(ctx):
         plugins = ctx.ext.plugins()
         out = []
-        for name, s in L.SAMPLES.items():
+        for name, s in ((n, L.SAMPLES[n]) for n in ctx.apps):
             p = next((x for x in plugins if x["package"] == s.package or (x["package"] is None and x["name"] == name)), None)
             out.append(Check("plugin %s is discovered (package %s)" % (name, s.package), p is not None, "listed by ExtensionDebugReceiver", [x["package"] or x["name"] for x in plugins]))
             if p is not None and not allow_enabled:
@@ -272,26 +284,30 @@ def setup_discover(allow_enabled):
 
 
 def setup_enable(ctx):
-    for smp in L.SAMPLES.values():
-        ctx.ext.enable(smp.package)
-    w = await_catalog(ctx, present=list(documented()))
+    for name in ctx.apps:
+        ctx.ext.enable(L.SAMPLES[name].package)
+    wanted = list(documented(ctx.apps))
+    w = await_catalog(ctx, present=wanted)
     plugins = ctx.ext.plugins()
     out = []
-    for name, smp in L.SAMPLES.items():
+    for name in ctx.apps:
+        smp = L.SAMPLES[name]
         p = next((x for x in plugins if x["package"] == smp.package), None)
         out.append(eq("plugin %s is on after enable" % name, True, bool(p and p["enabled"])))
-    out.append(truth("every documented tool of the three plugins is in the catalog (they appear one plugin after the other: waited up to %d s)" % CATALOG_WAIT_SECONDS,
-                     "all %d tools present" % len(documented()), w.ok, w.detail()))
+    out.append(truth("every documented tool of the %d plugins is in the catalog (they appear one plugin after the other: waited up to %d s)" % (len(ctx.apps), CATALOG_WAIT_SECONDS),
+                     "all %d tools present" % len(wanted), w.ok, w.detail()))
     return out
 
 
 def setup_catalog(ctx):
     # not a single read: the plugins' tools show up one after another (see await_catalog)
-    w = await_catalog(ctx, present=list(documented()))
+    wanted = list(documented(ctx.apps))
+    w = await_catalog(ctx, present=wanted)
     cat = w.catalog
-    out = [truth("every documented tool was offered within %d s" % CATALOG_WAIT_SECONDS, "all %d tools present" % len(documented()), w.ok, w.detail())]
+    out = [truth("every documented tool was offered within %d s" % CATALOG_WAIT_SECONDS, "all %d tools present" % len(wanted), w.ok, w.detail())]
     extras = {}
-    for name, smp in L.SAMPLES.items():
+    for name in ctx.apps:
+        smp = L.SAMPLES[name]
         for t in smp.tools:
             n = L.model_name(name, t)
             out.append(eq("%s is offered as %s with risk" % (t, n), L.expected_risk(t), cat.get(n)))
@@ -369,10 +385,40 @@ def alarm_steps(ctx):
 
     S.append(Step("alarm.next", "alarm", "alarm_next with an alarm on", [Call("alarm", "alarm_next")], verify=v_next))
 
+    def v_system_next(b, a, t, c):
+        own, system = t.tools[0].json(), t.tools[1].json()
+        shape = (isinstance(system, dict) and {"next_fire_at", "fires_in_minutes", "owned_by_this_app"} <= set(system) and isinstance(system["fires_in_minutes"], int)
+                 and system["fires_in_minutes"] >= 0 and isinstance(system["owned_by_this_app"], bool))
+        out = [truth("alarm_system_next returns next_fire_at, fires_in_minutes and owned_by_this_app (an alarm of this app is on, so the phone has a next alarm)",
+                     "object with the three fields", shape, system)]
+        if shape and isinstance(own, dict) and own.get("next_fire_at"):
+            own_ms, sys_ms = L.iso_ms(own["next_fire_at"]), L.iso_ms(system["next_fire_at"])
+            if system["owned_by_this_app"]:
+                out.append(truth("owned by this app: it is the instant alarm_next gives (same minute)", own["next_fire_at"], abs(own_ms - sys_ms) < MINUTE_MS, system["next_fire_at"]))
+            else:
+                out.append(truth("owned by another app (the Clock app...): that alarm rings no later than this app's next one", "<= %s" % own["next_fire_at"], sys_ms <= own_ms,
+                                 system["next_fire_at"]))
+        else:
+            out.append(truth("alarm_next gives this app's next alarm to compare with", "an object with next_fire_at", False, own))
+        return out
+
+    S.append(Step("alarm.system_next", "alarm", "alarm_system_next: the phone's next alarm, consistent with alarm_next",
+                  [Call("alarm", "alarm_next"), Call("alarm", "alarm_system_next")], verify=v_system_next))
+
     S.append(Step("alarm.delete", "alarm", "alarm_delete (high risk: confirmed by the auto-consent)",
                   lambda v: [Call("alarm", "alarm_delete", {"id": var(v, "alarm_id")})],
                   verify=lambda b, a, t, c: [truth("the alarm is gone from the app's dump", "no alarm with id %s" % c.vars["alarm_id"], find(a["alarms"], c.vars["alarm_id"]) is None, None),
                                              eq("one alarm less", len(b["alarms"]) - 1, len(a["alarms"])), not_registered(a, c.vars["alarm_id"])]))
+
+    def v_system_none(b, a, t, c):
+        r = t.tools[0].json()
+        if any(x["enabled"] for x in a["alarms"]):
+            return [truth("this app still has an alarm on (--no-reset): alarm_system_next is an object or null", "object | null", r is None or isinstance(r, dict), r)]
+        return [truth("no alarm of this app is on: alarm_system_next is null or belongs to another app", "null, or owned_by_this_app false",
+                      r is None or (isinstance(r, dict) and r.get("owned_by_this_app") is False), r)]
+
+    S.append(Step("alarm.system_next_after_delete", "alarm", "alarm_system_next after the alarm is gone: nothing of this app's is the phone's next alarm",
+                  [Call("alarm", "alarm_system_next")], verify=v_system_none))
 
     # ---- failure paths
     S.append(Step("alarm.err.missing_time", "alarm", "alarm_create without time: error to the model, nothing written",

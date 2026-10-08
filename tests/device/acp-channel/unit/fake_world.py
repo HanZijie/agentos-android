@@ -548,6 +548,21 @@ class FakePhone:
         j = self._alarm_json(rows[0])
         return {"alarm": j, "next_fire_at": j["next_fire_at"], "fires_in_minutes": 600}
 
+    def t_alarm_system_next(self, a):
+        """The phone's next alarm of any app: here this app's alarms and `other_alarm` (the Clock app's), which a test can set."""
+        rows = self.q("alarms.db", "SELECT * FROM alarms WHERE enabled=1 ORDER BY hour, minute")
+        mine = self._alarm_json(rows[0])["next_fire_at"] if rows else None
+        other = getattr(self, "other_alarm", None)
+        if "system-next-bad-shape" in self.faults:
+            return {"next_fire_at": mine}
+        if "system-next-later-and-not-mine" in self.faults and mine:
+            return {"next_fire_at": "2026-10-08T23:59:00+08:00", "fires_in_minutes": 900, "owned_by_this_app": False}
+        if "system-next-owned-but-gone" in self.faults and not rows:
+            return {"next_fire_at": "2026-10-08T05:00:00+08:00", "fires_in_minutes": 5, "owned_by_this_app": True}
+        if other and (mine is None or other < mine):
+            return {"next_fire_at": other, "fires_in_minutes": 300, "owned_by_this_app": False}
+        return None if mine is None else {"next_fire_at": mine, "fires_in_minutes": 600, "owned_by_this_app": True}
+
     def t_alarm_dismiss(self, a):
         raise ToolError("No alarm is ringing right now")
 
@@ -813,6 +828,7 @@ class FakeEnv:
         self.consent = L.ConsentDebug(phone)
         self.gateway = L.GatewayDebug(phone)
         self.bridge = FakeBridge(phone, live_plan)
+        self.apps = list(L.SAMPLES)
         self.events = []
 
     def prepare_device(self, opts):
@@ -836,5 +852,5 @@ class FakeEnv:
     def finish(self, notes):
         self.events.append("finish")
         self.consent.set_mode("off")
-        for s in L.SAMPLES.values():
-            self.ext.disable(s.package)
+        for name in self.apps:
+            self.ext.disable(L.SAMPLES[name].package)
