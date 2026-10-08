@@ -49,6 +49,8 @@ data class CallerEntry(
     val requestId: String? = null,
     val requestedAt: Long? = null,
     val promptsTotal: Long = 0,
+    /** 只在 PENDING 时有意义（不进文件）：这个包名以前被记录过，但签名和那时不同——授权卡片要写明。 */
+    val signatureChanged: Boolean = false,
 )
 
 /** 准入的结果（[CallerRegistry.admit]）。 */
@@ -77,13 +79,25 @@ sealed interface CallerHealth {
     enum class Using { BACKUP, EMPTY }
 }
 
+/** 一条授权提示是怎么结案的（[CallerListener.onResolved]）。 */
+enum class CallerResolution {
+    /** 用户答复了（允许或拒绝）。 */
+    ANSWERED,
+
+    /** 没人决定，按拒绝记（进入冷却）。 */
+    TIMED_OUT,
+
+    /** 没有答复就作废了：被新的请求取代（签名又变了）、记录被删除。界面撤回卡片即可。 */
+    CANCELLED,
+}
+
 /** 注册表事件的接收方（:agent）：授权提示的出现 / 撤回，以及撤销时要关通道、取消任务。回调在持锁之外调用，不要阻塞。 */
 interface CallerListener {
     /** 一个新的授权提示（PENDING）出现：界面弹卡片 / 发通知。 */
     fun onPending(entry: CallerEntry)
 
-    /** 一个授权提示结案（用户允许 / 拒绝，或超时按拒绝记）：撤回卡片 / 通知。[timedOut] 为 true 表示没人决定。 */
-    fun onResolved(requestId: String, state: CallerState, timedOut: Boolean)
+    /** 一个授权提示结案（[how]）：撤回卡片 / 通知。[state] 是之后的状态（用户答复的结果，或超时 / 作废后的 DENIED）。 */
+    fun onResolved(requestId: String, state: CallerState, how: CallerResolution)
 
     /** 这个 App（包名 + 签名摘要）的授权被撤销（改为拒绝 / 删除 / 签名变了）：关掉它现有的通道、取消它进行中的任务。 */
     fun onRevoked(packageName: String, signingDigest: String)
@@ -103,11 +117,15 @@ class CallerRegistry(
     private val primary: AtomicTextFile,
     private val backup: AtomicTextFile? = null,
     private val quarantine: AtomicTextFile? = null,
-    private val config: CallerConfig = CallerConfig(),
+    config: CallerConfig = CallerConfig(),
     private val clock: () -> Long = System::currentTimeMillis,
     private val newRequestId: () -> String = { UUID.randomUUID().toString() },
 ) {
     private val lock = Any()
+
+    /** 当前参数。正式运行时就是构造时的值；只有 debug 构建的调试入口会改它（[overrideConfig]，让设备用例不必等 10 分钟）。 */
+    @Volatile var config: CallerConfig = config
+        private set
     private val entries = LinkedHashMap<String, CallerEntry>() // 包名 → 记录
     private val promptTimes = HashMap<String, ArrayDeque<Long>>() // 包名 → 最近完成的 prompt 时间
     private var listener: CallerListener? = null
@@ -142,9 +160,9 @@ class CallerRegistry(
                 // 没有记录，或签名变了：旧记录作废（并撤销它的通道），当作新 App
                 e == null || e.signingDigest != signingDigest -> {
                     if (e != null) events += { listener?.onRevoked(e.packageName, e.signingDigest) }
-                    if (e != null && e.state == CallerState.PENDING) events += resolvedEvent(e, CallerState.DENIED, false)
+                    if (e != null && e.state == CallerState.PENDING) events += resolvedEvent(e, CallerState.DENIED, CallerResolution.CANCELLED)
                     entries.remove(packageName)
-                    propose(packageName, signingDigest, label, now, events)
+                    propose(packageName, signingDigest, label, now, events, signatureChanged = e != null)
                 }
                 e.state == CallerState.PENDING -> {
                     if (e.label != label) entries[packageName] = e.copy(label = label)
@@ -169,7 +187,8 @@ class CallerRegistry(
     }
 
     private fun propose(
-        pkg: String, digest: String, label: String, now: Long, events: MutableList<() -> Unit>, previous: CallerEntry? = null,
+        pkg: String, digest: String, label: String, now: Long, events: MutableList<() -> Unit>,
+        previous: CallerEntry? = null, signatureChanged: Boolean = false,
     ): Admission {
         if (entries.values.count { it.state == CallerState.PENDING } >= config.maxPending) {
             return Admission.Refused("too many pending authorization requests")
@@ -179,7 +198,7 @@ class CallerRegistry(
         val entry = CallerEntry(
             packageName = pkg, signingDigest = digest, label = label, state = CallerState.PENDING,
             firstSeenAt = previous?.firstSeenAt ?: now, lastUsedAt = previous?.lastUsedAt, promptsTotal = previous?.promptsTotal ?: 0,
-            requestId = id, requestedAt = now,
+            requestId = id, requestedAt = now, signatureChanged = signatureChanged,
         )
         entries[pkg] = entry
         events += { listener?.onPending(entry) }
@@ -204,13 +223,13 @@ class CallerRegistry(
                 state = CallerState.DENIED, decidedAt = now, deniedUntil = now + config.denyCooldownMillis, requestId = null, requestedAt = null,
             )
             persistQuietly()
-            events += resolvedEvent(e, CallerState.DENIED, timedOut = true)
+            events += resolvedEvent(e, CallerState.DENIED, CallerResolution.TIMED_OUT)
         }
     }
 
-    private fun resolvedEvent(e: CallerEntry, state: CallerState, timedOut: Boolean): () -> Unit {
+    private fun resolvedEvent(e: CallerEntry, state: CallerState, how: CallerResolution): () -> Unit {
         val id = e.requestId ?: return {}
-        return { listener?.onResolved(id, state, timedOut) }
+        return { listener?.onResolved(id, state, how) }
     }
 
     // ------------------------------------------------------------------ 用户的决定
@@ -258,7 +277,7 @@ class CallerRegistry(
                     throw IllegalStateException("agentos.acp.registry_unavailable: could not write the caller registry")
                 }
                 events += { listener?.onRevoked(e.packageName, e.signingDigest) }
-                events += resolvedEvent(e, CallerState.DENIED, false)
+                events += resolvedEvent(e, CallerState.DENIED, CallerResolution.CANCELLED)
                 null
             } else {
                 apply(e, target, now, events)
@@ -283,10 +302,70 @@ class CallerRegistry(
             entries[e.packageName] = e
             throw IllegalStateException("agentos.acp.registry_unavailable: could not write the caller registry")
         }
-        events += resolvedEvent(e, next.state, false)
+        events += resolvedEvent(e, next.state, CallerResolution.ANSWERED)
         // 已允许 → 拒绝：撤销（待决 → 拒绝时它还没有通道，也无妨）
         if (next.state == CallerState.DENIED && e.state != CallerState.DENIED) events += { listener?.onRevoked(e.packageName, e.signingDigest) }
         return next
+    }
+
+    // ------------------------------------------------------------------ 调试入口专用（debug 构建的 AcpCallerDebugReceiver）
+
+    /**
+     * 直接记一条“已允许”（没有经过授权提示）。**只有 debug 的调试入口调用**：release 里没有任何入口能走到这里。
+     * 已有的同包名记录被替换（旧签名的通道照常撤销）。
+     */
+    fun grant(packageName: String, signingDigest: String, label: String): CallerEntry {
+        val events = ArrayList<() -> Unit>()
+        val result = synchronized(lock) {
+            val now = clock()
+            val old = entries[packageName]
+            val entry = CallerEntry(
+                packageName, signingDigest, label, CallerState.ALLOWED,
+                firstSeenAt = old?.firstSeenAt ?: now, decidedAt = now, lastUsedAt = old?.lastUsedAt, promptsTotal = old?.promptsTotal ?: 0,
+            )
+            entries[packageName] = entry
+            try {
+                persist()
+            } catch (x: IOException) {
+                if (old != null) entries[packageName] = old else entries.remove(packageName)
+                throw IllegalStateException("agentos.acp.registry_unavailable: could not write the caller registry")
+            }
+            if (old != null) {
+                events += resolvedEvent(old, CallerState.ALLOWED, CallerResolution.CANCELLED)
+                if (old.signingDigest != signingDigest) events += { listener?.onRevoked(old.packageName, old.signingDigest) }
+            }
+            entry
+        }
+        events.forEach { it() }
+        return result
+    }
+
+    /** 删除全部记录并撤销它们（调试入口的 clear）。返回删掉的个数。 */
+    fun clear(): Int {
+        val events = ArrayList<() -> Unit>()
+        val n = synchronized(lock) {
+            val all = entries.values.toList()
+            val before = entries.toMap()
+            entries.clear(); promptTimes.clear()
+            try {
+                persist()
+            } catch (x: IOException) {
+                entries.putAll(before)
+                throw IllegalStateException("agentos.acp.registry_unavailable: could not write the caller registry")
+            }
+            for (e in all) {
+                events += { listener?.onRevoked(e.packageName, e.signingDigest) }
+                events += resolvedEvent(e, CallerState.DENIED, CallerResolution.CANCELLED)
+            }
+            all.size
+        }
+        events.forEach { it() }
+        return n
+    }
+
+    /** 换参数（只给 debug 调试入口用）。 */
+    fun overrideConfig(c: CallerConfig) {
+        config = c
     }
 
     // ------------------------------------------------------------------ 用量

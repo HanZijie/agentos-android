@@ -29,10 +29,10 @@ class CallerRegistryTest {
 
     private class Events : CallerListener {
         val pending = ArrayList<CallerEntry>()
-        val resolved = ArrayList<Triple<String, CallerState, Boolean>>()
+        val resolved = ArrayList<Triple<String, CallerState, CallerResolution>>()
         val revoked = ArrayList<Pair<String, String>>()
         override fun onPending(entry: CallerEntry) { pending += entry }
-        override fun onResolved(requestId: String, state: CallerState, timedOut: Boolean) { resolved += Triple(requestId, state, timedOut) }
+        override fun onResolved(requestId: String, state: CallerState, how: CallerResolution) { resolved += Triple(requestId, state, how) }
         override fun onRevoked(packageName: String, signingDigest: String) { revoked += packageName to signingDigest }
     }
 
@@ -70,7 +70,7 @@ class CallerRegistryTest {
         reg.admit(notes, digestA, "Notes")
         assertTrue(reg.decide("req-1", allow = true))
         assertEquals(Admission.Allowed("Notes"), reg.admit(notes, digestA, "Notes"))
-        assertEquals(listOf(Triple("req-1", CallerState.ALLOWED, false)), r.events.resolved)
+        assertEquals(listOf(Triple("req-1", CallerState.ALLOWED, CallerResolution.ANSWERED)), r.events.resolved)
         val again = r.registry()
         assertEquals(Admission.Allowed("Notes"), again.admit(notes, digestA, "Notes"))
         // the same answer twice is not taken twice
@@ -100,7 +100,7 @@ class CallerRegistryTest {
         r.now += 101_000
         val a = reg.admit(notes, digestA, "Notes")
         assertTrue(a is Admission.Denied)
-        assertEquals(Triple("req-1", CallerState.DENIED, true), r.events.resolved.single())
+        assertEquals(Triple("req-1", CallerState.DENIED, CallerResolution.TIMED_OUT), r.events.resolved.single())
         assertFalse(reg.decide("req-1", allow = true)) // too late
     }
 
@@ -116,6 +116,25 @@ class CallerRegistryTest {
         assertEquals(CallerState.PENDING, e.state)
         // the old digest does not come back as allowed
         assertTrue(reg.admit(notes, digestA, "Notes") is Admission.Pending)
+    }
+
+    @Test
+    fun `a card nobody answered is withdrawn when it is superseded or removed, and signature changes are flagged`() {
+        val r = Rig(); val reg = r.registry()
+        assertFalse(reg.admit(notes, digestA, "Notes").let { reg.entry(notes)!!.signatureChanged })
+        // the app comes back with another signature before the user answered: the old card is withdrawn, the new one says "changed"
+        reg.admit(notes, digestB, "Notes")
+        assertEquals(Triple("req-1", CallerState.DENIED, CallerResolution.CANCELLED), r.events.resolved.single())
+        assertTrue(reg.entry(notes)!!.signatureChanged)
+        assertEquals("req-2", reg.entry(notes)!!.requestId)
+        // deleting a pending record withdraws its card too
+        assertNull(reg.set(notes, "removed"))
+        assertEquals(Triple("req-2", CallerState.DENIED, CallerResolution.CANCELLED), r.events.resolved.last())
+        // a plain first request or a re-ask after the cooldown is not a signature change
+        reg.admit(notes, digestA, "Notes"); reg.decide("req-3", false)
+        r.now += 11 * 60_000
+        reg.admit(notes, digestA, "Notes")
+        assertFalse(reg.entry(notes)!!.signatureChanged)
     }
 
     @Test

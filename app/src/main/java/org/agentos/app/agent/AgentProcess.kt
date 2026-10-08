@@ -32,9 +32,14 @@ import org.agentos.app.agent.acp.AcpAccessPolicy
 import org.agentos.app.agent.acp.AcpDecision
 import org.agentos.app.agent.acp.CallerEntry
 import org.agentos.app.agent.acp.CallerListener
+import org.agentos.app.agent.acp.CallerResolution
+import org.agentos.app.agent.consent.ConsentWire
+import org.agentos.runtime.consent.ConsentEnd
+import org.agentos.runtime.consent.ConsentResolution
 import org.agentos.app.agent.acp.CallerRegistry
 import org.agentos.app.agent.acp.CallerState
 import org.agentos.app.agent.acp.PackageCallerResolver
+import org.agentos.app.agent.acp.PackageLookup
 import org.agentos.extensions.registry.FileBackedTextFile
 import org.agentos.runtime.AgentRuntime
 import org.agentos.runtime.AgentRuntimes
@@ -177,6 +182,9 @@ class AgentProcess private constructor(val app: Context) {
     )
     private val callerResolver = PackageCallerResolver(app)
 
+    /** 调试入口（AcpCallerDebugReceiver）按包名查已安装的 App。 */
+    val packageLookup: PackageLookup get() = callerResolver
+
     /** IAcpService.open 的准入：AgentOS 自己 SELF，其他 UID 按 [AcpAccessPolicy] 查授权记录，不阻塞。 */
     fun admitAcp(callerUid: Int): AcpDecision = AcpAccessPolicy.decide(callerUid, Process.myUid(), callerResolver, callers)
 
@@ -200,10 +208,30 @@ class AgentProcess private constructor(val app: Context) {
     private val callerListener = object : CallerListener {
         override fun onPending(entry: CallerEntry) {
             Log.i(TAG, "authorization requested by ${entry.packageName} (request ${entry.requestId?.take(8)})")
+            val id = entry.requestId ?: return
+            val at = entry.requestedAt ?: return
+            // 授权卡片 / 通知（D 的 ConsentBridge）：前台推给对话框，后台发带“拒绝”的通知，和工具确认排同一个队
+            consentBridge.authorizationRequested(
+                ConsentWire.AuthRequest(
+                    requestId = id,
+                    packageName = entry.packageName,
+                    appLabel = entry.label,
+                    signingDigest = entry.signingDigest,
+                    signatureChanged = entry.signatureChanged,
+                    deadlineMillis = at + callers.config.pendingTtlMillis,
+                    timeoutMillis = callers.config.pendingTtlMillis,
+                ),
+            )
         }
 
-        override fun onResolved(requestId: String, state: CallerState, timedOut: Boolean) {
-            Log.i(TAG, "authorization ${requestId.take(8)} resolved: ${state.wire}${if (timedOut) " (timed out)" else ""}")
+        override fun onResolved(requestId: String, state: CallerState, how: CallerResolution) {
+            Log.i(TAG, "authorization ${requestId.take(8)} resolved: ${state.wire} ($how)")
+            val end = when (how) {
+                CallerResolution.ANSWERED -> ConsentEnd.ANSWERED
+                CallerResolution.TIMED_OUT -> ConsentEnd.TIMED_OUT
+                CallerResolution.CANCELLED -> ConsentEnd.CANCELLED
+            }
+            consentBridge.authorizationResolved(requestId, ConsentResolution(end))
         }
 
         override fun onRevoked(packageName: String, signingDigest: String) {
@@ -219,6 +247,8 @@ class AgentProcess private constructor(val app: Context) {
 
     init {
         callers.setListener(callerListener)
+        // 通知上的“拒绝”（ConsentActionReceiver）经这里到注册表；通知上不给“允许”：授权是持久的信任决定，要在对话框里看清包名和签名
+        consentBridge.authorizationAnswer = { requestId, allow -> callers.decide(requestId, allow) }
         AcpAndroid.ensureInitialized()
         installCrashHandler()
         // BIND_AUTO_CREATE：:ext 随 :agent 存活；目录和策略到了之后才有第三方工具（之前 fail closed）

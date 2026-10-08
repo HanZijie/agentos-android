@@ -15,6 +15,11 @@ fun interface CallerResolver {
     fun resolve(uid: Int): ResolvedCaller?
 }
 
+/** 按包名解析已安装的 App（调试入口预授权用；准入永远按 UID，不按包名）。 */
+interface PackageLookup {
+    fun lookup(packageName: String): ResolvedCaller?
+}
+
 /** 一次 open 的决定。 */
 sealed interface AcpDecision {
     /** 打开通道。[app] 不为 null 时是第三方 App（调用方身份是 [CallerKind.APP]）。 */
@@ -50,12 +55,17 @@ object AcpAccessPolicy {
 }
 
 /** Android 上的 [CallerResolver]：`getPackagesForUid` 必须恰好一个包；签名摘要和插件用同一个函数；App 名取标签。 */
-class PackageCallerResolver(private val context: Context) : CallerResolver {
+class PackageCallerResolver(private val context: Context) : CallerResolver, PackageLookup {
     override fun resolve(uid: Int): ResolvedCaller? {
         val pm = context.packageManager
         val packages = pm.getPackagesForUid(uid)
         if (packages == null || packages.size != 1) return null
-        val pkg = packages[0]
+        return lookup(packages[0])
+    }
+
+    override fun lookup(packageName: String): ResolvedCaller? {
+        val pm = context.packageManager
+        val pkg = packageName
         return try {
             val info = pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()))
             val digest = AppPluginScanner.signerDigest(info)
