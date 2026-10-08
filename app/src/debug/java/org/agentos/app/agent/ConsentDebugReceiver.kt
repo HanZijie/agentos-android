@@ -82,6 +82,17 @@ class ConsentDebugReceiver : BroadcastReceiver() {
                         JSONObject().put("ok", true).put("accepted", process.consent.respond(id, choice))
                     }
                 }
+                op == "auth_inject" -> authInject(process, intent)
+                op == "auth_answer" -> {
+                    val id = intent.getStringExtra("id")
+                    val allow = intent.getStringExtra("allow")
+                    if (id == null || allow !in listOf("true", "false")) {
+                        JSONObject().put("ok", false).put("error", "need --es id and --es allow true|false")
+                    } else {
+                        JSONObject().put("ok", true).put("accepted", authAnswer(process, id, allow == "true"))
+                    }
+                }
+                op == "auth_decision" -> JSONObject().put("ok", true).put("decision", authDecisions[intent.getStringExtra("id")] ?: "unknown")
                 op == "decision" -> JSONObject().put("ok", true).put("decision", decisions[intent.getStringExtra("id")] ?: "unknown")
                 op == "recent" -> JSONObject().put("ok", true).put("mode", responder.mode.name).put(
                     "recent",
@@ -145,7 +156,48 @@ class ConsentDebugReceiver : BroadcastReceiver() {
         return JSONObject().put("ok", true).put("requestId", id)
     }
 
+    /**
+     * 向授权提示的界面接缝发一条授权请求（stand-in for C 的 CallerRegistry）：`--es pkg`（默认 org.agentos.debug.app）、`--es label`（可选，
+     * 不给就让界面自己解析）、`--es digest`（64 位十六进制，默认固定值）、`--ez changed true`（签名变了）、`--el timeoutMs`（默认 30000）。
+     * 回答用 `auth_answer`（或界面上点）；到点没有回答按拒绝。决定用 `auth_decision` 读：pending / allow / deny:user / deny:timeout。
+     */
+    private fun authInject(process: AgentProcess, intent: Intent): JSONObject {
+        val id = "dbga_" + java.util.UUID.randomUUID().toString().take(8)
+        val timeout = intent.getLongExtra("timeoutMs", 30_000L)
+        val req = ConsentWire.AuthRequest(
+            requestId = id,
+            packageName = intent.getStringExtra("pkg") ?: "org.agentos.debug.app",
+            appLabel = intent.getStringExtra("label"),
+            signingDigest = intent.getStringExtra("digest") ?: "7920a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e",
+            signatureChanged = intent.getBooleanExtra("changed", false),
+            deadlineMillis = System.currentTimeMillis() + timeout,
+            timeoutMillis = timeout,
+        )
+        // 真正的 CallerRegistry 接上后会自己设 authorizationAnswer；这里只在没人设时补一个记录决定的
+        if (process.consentBridge.authorizationAnswer == null) {
+            process.consentBridge.authorizationAnswer = { rid, allow -> authAnswer(process, rid, allow) }
+        }
+        authDecisions[id] = "pending"
+        process.consentBridge.authorizationRequested(req)
+        scope.launch {
+            kotlinx.coroutines.delay(timeout)
+            if (authDecisions[id] == "pending") {
+                authDecisions[id] = "deny:timeout"
+                process.consentBridge.authorizationResolved(id, org.agentos.runtime.consent.ConsentResolution(org.agentos.runtime.consent.ConsentEnd.TIMED_OUT))
+            }
+        }
+        return JSONObject().put("ok", true).put("requestId", id)
+    }
+
+    private fun authAnswer(process: AgentProcess, id: String, allow: Boolean): Boolean {
+        if (authDecisions[id] != "pending") return false
+        authDecisions[id] = if (allow) "allow" else "deny:user"
+        process.consentBridge.authorizationResolved(id, org.agentos.runtime.consent.ConsentResolution(org.agentos.runtime.consent.ConsentEnd.ANSWERED))
+        return true
+    }
+
     private companion object {
+        val authDecisions = ConcurrentHashMap<String, String>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val decisions = ConcurrentHashMap<String, String>()
     }
