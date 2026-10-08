@@ -106,7 +106,7 @@ class McpToolResult {
 
 ### 4.2 日历 `calendar`
 
-界面：月视图（有日程的日期带点 / 色条）、日程列表（议程）、周视图或日视图至少一种、新建 / 编辑日程（标题、起止、全天、地点、备注、颜色、提醒、重复）、多个日历（可显示 / 隐藏）、搜索。提醒到点发通知（`AlarmManager` + 通知）。数据用自己的 SQLite，不用系统 `CalendarContract`。
+界面：月视图（有日程的日期带点 / 色条）、日程列表（议程）、周视图或日视图至少一种、新建 / 编辑日程（标题、起止、全天、地点、备注、颜色、提醒、重复）、多个日历（可显示 / 隐藏）、搜索。提醒到点发通知。**数据层（next-apps-plan.md 第 2 节）：系统日历库 `CalendarContract` + 本机日历并存**——有 Google / CalDAV 账号的日历由系统同步到云端（`READ_CALENDAR` / `WRITE_CALENDAR` 运行时权限，未授权时工具返回明确错误，本机日历照常）；本机日历是 App 自己的 SQLite（无账号、无权限时可用），提醒仍由 `AlarmManager` + 通知，账号日历的提醒写 `Reminders` 表由系统日历 App 发。工具名和必填参数不变，只加字段：`calendar_list` 多了 `account`、`account_type`、`source`（`google` / `caldav` / `local` / `other`）、`writable`、`storage`，`is_default` 表示“默认写入日历”；`calendar_create` / `calendar_delete` 只作用于本机日历；`event_create` 缺省日历 = 用户选的“默认写入日历”，否则第一个“可写、可见、非本机”的日历，再否则本机默认日历；读到无法无损表达的 RRULE 时 `recurrence: "custom"` 并带 `rrule` 原文，更新被拒。详见 `plugins/samples/calendar/README.md`。
 
 | 工具 | 必填参数 | 可选参数 | 说明 |
 |---|---|---|---|
@@ -171,7 +171,7 @@ class McpToolResult {
 
 1. **JVM 单元测试**：数据层 + 工具层，`./gradlew :plugins:samples:<name>:testDebugUnitTest`。
 2. **设备（模拟器）**：装 debug 包，界面逐页走一遍，截图；SDK 合入后加“自测入口”（debug 构建的导出 `BroadcastReceiver` 或 `adb shell am start` 的 Activity，经 `McpBinderClient` 绑自己的 Service，依次 `tools/list`、增删改查全部工具，结果写 logcat 一行 JSON 摘要），确认 MCP 路径通。
-3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），读各 App 的状态确认结果。**读状态用各 App 的 debug `dump`（`--es cmd dump [--ei offset N --ei limit M]`，结果在广播 result data，按 `next_offset` 翻页），复位用 `reset`；不要在真机上跑 `run-as sqlite3`（user 构建的真机没有 sqlite3）。**闹钟的 dump 带 `scheduled[].registered`，是 `AlarmManager` 里真的登记了的实测。日历的 `dump` 一样（分页、`events` 每个系列一行、时间是带偏移的 ISO 字符串、提醒是 `reminder_minutes`），`reset` 返回 `{cleared, calendars_remaining, remaining_scheduled}`，同步完成，不用轮询；`clear` 只写 logcat。
+3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），读各 App 的状态确认结果。**读状态用各 App 的 debug `dump`（`--es cmd dump [--ei offset N --ei limit M]`，结果在广播 result data，按 `next_offset` 翻页），复位用 `reset`；不要在真机上跑 `run-as sqlite3`（user 构建的真机没有 sqlite3）。**闹钟的 dump 带 `scheduled[].registered`，是 `AlarmManager` 里真的登记了的实测。日历的 `dump` 一样（分页、`events` 每个系列一行、时间是带偏移的 ISO 字符串、提醒是 `reminder_minutes`），`reset` 返回 `{cleared, calendars_remaining, remaining_scheduled}`，同步完成，不用轮询；`clear` 只写 logcat。**日历改用系统日历库之后**：`dump` 的 `events[]` 只列**本 App 创建的**日程（本机日历全部 + 系统日历里带本 App `CUSTOM_APP_PACKAGE` 标记的），别人的 / 同步下来的日程从不列出，只在 `other_events` 里数个数；`reset` 只删本 App 创建的日程和本机的非默认日历，**绝不整库清理**——所以带真实账号的设备上跑 e2e 也不会碰用户的日程。`CUSTOM_APP_PACKAGE` 是约定不是安全边界（任何 App 都能写任意字符串）。待办、短信的 `dump` / `reset` 同一口径（短信的 `reset` 只清自己的 `outbox` 与草稿，不碰系统短信）。
    驱动是 `tests/device/acp-channel/sample_apps_e2e.py`（脚本模式；`--live` 用真实模型，要先开电脑端接入、最后配真实模型并核对 `modelBaseUrl`）。
 4. 提交前：`./gradlew :plugins:samples:<name>:assembleDebug :plugins:samples:<name>:assembleRelease :plugins:samples:<name>:lintDebug` 通过；`git diff | grep -c` 自查没有任何 key。
 
