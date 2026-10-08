@@ -156,11 +156,15 @@ def apk_badging(apk: Path) -> dict[str, str]:
 
 
 def apk_cert_sha256(apk: Path) -> str | None:
-    r = subprocess.run([str(build_tool("apksigner")), "verify", "--print-certs", str(apk)],
-                       capture_output=True, text=True)
+    tool = build_tool("apksigner")
+    r = subprocess.run([str(tool), "verify", "--print-certs", str(apk)], capture_output=True, text=True)
+    # 不是 None 就是“未签名”：先把 apksigner 自己的说法打出来，否则只能看到一句“未签名”而不知道为什么
     if r.returncode != 0:
+        log(f"apksigner verify failed (rc={r.returncode}, {tool}): {(r.stderr or r.stdout).strip()[:800]}")
         return None
     m = re.search(r"Signer #1 certificate SHA-256 digest: ([0-9a-f]{64})", r.stdout)
+    if not m:
+        log(f"apksigner verify printed no 'Signer #1 certificate SHA-256 digest' ({tool}): {r.stdout.strip()[:800]}")
     return m.group(1) if m else None
 
 
