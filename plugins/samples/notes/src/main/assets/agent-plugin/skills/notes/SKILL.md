@@ -38,7 +38,7 @@ The user sees the app live: whatever you change appears on screen immediately, e
 ## Writing the content
 
 - Plain Markdown: `# Heading`, `**bold**`, `*italic*`, `` `code` ``, fenced code blocks, `> quote`, `- bullet`, `1. numbered`, `---` rule, `[text](https://…)`.
-- Checklists: `- [ ] todo` and `- [x] done`. The app draws them as checkboxes with a progress bar. To tick an item, edit that line (`note_get`, then `note_update` with the full body) or append a new item with `note_append`.
+- Checklists: `- [ ] todo` and `- [x] done`. The app draws them as checkboxes with a progress bar. To tick an item, edit that line (`note_get`, then `note_update` with the full body) or append a new item with `note_append`. A checklist is for items that belong inside one note (a shopping or packing list); a task with its own due date or status is a to-do in the Todo app when its tools are available (`todo_create`), not a checklist line here.
 - Keep the user's language. Short, scannable notes beat long prose. The first line is the title if you don't pass one.
 - Tags: short words without `#` or commas, at most 32 characters, at most 20 per note; case-insensitive duplicates are merged.
 - Colors: `default`, `yellow`, `orange`, `red`, `purple`, `blue`, `teal`, `green`, `gray`.

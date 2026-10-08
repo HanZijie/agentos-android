@@ -22,6 +22,11 @@ class ScheduleItemsTest {
         assertEquals(ItemKind.EVENT, ScheduleItems.kindOf("mcp__calendar__event_create"))
         assertEquals(ItemKind.ALARM, ScheduleItems.kindOf("alarm_create"))
         assertEquals(ItemKind.ALARM, ScheduleItems.kindOf("mcp__alarm__alarm_create"))
+        assertEquals(ItemKind.TODO, ScheduleItems.kindOf("todo_create"))
+        assertEquals(ItemKind.TODO, ScheduleItems.kindOf("mcp__todo__todo_create"))
+        assertEquals(ItemKind.TODO, ScheduleItems.kindOf("anything", ToolRef("todo", "todo_create")))
+        assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("todo_delete"))
+        assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("my_todo_create"))
         assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("note_delete"))
         assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("event_create_all"))
         assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("my_event_create"))
@@ -205,6 +210,43 @@ class ScheduleItemsTest {
         assertEquals(1, s.failedCount)
         assertFalse(s.isEmpty)
         assertTrue(ScheduleSummary(emptyList()).isEmpty)
+    }
+
+    @Test fun `a todo result gives title and due, and a todo is counted on its own`() {
+        val dated = """{"id":"t1","title":"写 PRD：搜索","status":"todo","priority":"high","due":"2026-10-14","due_all_day":true}"""
+        val timed = """{"id":"t2","title":"Send the report","due":"2026-10-16T17:00:00+08:00"}"""
+        val undated = """{"id":"t3","title":"Read the spec"}"""
+        assertEquals(TodoInfo("写 PRD：搜索", "2026-10-14"), ScheduleItems.parseTodo(dated))
+        assertEquals("2026-10-16T17:00:00+08:00", ScheduleItems.parseTodo(timed)!!.due)
+        assertNull("no due date is fine", ScheduleItems.parseTodo(undated)!!.due)
+        assertNull(ScheduleItems.parseTodo("""{"id":"t4"}"""))
+        assertNull(ScheduleItems.parseTodo("not json"))
+        val items = fold(
+            call("e1", "event_create", ToolStatus.COMPLETED, eventJson),
+            call("t1", "todo_create", ToolStatus.COMPLETED, dated),
+            call("t2", "todo_create", ToolStatus.COMPLETED, timed),
+            call("t3", "todo_create", ToolStatus.DENIED, "no"),
+            call("t4", "todo_create", ToolStatus.FAILED, """{"error":"due must carry a UTC offset"}"""),
+        )
+        val s = ScheduleSummary(items)
+        assertEquals(2, s.todoCount)
+        assertEquals(1, s.eventCount)
+        assertEquals(0, s.alarmCount)
+        assertEquals(3, s.createdCount)
+        assertEquals("a todo item carries its title for the card", "写 PRD：搜索", s.createdTodos.first().todo!!.title)
+        assertEquals(1, s.deniedCount)
+        assertEquals(1, s.failedCount)
+    }
+
+    @Test fun `while a todo waits for approval its arguments are previewed, and a refusal keeps the preview`() {
+        val args = """{"title":"写三份 PRD","due":"2026-10-14","priority":"high"}"""
+        val ref = ToolRef("todo", "todo_create")
+        val waiting = fold(GatewayEvent.ToolCall("t1", "todo_create", ToolStatus.PENDING_APPROVAL, null, argumentsJson = args, ref = ref))
+        assertEquals("写三份 PRD", waiting.single().todo!!.title)
+        assertEquals(0, ScheduleSummary(waiting).todoCount)
+        val denied = ScheduleItems.apply(waiting, GatewayEvent.ToolCall("t1", "todo_create", ToolStatus.DENIED, "denied by user"))
+        assertEquals("写三份 PRD", denied.single().todo!!.title)
+        assertEquals(0, ScheduleSummary(denied).todoCount)
     }
 
     @Test fun `the summary never reads the model's words`() {

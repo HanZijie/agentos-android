@@ -74,6 +74,19 @@ class AgentScheduleUseCaseTest {
 
     // ---------------------------------------------------------------- 正常路径
 
+    @Test fun `success_todo creates an event, a to-do and an alarm, each counted on its own`() = runTest {
+        val e = env("success_todo")
+        val end = runIt(e) as ScheduleState.Done
+        assertEquals(1, end.summary.eventCount)
+        assertEquals(1, end.summary.todoCount)
+        assertEquals(1, end.summary.alarmCount)
+        assertEquals(3, end.summary.createdCount)
+        assertEquals("写三份 PRD", end.summary.createdTodos.single().todo!!.title)
+        assertNotNull("the to-do result carries a due date", end.summary.createdTodos.single().todo!!.due)
+        assertEquals(listOf(ItemKind.EVENT, ItemKind.TODO, ItemKind.ALARM), end.summary.items.map { it.kind })
+        assertEquals(NotesToolScope, e.gateways.single().scope)
+    }
+
     @Test fun `success creates an event and an alarm, walking Ready Checking Running Done`() = runTest {
         val e = env("success")
         val end = runIt(e) as ScheduleState.Done
@@ -87,7 +100,7 @@ class AgentScheduleUseCaseTest {
         assertTrue(end.text.contains("处理好了"))
         val gw = e.gateways.single()
         assertEquals(NotesToolScope, gw.scope)
-        assertEquals(listOf(ToolRef("alarm", "alarm_create"), ToolRef("calendar", "event_create")), gw.scope)
+        assertEquals(listOf(ToolRef("alarm", "alarm_create"), ToolRef("calendar", "event_create"), ToolRef("todo", "todo_create")), gw.scope)
         assertEquals("the connection is closed after a normal end", 1, gw.closeCount)
         assertFalse("the marker is cleared at the end", e.marker.on)
     }

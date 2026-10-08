@@ -40,6 +40,7 @@ object NoteText {
         for (item in raw) {
             val tag = item.trim().trimStart('#').trim()
             if (tag.isEmpty()) continue
+            // i18n-ok: 校验标签用的全角逗号，是对用户输入的文本分析，不是界面文案
             if (tag.any { it == ',' || it == '\n' || it == '\r' || it == '，' }) {
                 throw NoteException(NoteException.Kind.INVALID, "Tag \"${safeTake(tag, 20)}\" must not contain commas or line breaks.")
             }

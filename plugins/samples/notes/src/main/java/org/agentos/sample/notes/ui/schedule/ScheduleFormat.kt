@@ -10,6 +10,21 @@ import org.agentos.sample.notes.R
 import org.agentos.sample.notes.agentos.AlarmInfo
 import org.agentos.sample.notes.agentos.EventInfo
 import org.agentos.sample.notes.agentos.ScheduleItems
+import org.agentos.sample.notes.agentos.TodoInfo
+
+/** 重复说明用到的几段文字。Android 里由资源提供（[ScheduleFormat.alarmRepeat]），JVM 测试用中、英两个假实现。 */
+interface RepeatText {
+    val once: String
+    val everyDay: String
+    val weekdays: String
+    val weekends: String
+
+    /** 星期名之间的分隔符（中文 “、”，英文 “, ”）：跟着语言走，不在代码里按语言判断。 */
+    val separator: String
+
+    /** “每周一、周三” / “Every Mon, Wed”：[days] 已经用分隔符连好。 */
+    fun weekly(days: String): String
+}
 
 /** 把工具结果里的时间写成给人看的样子（跟随系统语言和 12 / 24 小时制）。 */
 object ScheduleFormat {
@@ -25,21 +40,34 @@ object ScheduleFormat {
         return DateUtils.formatDateRange(context, Formatter(StringBuilder(), Locale.getDefault()), start.millis, endMillis, flags, zone).toString()
     }
 
+    /** “截止 10月12日周一”；没有截止时间或认不出来返回 null。写法与 [eventWhen] 一致（日期 / 时间都跟系统）。 */
+    fun todoDue(context: Context, info: TodoInfo): String? {
+        val due = info.due ?: return null
+        val text = eventWhen(context, EventInfo(info.title, due, null)) ?: return null
+        return context.getString(R.string.agent_todo_due, text)
+    }
+
     /** “07:00 · 每周一、周三”；只响一次的写“仅一次”。 */
     fun alarmWhen(context: Context, info: AlarmInfo): String = "${info.time} · ${alarmRepeat(context, info.days)}"
 
-    fun alarmRepeat(context: Context, days: List<String>): String {
+    fun alarmRepeat(context: Context, days: List<String>): String = repeatText(days, Locale.getDefault(), object : RepeatText {
+        override val once get() = context.getString(R.string.agent_alarm_once)
+        override val everyDay get() = context.getString(R.string.agent_alarm_every_day)
+        override val weekdays get() = context.getString(R.string.agent_alarm_weekdays)
+        override val weekends get() = context.getString(R.string.agent_alarm_weekends)
+        override val separator get() = context.getString(R.string.agent_day_separator)
+        override fun weekly(days: String) = context.getString(R.string.agent_alarm_weekly, days)
+    })
+
+    /** 纯函数：重复日 → 一句话。星期名用 [locale] 的短名，顺序固定周一到周日，分隔符由 [text] 给。 */
+    fun repeatText(days: List<String>, locale: Locale, text: RepeatText): String {
         val set = days.mapNotNull(::dayOf).toSortedSet()
         return when {
-            set.isEmpty() -> context.getString(R.string.agent_alarm_once)
-            set.size == 7 -> context.getString(R.string.agent_alarm_every_day)
-            set == WEEKDAYS -> context.getString(R.string.agent_alarm_weekdays)
-            set == WEEKEND -> context.getString(R.string.agent_alarm_weekends)
-            else -> {
-                val locale = Locale.getDefault()
-                val sep = if (locale.language == "zh" || locale.language == "ja") "、" else ", "
-                context.getString(R.string.agent_alarm_weekly, set.joinToString(sep) { it.getDisplayName(TextStyle.SHORT, locale) })
-            }
+            set.isEmpty() -> text.once
+            set.size == 7 -> text.everyDay
+            set == WEEKDAYS -> text.weekdays
+            set == WEEKEND -> text.weekends
+            else -> text.weekly(set.joinToString(text.separator) { it.getDisplayName(TextStyle.SHORT, locale) })
         }
     }
 

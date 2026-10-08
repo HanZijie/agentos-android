@@ -36,6 +36,7 @@ class NoteSchedulePromptTest {
         val p = build("x")
         assertTrue(p.contains("event_create"))
         assertTrue(p.contains("alarm_create"))
+        assertTrue(p.contains("todo_create"))
         assertTrue(p.contains("at most 10 items"))
         assertTrue(p.contains("do not create anything for it, and say why"))
         assertTrue(p.contains("Do not ask the user any questions"))
@@ -46,9 +47,52 @@ class NoteSchedulePromptTest {
         val p = build("x")
         assertTrue(p, p.contains("put it in reminder_minutes"))
         assertTrue(p, p.contains("Do NOT also create an alarm for it"))
-        assertTrue(p, p.contains("only for something that must ring at a certain clock time by itself"))
-        assertTrue(p, p.contains("never create both an event and an alarm"))
+        assertTrue(p, p.contains("must ring at a certain clock time by itself"))
+        assertTrue(p, p.contains("never create two items"))
+        assertTrue(p, p.contains("an event and a to-do"))
+        assertTrue(p, p.contains("two of the same kind"))
         assertTrue(p, p.contains("leave days empty for a one-time alarm"))
+    }
+
+    @Test fun `puts a thing with a done state into a to-do, one per thing, with due and priority`() {
+        val p = build("x")
+        assertTrue(p, p.contains("clear done state"))
+        assertTrue(p, p.contains("create a to-do with todo_create"))
+        assertTrue(p, p.contains("one to-do per thing"))
+        assertTrue(p, p.contains("Give it due"))
+        assertTrue(p, p.contains("priority (high, medium or low)"))
+        // 待办的例子是“要做的事 / 交付物”，不是占时间段的事
+        val todo = p.substringAfter("clear done state").substringBefore("It must ring")
+        assertFalse(todo, todo.contains("event_create"))
+    }
+
+    @Test fun `plain information stays in the note and nothing is created for it`() {
+        val p = build("x")
+        assertTrue(p, p.contains("only information"))
+        assertTrue(p, p.contains("leave it in the note and create nothing"))
+    }
+
+    @Test fun `degrades when a tool is missing, e g the todo plugin is not installed or not enabled`() {
+        val p = build("x")
+        assertTrue(p, p.contains("Use only the tools that really exist in your tool list"))
+        assertTrue(p, p.contains("no todo_create"))
+        assertTrue(p, p.contains("do not swap in another kind"))
+        assertTrue(p, p.contains("leave that thing in the note and tell the user"))
+    }
+
+    @Test fun `the four places come in a fixed order, event then to-do then alarm then information`() {
+        val p = build("x")
+        val order = listOf("1. It takes up a stretch of time", "2. It has a clear done state", "3. It must ring", "4. It is only information").map { p.indexOf(it) }
+        assertTrue(p, order.all { it > 0 })
+        assertEquals(order.sorted(), order)
+    }
+
+    @Test fun `the safety paragraph names exactly the three creating tools`() {
+        val p = build("x")
+        val safety = p.substringAfter("Safety:").substringBefore("<note>\n")
+        for (tool in listOf("event_create", "todo_create", "alarm_create")) assertTrue("$tool in $safety", safety.contains(tool))
+        assertTrue(safety, safety.contains("never anything else"))
+        assertFalse(safety, safety.contains("note_delete"))
     }
 
     @Test fun `has the fixed safety paragraph before the note`() {
