@@ -1292,9 +1292,11 @@ class LivePromptTest(unittest.TestCase):
                 "title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "end": "2026-10-14T16:00:00+08:00", "location": "3 号会议室", "reminder_minutes": [15]})],
             S.LIVE_PROMPTS["notes"]: lambda ph: [("mcp__notes__notes__note_create", {"content": "新品发布会要准备：演示稿、嘉宾名单、物料清单", "tags": ["工作"]})],
         }
+        d.update(LiveRunTest().next_plan())
         report = E.run_acceptance(FakeEnv(FakePhone(), live_plan=d), E.Options(live=True), log=lambda m: None)
         self.assertTrue(report["ok"], report["summary"]["failures"])
-        self.assertEqual([S.LIVE_PROMPTS["alarm"], S.LIVE_PROMPTS["calendar"], S.LIVE_PROMPTS["notes"]], [t for _, t in [(0, x["title"]) for x in report["steps"] if x["id"].startswith("live.")]])
+        self.assertEqual([S.LIVE_PROMPTS["alarm"], S.LIVE_PROMPTS["calendar"], S.LIVE_PROMPTS["notes"]] + [p for p in LiveRunTest().next_prompts()],
+                         [x["title"] for x in report["steps"] if x["id"].startswith("live.")])
 
 
 class ModelSourceTest(unittest.TestCase):
@@ -1339,13 +1341,33 @@ class ModelSourceTest(unittest.TestCase):
 
 
 class LiveRunTest(unittest.TestCase):
+    NUMBER = "5556"     # the fake phone is emulator-5554 and has no neighbour: the live sms prompts name a made-up port that is not its own
+
+    def next_prompts(self):
+        return [S.LIVE_PROMPTS_NEXT["todo"], S.LIVE_PROMPTS_NEXT["sms"].format(number=self.NUMBER), S.LIVE_PROMPTS_NEXT["cross"].format(number=self.NUMBER)]
+
+    def next_plan(self):
+        """What a model that did what the sentences say would call: a todo, a declined text message, and the integration scenario of plan section 9."""
+        todo, sms, cross = self.next_prompts()
+        prd = lambda name: ("mcp__todo__todo__todo_create", {"title": "写 PRD：" + name, "due": "2026-10-16", "priority": "high"})  # noqa: E731
+        return {
+            todo: lambda ph: [("mcp__todo__todo__todo_create", {"title": "写完季度复盘", "due": "2026-10-09", "priority": "high"})],
+            sms: lambda ph: [("mcp__sms__sms__sms_send", {"to": self.NUMBER, "text": "纪要已发出，请查收。"})],
+            cross: lambda ph: [("mcp__calendar__calendar__event_create", {"title": "需求评审会（王总）", "start": "2026-10-14T15:00:00+08:00", "end": "2026-10-14T16:00:00+08:00",
+                                                                           "reminder_minutes": [30]}),
+                               prd("搜索改版"), prd("会员体系"), prd("数据看板"),
+                               ("mcp__sms__sms__sms_send", {"to": self.NUMBER, "text": "王总，今天评审会的纪要已整理，请确认。"})],
+        }
+
     def plan(self):
         d = date(2026, 10, 14)  # next Wednesday
-        return {
+        plan = {
             S.LIVE_PROMPTS["alarm"]: lambda ph: [("mcp__alarm__alarm__alarm_create", {"time": "07:00"})],
             S.LIVE_PROMPTS["calendar"]: lambda ph: [("mcp__calendar__calendar__event_create", {"title": "和王总开会", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [15]})],
             S.LIVE_PROMPTS["notes"]: lambda ph: [("mcp__notes__notes__note_search", {"query": "新品发布"}), ("mcp__notes__notes__note_create", {"content": "新品发布备忘", "tags": ["工作"]})],
         }
+        plan.update(self.next_plan())
+        return plan
 
     def test_live_cases_read_the_app_state_and_record_the_tool_sequence(self):
         phone = FakePhone()
@@ -1354,7 +1376,7 @@ class LiveRunTest(unittest.TestCase):
         self.assertEqual("live", report["mode"])
         self.assertEqual(["model:live"], [e for e in env.events if e.startswith("model")])
         live = [s for s in report["steps"] if s["id"].startswith("live.")]
-        self.assertEqual(["live.alarm", "live.calendar", "live.notes"], [s["id"] for s in live])
+        self.assertEqual(["live.alarm", "live.calendar", "live.notes", "live.todo", "live.sms", "live.cross"], [s["id"] for s in live])
         self.assertEqual([], [(s["id"], E._first_failure(s)) for s in live if not s["ok"]])
         notes = next(s for s in live if s["id"] == "live.notes")
         self.assertEqual([{"name": "mcp__notes__notes__note_search", "status": "completed"}, {"name": "mcp__notes__notes__note_create", "status": "completed"}], notes["toolSequence"])
@@ -1385,7 +1407,7 @@ class LiveRunTest(unittest.TestCase):
         phone = FakePhone()
         env = FakeEnv(phone, live_plan=self.plan())
         E.run_acceptance(env, E.Options(live=True), log=lambda m: None)
-        self.assertEqual([S.LIVE_PROMPTS["alarm"], S.LIVE_PROMPTS["calendar"], S.LIVE_PROMPTS["notes"]], [t for _, t in env.bridge.prompts])
+        self.assertEqual([S.LIVE_PROMPTS["alarm"], S.LIVE_PROMPTS["calendar"], S.LIVE_PROMPTS["notes"]] + self.next_prompts(), [t for _, t in env.bridge.prompts])
         env2 = FakeEnv(FakePhone(), live_plan={})
         E.run_acceptance(env2, E.Options(live=True, tell_date=True), log=lambda m: None)
         self.assertTrue(all(t.startswith("今天是 2026-10-07（设备时区 UTC+08:00）。") for _, t in env2.bridge.prompts), env2.bridge.prompts)
@@ -1405,6 +1427,148 @@ class LiveRunTest(unittest.TestCase):
         text = json.dumps(report, ensure_ascii=False)
         for needle in ("sk-", "MINIMAX_API_KEY", "x-api-key", "agtest-"):
             self.assertNotIn(needle, text)
+
+
+class LiveNextTest(unittest.TestCase):
+    """The live cases of the todo and sms apps and the cross-app scenario of docs/next-apps-plan.md section 9: the verdict is the state of the apps."""
+
+    def live(self, plan_changes=None, phone=None, **opt):
+        base = LiveRunTest()
+        plan = base.plan()
+        plan.update({k: v for k, v in (plan_changes or {}).items()})
+        phone = phone or FakePhone()
+        env = FakeEnv(phone, live_plan=plan)
+        report = E.run_acceptance(env, E.Options(live=True, **opt), log=lambda m: None)
+        return phone, env, report
+
+    def prompts(self):
+        return LiveRunTest().next_prompts()
+
+    def step(self, report, id):
+        return next(s for s in report["steps"] if s["id"] == id)
+
+    def test_the_prompts_carry_every_fact_the_checks_read(self):
+        todo, sms, cross = self.prompts()
+        for fact in ("待办", "周五", "季度复盘", "优先级高"):
+            self.assertIn(fact, todo)
+        for fact in ("5556", "短信", "纪要已发出，请查收"):
+            self.assertIn(fact, sms)
+        for fact in ("下周三", "下午 3 点", "王总", "提前半小时", "三个 PRD", "搜索改版", "会员体系", "数据看板", "待办", "下周五前", "发短信", "5556", "现在"):
+            self.assertIn(fact, cross)
+        for p in (todo, sms, cross):
+            self.assertGreaterEqual(len(__import__("re").findall(r"[\u4e00-\u9fff]", p)), 12, p)
+            self.assertFalse(__import__("re").search(r"[A-Za-z_]{4,}", p), "no tool names or English words in %r" % p)
+            self.assertLess(len(p), 140)
+
+    def test_a_model_that_did_what_the_sentences_say_passes_and_the_cross_case_has_its_own_audits(self):
+        phone, env, report = self.live()
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+        ids = [s["id"] for s in report["steps"]]
+        for expect in ("live.todo", "audit.todo", "live.sms", "audit.sms", "live.cross", "audit.cross.calendar", "audit.cross.alarm", "audit.cross.todo", "audit.cross.sms"):
+            self.assertIn(expect, ids)
+        cross = self.step(report, "live.cross")
+        self.assertEqual(["calendar", "alarm", "todo", "sms"], cross["apps"])
+        self.assertIsNone(cross["sample"])
+        self.assertEqual([], phone.sms_sent_log, "a live case never sends a message")
+
+    def test_the_sms_case_is_declined_by_the_driver_with_the_card_checked_and_the_settings_put_back(self):
+        phone = FakePhone()
+        phone.sms["settings"].update({"allow_short_numbers": True, "rate_limit": 4})
+        phone, env, report = self.live(phone=phone)
+        sms = self.step(report, "live.sms")
+        self.assertTrue(sms["ok"], [c for c in sms["checks"] if not c["ok"]])
+        self.assertEqual([("mcp__sms__sms__sms_send", "failed")], [(t["name"], t["status"]) for t in [dict(x) for x in sms["toolSequence"]]])
+        self.assertIn("tool_denied", sms["failedCalls"][0]["result"])
+        sends = [e for e in phone.consent_log if e["tool"].endswith("sms_send")]
+        self.assertEqual(["DENY", "ALLOW_ONCE"], [e["answeredWith"] for e in sends], "live.sms is declined; the next case (cross) is answered in mode allow again")
+        self.assertEqual({"mask_codes": True, "allow_short_numbers": True, "rate_limit": 4}, phone.sms["settings"], "the settings from before the run")
+        self.assertEqual([], phone.sms["outbox"])
+
+    def test_a_model_that_never_tries_to_send_fails_the_sms_case_and_its_audit(self):
+        _, _, report = self.live({self.prompts()[1]: lambda ph: []})
+        self.assertIn("live.sms", failed(report))
+        self.assertIn("audit.sms", failed(report))
+
+    def test_the_todo_case_wants_priority_high_and_a_due_date_within_two_weeks(self):
+        todo = self.prompts()[0]
+        for args in ({"title": "写完季度复盘", "due": "2026-10-09", "priority": "low"}, {"title": "写完季度复盘", "priority": "high"}, {"title": "写完季度复盘", "due": "2026-12-25", "priority": "high"},
+                     {"title": "整理文档", "due": "2026-10-09", "priority": "high"}):
+            _, _, report = self.live({todo: lambda ph, args=args: [("mcp__todo__todo__todo_create", args)]})
+            self.assertEqual({"live.todo"}, failed(report), args)
+
+    def calls(self, **changes):
+        """The cross-app calls of a model that did everything right, with parts replaced (None = left out)."""
+        parts = {
+            "event": ("mcp__calendar__calendar__event_create", {"title": "需求评审会（王总）", "start": "2026-10-14T15:00:00+08:00", "end": "2026-10-14T16:00:00+08:00", "reminder_minutes": [30]}),
+            "prd1": ("mcp__todo__todo__todo_create", {"title": "写 PRD：搜索改版", "due": "2026-10-16", "priority": "high"}),
+            "prd2": ("mcp__todo__todo__todo_create", {"title": "写 PRD：会员体系", "due": "2026-10-16", "priority": "high"}),
+            "prd3": ("mcp__todo__todo__todo_create", {"title": "写 PRD：数据看板", "due": "2026-10-16", "priority": "high"}),
+            "sms": ("mcp__sms__sms__sms_send", {"to": "5556", "text": "王总，评审会纪要已整理，请确认。"}),
+        }
+        parts.update(changes)
+        return lambda ph: [v for v in parts.values() if v is not None]
+
+    def cross(self, **changes):
+        return self.live({self.prompts()[2]: self.calls(**changes)})[2]
+
+    def test_an_alarm_at_1430_instead_of_a_reminder_is_the_other_valid_way(self):
+        report = self.cross(event=("mcp__calendar__calendar__event_create", {"title": "需求评审会（王总）", "start": "2026-10-14T15:00:00+08:00"}),
+                            alarm=("mcp__alarm__alarm__alarm_create", {"time": "14:30", "label": "评审会", "days": ["wed"]}))
+        self.assertNotIn("live.cross", failed(report), self.step(report, "live.cross")["checks"])
+
+    def test_both_an_alarm_and_a_reminder_is_a_duplicate_and_neither_is_a_miss(self):
+        both = self.cross(alarm=("mcp__alarm__alarm__alarm_create", {"time": "14:30", "days": ["wed"]}))
+        self.assertIn("live.cross", failed(both))
+        neither = self.cross(event=("mcp__calendar__calendar__event_create", {"title": "需求评审会（王总）", "start": "2026-10-14T15:00:00+08:00"}))
+        self.assertIn("live.cross", failed(neither))
+        bad = [c["name"] for c in self.step(neither, "live.cross")["checks"] if not c["ok"]]
+        self.assertTrue(any("exactly once" in n for n in bad), bad)
+
+    def test_a_wrong_hour_a_duplicate_meeting_a_missing_prd_and_a_prd_without_due_fail(self):
+        self.assertIn("live.cross", failed(self.cross(event=("mcp__calendar__calendar__event_create", {"title": "需求评审会（王总）", "start": "2026-10-14T16:00:00+08:00", "reminder_minutes": [30]}))))
+        self.assertIn("live.cross", failed(self.cross(event2=("mcp__calendar__calendar__event_create", {"title": "需求评审会（王总）", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [30]}))))
+        self.assertIn("live.cross", failed(self.cross(prd3=None)))
+        self.assertIn("live.cross", failed(self.cross(prd3=("mcp__todo__todo__todo_create", {"title": "写 PRD：数据看板", "priority": "high"}))))
+
+    def test_the_cross_case_needs_the_confirmation_of_the_text_message(self):
+        report = self.cross(sms=None)
+        bad = [c["name"] for c in self.step(report, "live.cross")["checks"] if not c["ok"]]
+        self.assertTrue(any("sms_send was attempted" in n for n in bad), bad)
+
+    def test_a_text_message_that_really_left_the_phone_fails_the_cross_case(self):
+        phone, _, report = self.live(phone=FakePhone(faults={"sms-sends-to-short"}))
+        self.assertIn("live.cross", failed(report))
+        self.assertTrue(phone.sms_sent_log, "this is what the check protects against")
+
+    def test_without_the_sms_app_the_live_plan_has_no_sms_case_and_the_cross_sentence_has_no_text_message(self):
+        phone = FakePhone(serial="38290DLJH0007B")
+        base = LiveRunTest()
+        plan = base.plan()
+        plan[S.LIVE_PROMPTS_NEXT["cross_without_sms"]] = base.next_plan()[S.LIVE_PROMPTS_NEXT["cross"].format(number="5556")]
+        env = FakeEnv(phone, live_plan=plan)
+        report = E.run_acceptance(env, E.Options(live=True), log=lambda m: None)
+        ids = [s["id"] for s in report["steps"]]
+        self.assertNotIn("live.sms", ids)
+        self.assertIn("live.cross", ids)
+        self.assertEqual(["calendar", "alarm", "todo"], self.step(report, "live.cross")["apps"])
+        self.assertNotIn("发短信", self.step(report, "live.cross")["title"])
+        self.assertEqual([S.LIVE_PROMPTS["alarm"], S.LIVE_PROMPTS["calendar"], S.LIVE_PROMPTS["notes"], S.LIVE_PROMPTS_NEXT["todo"], S.LIVE_PROMPTS_NEXT["cross_without_sms"]],
+                         [t for _, t in env.bridge.prompts])
+        self.assertTrue(report["ok"], report["summary"]["failures"])
+
+    def test_only_selects_live_cases_by_app(self):
+        _, _, report = self.live(only={"todo"})
+        self.assertEqual(["live.todo", "audit.todo"], [s["id"] for s in report["steps"] if s["id"].startswith(("live.", "audit."))])
+        _, _, report = self.live(only={"todo", "alarm", "calendar", "sms"})
+        ids = [s["id"] for s in report["steps"] if s["id"].startswith(("live.", "audit."))]
+        self.assertIn("live.cross", ids, "a cross-app case runs when all its apps are selected")
+        self.assertNotIn("live.notes", ids)
+        _, _, report = self.live(only={"todo", "sms"})
+        self.assertNotIn("live.cross", [s["id"] for s in report["steps"]], "... and not otherwise")
+
+    def test_the_audit_after_the_cross_case_does_not_fail_for_an_app_the_model_did_not_touch(self):
+        report = self.cross(event=("mcp__calendar__calendar__event_create", {"title": "需求评审会（王总）", "start": "2026-10-14T15:00:00+08:00", "reminder_minutes": [30]}))
+        self.assertTrue(self.step(report, "audit.cross.alarm")["ok"])
 
 
 class ReportFileTest(unittest.TestCase):

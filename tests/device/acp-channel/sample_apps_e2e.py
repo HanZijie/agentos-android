@@ -102,14 +102,12 @@ def run_acceptance(env, opts, log=log_line):
                 if opts.only and not set(item_apps(item)) <= opts.only:
                     continue
                 if isinstance(item, tuple):
-                    record(S.run_check_step(item[0], item[1], item[2], ctx))
+                    record(S.run_check_step(item[0], item[1], item[2], ctx))     # (id, title, fn[, apps])
                 elif opts.live:
                     record(S.run_live_case(item, ctx, opts.live_timeout))
                 else:
                     record(L.run_step(item, ctx, opts.step_timeout))
-            if opts.live:
-                for sample in sorted({a for i in plan if opts.only is None or set(item_apps(i)) <= opts.only for a in item_apps(i)}):
-                    record(S.run_check_step(*S.consent_audit_step(sample), ctx))
+            # live: the audit of an app is a plan item right after its case (ConsentDebugReceiver keeps only the latest 50 requests)
         else:
             notes.append("setup failed: the app steps were not run")
     except Exception as e:  # noqa: BLE001
@@ -136,14 +134,17 @@ def run_acceptance(env, opts, log=log_line):
 
 
 def item_sample(item):
-    """The app a plan item belongs to (check steps are tuples `(id, title, fn)` whose id is `<anything>.<app>`: `audit.<app>`, `sms.<what>`...)."""
+    """The app a plan item belongs to (check steps are tuples `(id, title, fn)`; the app is the first part of the id that names one: `audit.todo`,
+    `audit.cross.sms`, `sms.prepare`)."""
     if isinstance(item, tuple):
-        return item[0].split(".", 1)[0] if item[0].split(".", 1)[0] in L.SAMPLES else item[0].split(".", 1)[1]
+        return next((part for part in item[0].split(".") if part in L.SAMPLES), None)
     return getattr(item, "sample", None)
 
 
 def item_apps(item):
-    """Every app a plan item touches (a cross-app live case touches several; for the others it is [item_sample])."""
+    """Every app a plan item touches (a cross-app live case and its audits touch several; for the others it is [item_sample])."""
+    if isinstance(item, tuple) and len(item) > 3:
+        return list(item[3])
     return list(getattr(item, "apps", None) or [item_sample(item)])
 
 

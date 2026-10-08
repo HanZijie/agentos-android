@@ -11,7 +11,7 @@ found and removed (cleanup()) even after a failed run.
 import json
 import os
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import sample_apps_lib as L
 from sample_apps_lib import Call, Check, DriverError, Step, eq, truth
@@ -463,9 +463,9 @@ def plugin_off_steps(ctx, sample, pkg, probe_call, state_key, label):
     return [off, on]
 
 
-def consent_audit_step(sample):
+def consent_audit_step(sample, id=None):
     """A check step (no prompt): what ConsentDebugReceiver recorded for this app is what the design says (source line, risk, options, answers)."""
-    return ("audit.%s" % sample, "confirmation requests of %s: source line, risk, options, answers" % sample,
+    return (id or "audit.%s" % sample, "confirmation requests of %s: source line, risk, options, answers" % sample,
             lambda ctx: L.audit_consent(ctx.consent_recent(), sample))
 
 
@@ -1155,8 +1155,12 @@ def cleanup(ctx, timeout=90):
 # ---------------------------------------------------------------------- live (real model, natural language)
 
 class LiveCase:
-    def __init__(self, id, sample, prompt, verify, preface=""):
+    """One natural-language prompt. `apps` (a cross-app case) makes `verify` get {app: state} dicts for before / after instead of one app's state;
+    `pre` / `post` run around the prompt (post also after a failure)."""
+
+    def __init__(self, id, sample, prompt, verify, preface="", apps=None, pre=None, post=None):
         self.id, self.sample, self.prompt, self.verify, self.preface = id, sample, prompt, verify, preface
+        self.apps, self.pre, self.post = apps, pre, post
 
     @property
     def text(self):
@@ -1220,9 +1224,145 @@ def live_cases(ctx, tell_date=False):
         return [truth("a new note about 新品发布", "one new note mentioning it", bool(hit), [n["title"] for n in new]),
                 truth("tagged 工作", "tags contains 工作", any("工作" in n["tags"] for n in hit), [n["tags"] for n in hit])]
 
-    return [LiveCase("live.alarm", "alarm", LIVE_PROMPTS["alarm"], v_alarm, preface),
-            LiveCase("live.calendar", "calendar", LIVE_PROMPTS["calendar"], v_event, preface),
-            LiveCase("live.notes", "notes", LIVE_PROMPTS["notes"], v_note, preface)]
+    plan = []
+    for app, prompt, verify in (("alarm", LIVE_PROMPTS["alarm"], v_alarm), ("calendar", LIVE_PROMPTS["calendar"], v_event), ("notes", LIVE_PROMPTS["notes"], v_note)):
+        if app in ctx.apps:
+            plan += [LiveCase("live." + app, app, prompt, verify, preface), consent_audit_step(app)]
+    plan += live_cases_next(ctx, preface)
+    return plan
+
+
+# The todo, sms and cross-app prompts. The sms ones carry the recipient's number (a second emulator's port, or a made-up one: the driver never sends a live
+# message to anything else). "PRD" is the product manager's own word for the document; the three names make the sentence complete.
+LIVE_PROMPTS_NEXT = {
+    # the check: a new todo about 复盘, priority high, with a due date within two weeks
+    "todo": "帮我加一条待办：周五之前把季度复盘写完，优先级高。",
+    # the check: sms_send was attempted and its confirmation shown with the number and the text; the driver declines it, nothing is sent
+    "sms": "给 {number} 发一条短信，内容是：纪要已发出，请查收。",
+    # plan section 9. The short message goes out now (an assistant cannot wait for the end of a meeting).
+    "cross": "下周三下午 3 点和王总开需求评审会，提前半小时叫我；先把三个 PRD（搜索改版、会员体系、数据看板）列成待办，下周五前写完；开完会要给王总（{number}）发短信确认纪要，这条现在就帮我发出去。",
+    "cross_without_sms": "下周三下午 3 点和王总开需求评审会，提前半小时叫我；先把三个 PRD（搜索改版、会员体系、数据看板）列成待办，下周五前写完。",
+}
+
+
+def live_sms_number(ctx):
+    """The number written into the live sms prompts: the second emulator's port, otherwise a made-up emulator port that is not this emulator's own."""
+    return ctx.sms_peer or ("5556" if str(ctx.adb.serial).endswith("5554") else "5554")
+
+
+def live_sms_prepare(ctx):
+    """Before a live case that may reach sms_send: short numbers refused (the app then refuses an emulator port even if the confirmation is allowed), a rate limit
+    that cannot get in the way. The settings from before the run are kept in ctx.vars and put back by [live_sms_restore]."""
+    st = L.SmsState(ctx.adb)
+    ctx.vars.setdefault("_sms_settings0", dict(ctx.state("sms")["settings"]))
+    for key, value in (("allow_short_numbers", False), ("rate_limit", 30)):
+        st.set(key, value)
+
+
+def live_sms_restore(ctx):
+    want = ctx.vars.get("_sms_settings0")
+    if want:
+        st = L.SmsState(ctx.adb)
+        for key, value in want.items():
+            st.set(key, value)
+
+
+def cross_audit(app):
+    """The audit after the cross-app case: the same checks as audit.<app>, but an app the model did not touch (it may have used the calendar's reminder instead of
+    an alarm) or whose requests are older than the receiver's window is not a failure."""
+    def fn(ctx):
+        entries = ctx.consent_recent()
+        if not any(str(e.get("tool", "")).startswith("mcp__%s__%s__" % (app, app)) for e in entries):
+            return [truth("%s: no confirmation request in the recorded window (not used, or older than the latest 50)" % app, "nothing to audit", True, 0)]
+        return L.audit_consent(entries, app)
+    return fn
+
+
+def asked_since(ctx, key, tool):
+    """The confirmation requests for one tool recorded after the marker `key` was set in ctx.vars (a set of requestIds seen before)."""
+    seen = ctx.vars.get(key, set())
+    return [e for e in ctx.consent_recent() if e.get("tool") == tool and e.get("requestId") not in seen]
+
+
+def mark_asked(ctx, key):
+    ctx.vars[key] = {e.get("requestId") for e in ctx.consent_recent()}
+
+
+def live_cases_next(ctx, preface=""):
+    """The live cases of the todo and sms apps and the cross-app case of docs/next-apps-plan.md section 9. The verdict is the state of the apps."""
+    number = live_sms_number(ctx)
+    today = ctx.today
+
+    def v_todo(b, a, t, c):
+        known = {y["id"] for y in b["todos"]}
+        hit = [x for x in a["todos"] if x["id"] not in known and "复盘" in x["title"] + (x["notes"] or "")]
+        due_ok = [x for x in hit if x["due"] and today <= date.fromisoformat(x["due"][:10]) <= today + timedelta(days=14)]
+        return [truth("a new todo about 复盘", "one new todo with 复盘 in its title", bool(hit), [x["title"] for x in a["todos"] if x["id"] not in known]),
+                truth("priority high", "high", any(x["priority"] == "high" for x in hit), [x["priority"] for x in hit]),
+                truth("it has a due date within the next two weeks ('before Friday')", "%s .. %s" % (today, today + timedelta(days=14)), bool(due_ok), [x["due"] for x in hit])]
+
+    def v_sms(b, a, t, c):
+        asked = asked_since(c, "_asked_before_live_sms", L.model_name("sms", "sms_send"))
+        text = "纪要已发出"
+        return [truth("sms_send was attempted: its high-risk confirmation was shown", "at least one request at risk HIGH, options ALLOW_ONCE / DENY",
+                      bool(asked) and all(e.get("risk") == "HIGH" and list(e.get("options") or []) == ["ALLOW_ONCE", "DENY"] for e in asked),
+                      [{k: e.get(k) for k in ("risk", "options")} for e in asked]),
+                truth("the confirmation shows the number and the text", "%s and %s in the arguments" % (number, text),
+                      bool(asked) and all(number in (e.get("args") or "") and text in (e.get("args") or "") for e in asked), [e.get("args") for e in asked]),
+                truth("the driver declined every attempt", "answeredWith DENY", bool(asked) and all(e.get("answeredWith") == "DENY" for e in asked), [e.get("answeredWith") for e in asked]),
+                eq("nothing was sent", b["outbox_keys"], a["outbox_keys"])]
+
+    wed = {d.isoformat() for d in (next_weekday(today, 2, True), next_weekday(today, 2, False))}
+
+    def v_cross(b, a, t, c):
+        cal_b, cal_a, al_b, al_a, td_b, td_a = b["calendar"], a["calendar"], b["alarm"], a["alarm"], b["todo"], a["todo"]
+        events = [e for e in cal_a["events"] if e["id"] not in {y["id"] for y in cal_b["events"]}]
+        meeting = [e for e in events if "王总" in e["title"] + (e["description"] or "") or "评审" in e["title"]]
+        tz = datetime.fromisoformat(c.local(today, "00:00")).tzinfo
+        starts = [datetime.fromtimestamp(e["start_ms"] / 1000, tz=tz).strftime("%Y-%m-%d %H:%M") for e in meeting]
+        alarms = [x for x in al_a["alarms"] if x["id"] not in {y["id"] for y in al_b["alarms"]}]
+        at_1430 = [x for x in alarms if x["time"] == "14:30" and x["enabled"]]
+        reminded = [e for e in meeting if 30 in e["reminders"]]
+        names = ("搜索改版", "会员体系", "数据看板")
+        todos = [x for x in td_a["todos"] if x["id"] not in {y["id"] for y in td_b["todos"]} and not x["parent_id"]]
+        prds = [x for x in todos if "PRD" in x["title"].upper() or any(n in x["title"] for n in names)]
+        asked = asked_since(c, "_asked_before_cross", L.model_name("sms", "sms_send")) if "sms" in c.apps else []
+        out = [eq("one meeting event (not two)", 1, len(meeting)),
+               truth("it starts next Wednesday 15:00", "date in %s, 15:00" % sorted(wed), any(x[11:] == "15:00" and x[:10] in wed for x in starts), starts),
+               truth("'half an hour before' exists exactly once: a 14:30 alarm OR a 30 minute reminder of the event, not both, not twice",
+                     "1 entry", len(at_1430) + (1 if reminded else 0) == 1 and len(alarms) <= 1, {"alarms_14_30": len(at_1430), "new_alarms": len(alarms), "event_reminders": [e["reminders"] for e in meeting]}),
+               eq("three todos for the three PRDs (no duplicates)", 3, len(prds)),
+               truth("each has a due date within two weeks", "%s .. %s" % (today, today + timedelta(days=14)),
+                     len(prds) > 0 and all(x["due"] and today <= date.fromisoformat(x["due"][:10]) <= today + timedelta(days=14) for x in prds), [x["due"] for x in prds])]
+        if at_1430:
+            out.append(registered(al_a, at_1430[0]["id"], "14:30"))
+        if meeting and reminded:
+            out += reminder_checks(c, meeting[0]["id"], meeting[0]["start_ms"] - 30 * MINUTE_MS, 30, label="cross reminder")
+        if "sms" in c.apps:
+            sms_b, sms_a = b["sms"], a["sms"]
+            out += [truth("sms_send was attempted and its confirmation shown at risk HIGH with the number", "request at HIGH, %s in the arguments" % number,
+                          bool(asked) and all(e.get("risk") == "HIGH" and number in (e.get("args") or "") for e in asked), [{k: e.get(k) for k in ("risk", "args")} for e in asked]),
+                    # mode=allow answers the HIGH confirmation with "allow once"; what keeps the message from leaving is the app: an emulator port is a short number
+                    # and short numbers are refused (live_sms_prepare switched allow_short_numbers off). Nothing is ever sent by a live case.
+                    eq("nothing was sent (the app refuses the short number)", sms_b["outbox_keys"], sms_a["outbox_keys"])]
+        return out
+
+    plan = []
+    if "todo" in ctx.apps:
+        plan += [LiveCase("live.todo", "todo", LIVE_PROMPTS_NEXT["todo"], v_todo, preface), consent_audit_step("todo")]
+    if "sms" in ctx.apps:
+        plan += [LiveCase("live.sms", "sms", LIVE_PROMPTS_NEXT["sms"].format(number=number), v_sms, preface,
+                          pre=lambda c: (live_sms_prepare(c), mark_asked(c, "_asked_before_live_sms"), deny_pre(c)),
+                          post=lambda c: (deny_post(c), live_sms_restore(c))), consent_audit_step("sms")]
+    if {"alarm", "calendar", "todo"} <= set(ctx.apps):
+        apps = ["calendar", "alarm", "todo"] + (["sms"] if "sms" in ctx.apps else [])
+        prompt = LIVE_PROMPTS_NEXT["cross" if "sms" in apps else "cross_without_sms"].format(number=number)
+        plan += [LiveCase("live.cross", None, prompt, v_cross, preface, apps=apps,
+                          pre=lambda c: (live_sms_prepare(c) if "sms" in apps else None, mark_asked(c, "_asked_before_cross")),
+                          post=live_sms_restore if "sms" in apps else None)]
+        plan += [("audit.cross.%s" % app, "confirmation requests of %s so far (the receiver keeps the latest 50): source line, risk, options, answers" % app, cross_audit(app), apps)
+                 for app in apps]
+    return plan
 
 
 def run_live_case(case, ctx, timeout=240):
@@ -1231,18 +1371,29 @@ def run_live_case(case, ctx, timeout=240):
     t0 = time.time()
     checks, turn, error = [], None, None
     try:
-        before = ctx.state(case.sample)
+        if case.pre:
+            case.pre(ctx)
+        snap = (lambda: {a: ctx.state(a) for a in case.apps}) if case.apps else (lambda: ctx.state(case.sample))
+        before = snap()
         turn = ctx.session.prompt(case.text, timeout)
-        after = ctx.state(case.sample)
+        after = snap()
         # The model chooses its own way (it may look first: note_search before note_create, event_list before event_create, or retry after an error):
         # the verdict is the app state, not a fixed tool sequence. The sequence and the failed calls are recorded as information.
         checks.append(eq("turn ends normally", "end_turn", turn.stop_reason if not turn.timeout else "timeout"))
         checks += case.verify(before, after, turn, ctx)
     except Exception as e:  # noqa: BLE001
         error = "%s: %s" % (type(e).__name__, e)
+    finally:
+        if case.post:
+            try:
+                case.post(ctx)
+            except Exception as e:  # noqa: BLE001
+                error = (error + "; " if error else "") + "post: %s: %s" % (type(e).__name__, e)
     ok = error is None and bool(checks) and all(c.ok for c in checks)
     r = {"id": case.id, "sample": case.sample, "title": case.text, "ok": ok, "ms": round((time.time() - t0) * 1000), "error": error,
          "checks": [c.to_json() for c in checks], "turn": turn.to_json() if turn else None}
+    if case.apps:
+        r["apps"] = list(case.apps)
     if turn:
         r["toolSequence"] = [{"name": t.name, "status": t.status} for t in turn.tools]
         r["failedCalls"] = [{"name": t.name, "result": t.text[:200]} for t in turn.tools if t.status != "completed"]
