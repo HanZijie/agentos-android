@@ -14,7 +14,7 @@
 
 ## 1. 项目文件夹
 
-下面的 Kotlin 路径是简写：源码按 Gradle 标准布局，按包名展开，例如 `core/runtime/ports/AgentCore.kt` 就是 `core/runtime/src/main/kotlin/org/agentos/runtime/ports/AgentCore.kt`。各模块的包名见 README「开发」一节。
+下面的 Kotlin 路径是简写：源码按 Gradle 标准布局，按包名展开，例如 `core/runtime/ports/AgentCore.kt` 就是 `core/runtime/src/main/kotlin/org/agentos/runtime/ports/AgentCore.kt`。各模块的包名见 [development.md](development.md#模块与源码位置)。
 
 ```text
 agentos-android/
@@ -342,7 +342,7 @@ zip 里没有独立的原生二进制，不按 API 或 ABI 分别构建。Pi Age
 - [x] 目录骨架、`.gitignore`（排除 `.DS_Store`、构建产物、密钥）、`LICENSE`（MIT，与 agenriod 一致）
 - [x] Gradle 多模块：`core:runtime`、`core:extensions`、`sdk:binder-channel`、`sdk:acp-android`、`sdk:plugin-sdk`、`app`、`runner`、`plugins:samples:*`；`core/pi-runtime` 是 Node 工程，由 Gradle 任务在构建 APK 前调用它的 `build.mjs`
 - [x] `gradle/libs.versions.toml`，按第 2 节锁定版本
-- [ ] 生成项目发布证书，私钥不进仓库（**待维护者**：证书决定以后所有版本的签名身份，按 README「开发」一节生成一次；构建脚本只从环境变量读取，签名流程已用一次性证书验证）
+- [ ] 生成项目发布证书，私钥不进仓库（**待维护者**：证书决定以后所有版本的签名身份，按 [development.md](development.md#项目发布证书)生成一次；构建脚本只从环境变量读取，签名流程已用一次性证书验证）
 - [x] `.github/workflows/portable-tests.yml`（本地确认 YAML 可解析；还没在 GitHub 上实际跑过）
 
 `plugins:samples:*` 目前只有自动加入机制：`plugins/samples/<name>/` 下有 `build.gradle.kts` 就进构建，W17 加示例时不用改 settings。
