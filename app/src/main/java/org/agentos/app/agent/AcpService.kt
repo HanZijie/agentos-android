@@ -19,6 +19,8 @@ import org.agentos.channel.BinderChannel
 import org.agentos.channel.ChannelConfig
 import org.agentos.channel.IAcpService
 import org.agentos.channel.IChannel
+import org.agentos.app.agent.acp.AcpDecision
+import org.agentos.app.agent.acp.ResolvedCaller
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.OutboundGate
@@ -33,8 +35,9 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * 导出的 ACP 服务（architecture 5.2、5.3；intent action [AcpServiceContract.ACTION]），运行在 `:agent`。
  *
- * 每条通道绑定调用方 UID（`Binder.getCallingUid()`，不信任客户端自报）。M1 只接受 AgentOS App 自己；
- * 其他 UID 在 open 里抛 SecurityException，原因码 [AcpServiceContract.REASON_NOT_OPEN]。W25 放开第三方。
+ * 每条通道绑定调用方 UID（`Binder.getCallingUid()`，不信任客户端自报）。AgentOS 自己直接放行；第三方 App 要先被用户允许
+ * （docs/third-party-acp.md 4.1，[AcpAccessPolicy] + [CallerRegistry]）：open **不阻塞**，没决定时立刻抛
+ * `agentos.acp.authorization_pending`，SDK 每秒重试。拒绝原因码见 [AcpServiceContract]。
  */
 class AcpService : Service() {
     private lateinit var runtime: AgentProcess
@@ -42,11 +45,13 @@ class AcpService : Service() {
     private val binder = object : IAcpService.Stub() {
         override fun open(client: IChannel?): IChannel {
             val uid = Binder.getCallingUid()
-            AcpAccessPolicy.check(uid)?.let { reason ->
-                runtime.acp.onRejected(uid)
-                throw SecurityException(reason)
+            return when (val d = runtime.admitAcp(uid)) {
+                is AcpDecision.Reject -> {
+                    runtime.acp.onRejected(uid, d.reason)
+                    throw SecurityException(d.message)
+                }
+                is AcpDecision.Open -> runtime.acp.open(requireNotNull(client) { "client channel is null" }, uid, d.caller, d.app)
             }
-            return runtime.acp.open(requireNotNull(client) { "client channel is null" }, uid)
         }
     }
 
@@ -56,19 +61,6 @@ class AcpService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
-}
-
-/** 谁能打开 ACP 通道。返回 null 表示允许，否则返回 SecurityException 的 message。 */
-object AcpAccessPolicy {
-    fun check(callerUid: Int, myUid: Int = Process.myUid()): String? =
-        if (callerUid == myUid) {
-            null
-        } else {
-            AcpServiceContract.message(
-                AcpServiceContract.REASON_NOT_OPEN,
-                "this AgentOS version only accepts the AgentOS app itself; third-party apps are not enabled yet",
-            )
-        }
 }
 
 /**
@@ -87,30 +79,53 @@ class AcpConnections(private val process: AgentProcess) {
     private val rejected = AtomicLong()
     private val closeRecords = ConcurrentLinkedDeque<JSONObject>()
 
-    private class Conn(val id: Int, val peerUid: Int, val transport: BinderAcpTransport, val openedAt: Long)
+    private class Conn(
+        val id: Int,
+        val peerUid: Int,
+        val transport: BinderAcpTransport,
+        val openedAt: Long,
+        val caller: CallerIdentity,
+        val app: ResolvedCaller?,
+    )
 
-    fun open(client: IChannel, uid: Int): IChannel {
+    fun open(client: IChannel, uid: Int, caller: CallerIdentity, app: ResolvedCaller? = null): IChannel {
         val id = nextId.incrementAndGet()
         val name = "acp-conn-$id(uid=$uid)"
         val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + CoroutineName(name))
         val transport = BinderAcpTransport.accept(client, uid, scope, ChannelConfig.DEFAULT, name)
-        conns[id] = Conn(id, uid, transport, SystemClock.elapsedRealtime())
+        conns[id] = Conn(id, uid, transport, SystemClock.elapsedRealtime(), caller, app)
         opened.incrementAndGet()
         transport.onClose {
             onClosed(id, transport.channel.closeCauseOrNull?.toString() ?: "unknown")
             scope.cancel()
         }
-        // M1 只有本 App 能走到这里（AcpAccessPolicy），所以调用方类别是 SELF；W25 放开第三方后按 UID 解析为 APP
-        val caller = CallerIdentity(uid = uid, kind = CallerKind.SELF, label = "AgentOS")
+        // 调用方身份由 AcpAccessPolicy 按 UID 定：AgentOS 自己 SELF，已被用户允许的第三方 APP（label = App 名）。
+        // 绝不能把第三方建成 SELF：SELF 能看到所有会话
         process.runtime.serveAcp(transport, caller, OutboundGate { transport.awaitWritable(OutboundGate.BINDER_HIGH_WATER_CHARS) })
-        Log.i(TAG, "opened $name")
+        Log.i(TAG, "opened $name kind=${caller.kind}")
         return transport.channel.binder
     }
 
-    fun onRejected(uid: Int) {
+    fun onRejected(uid: Int, reason: String) {
         rejected.incrementAndGet()
-        Log.i(TAG, "rejected ACP open from uid $uid (not open)")
+        Log.i(TAG, "rejected ACP open from uid $uid: ${reason.removePrefix(AcpServiceContract.REASON_PREFIX)}")
     }
+
+    /** 这个 App（包名 + 签名摘要）现在开着的通道数。 */
+    fun channelsOf(packageName: String): Int = conns.values.count { it.app?.packageName == packageName }
+
+    /**
+     * 撤销：关掉这个 App 现有的全部通道（包名相同、签名摘要相同或不限）。关通道不会取消任务（F7），任务由 [AgentProcess.cancelTasksOf] 取消。
+     * 返回关掉的通道数。
+     */
+    fun closeFor(packageName: String, signingDigest: String?, reason: String): Int {
+        val victims = conns.values.filter { it.app?.packageName == packageName && (signingDigest == null || it.app.signingDigest == signingDigest) }
+        for (c in victims) c.transport.channel.close(reason)
+        return victims.size
+    }
+
+    /** 这个 App 开着的通道里的调用方身份（取消任务用）。 */
+    fun callersOf(packageName: String): List<CallerIdentity> = conns.values.filter { it.app?.packageName == packageName }.map { it.caller }.distinct()
 
     private fun onClosed(id: Int, cause: String) {
         val c = conns.remove(id) ?: return
@@ -126,7 +141,12 @@ class AcpConnections(private val process: AgentProcess) {
 
     fun stats(): JSONObject {
         val open = JSONArray()
-        for (c in conns.values) open.put(JSONObject().put("id", c.id).put("peerUid", c.peerUid).put("transport", c.transport.stats()))
+        for (c in conns.values) {
+            open.put(
+                JSONObject().put("id", c.id).put("peerUid", c.peerUid).put("kind", c.caller.kind.name)
+                    .put("package", c.app?.packageName ?: JSONObject.NULL).put("transport", c.transport.stats())
+            )
+        }
         val rs = process.runtime.runState.value
         val transportScopes = parent.coroutineContext[Job]?.children?.count() ?: -1
         return JSONObject()
@@ -135,6 +155,7 @@ class AcpConnections(private val process: AgentProcess) {
             .put("connectionsOpened", opened.get())
             .put("connectionsClosed", closed.get())
             .put("rejectedOpens", rejected.get())
+            .put("thirdPartyChannels", conns.values.count { it.caller.kind == CallerKind.APP })
             .put("liveChannels", BinderChannel.liveChannels)
             // 还没释放的传输作用域（宿主层的 ACP 连接随传输关闭，见 AgentRuntime.serveAcp）
             .put("hostJobChildren", transportScopes)

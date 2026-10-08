@@ -46,6 +46,16 @@
             android:permission="android.permission.DUMP"
             android:process=":agent" />
 
+        <!--
+          lane C（C8）：第三方 App 授权的测试入口（allow / deny / revoke / remove / list / answer / clear / config）。设备用例用它代替用户在
+          AgentOS 里点按钮（真机只用 adb）。要求 DUMP；运行在 :agent（CallerRegistry 在那里）。
+        -->
+        <receiver
+            android:name=".agent.AcpCallerDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":agent" />
+
     </application>
 
 </manifest>

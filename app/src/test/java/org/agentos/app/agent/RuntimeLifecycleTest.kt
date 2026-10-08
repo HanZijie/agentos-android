@@ -268,13 +268,6 @@ class RuntimeLifecycleTest {
         assertFalse(RecoveryPolicy.userStopped(null))
     }
 
-    @Test
-    fun acpAccessPolicy_onlySelf() {
-        assertNull(AcpAccessPolicy.check(callerUid = 10123, myUid = 10123))
-        val reason = AcpAccessPolicy.check(callerUid = 10200, myUid = 10123)!!
-        assertTrue(reason.startsWith("agentos.acp.not_open:"))
-    }
-
     // ------------------------------------------------------------------ 空闲宽限期（规则 5）
 
     private class ClockPort : RuntimeLifecycle.Port {
