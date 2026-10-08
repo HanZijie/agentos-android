@@ -32,6 +32,13 @@ class PanelRulesTest {
         assertFalse(PanelRules.errorActions(AgentOsError.DENIED, false, true, true).retryToo)
     }
 
+    @Test fun `an authorization timeout is a refusal with a cooldown, so it sends you to AgentOS and does not offer a retry`() {
+        val a = PanelRules.errorActions(AgentOsError.AUTHORIZATION_PENDING_TIMEOUT, false, true, agentOsInstalled = true)
+        assertEquals(Primary.OPEN_AGENTOS, a.primary)
+        assertFalse(a.retryToo)
+        assertEquals("without AgentOS installed there is nothing to open", Primary.NONE, PanelRules.errorActions(AgentOsError.AUTHORIZATION_PENDING_TIMEOUT, false, true, agentOsInstalled = false).primary)
+    }
+
     @Test fun `not installed offers to learn more and never retry`() {
         val a = PanelRules.errorActions(AgentOsError.NOT_INSTALLED, false, true, agentOsInstalled = false)
         assertEquals(Primary.LEARN_MORE, a.primary)
@@ -40,7 +47,7 @@ class PanelRulesTest {
 
     @Test fun `too large cannot be retried, the others can`() {
         assertEquals(Primary.NONE, PanelRules.errorActions(AgentOsError.TOO_LARGE, false, true, true).primary)
-        for (e in listOf(AgentOsError.BUSY, AgentOsError.RATE_LIMITED, AgentOsError.DISCONNECTED, AgentOsError.FAILED, AgentOsError.AUTHORIZATION_PENDING_TIMEOUT)) {
+        for (e in listOf(AgentOsError.BUSY, AgentOsError.RATE_LIMITED, AgentOsError.DISCONNECTED, AgentOsError.FAILED)) {
             assertEquals(e.name, Primary.RETRY, PanelRules.errorActions(e, false, true, true).primary)
         }
     }
