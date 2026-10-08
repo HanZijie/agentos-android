@@ -1,6 +1,6 @@
 # AgentOS for Android
 
-**让 App 既能调用 Agent，也能为 Agent 提供能力。**
+**让 App 既能调用 Agent，也能为 Agent 提供能力。Agent 可以是一种入口，也可以是一种基础的系统服务。**
 
 AgentOS 是一个 Android Agent 服务原型，探索如何让多个 App 共用同一套 Agent 运行时，而不必各自内置完整的 Agent。
 
