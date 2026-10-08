@@ -3,10 +3,11 @@ package org.agentos.runtime.store
 /**
  * Store 的 schema。Android（AndroidStore / SQLiteDriver）与电脑测试共用这一份；版本记在 `PRAGMA user_version`。
  *
- * 迁移只向前（W12 起加 Migrations.kt：迁移前备份，失败回滚并停在 safe mode）。v1 是第一版，v2 给会话加 toolScope 列，v3 给任务加调用方包名列。
+ * 迁移只向前（W12 起加 Migrations.kt：迁移前备份，失败回滚并停在 safe mode）。v1 是第一版，v2 给会话加 toolScope 列，v3 给任务加调用方包名列，
+ * v4 给会话加 model_id、mode 两列（会话级模型与模式）。
  */
 internal object Schema {
-    const val VERSION = 3
+    const val VERSION = 4
 
     /** v1：会话、事件、任务、工具调用、各会话的 Pi messages。 */
     val V1 = """
@@ -101,6 +102,14 @@ internal object Schema {
      */
     const val V3 = "ALTER TABLE tasks ADD COLUMN caller_package TEXT"
 
+    /**
+     * v4: per-session model and mode (ACP `session/set_model`, `session/set_mode`, config options). `model_id` is a [org.agentos.runtime.ports.ModelChoice.id]
+     * (NULL = follow the model the user picked in settings); `mode` is a [org.agentos.runtime.store.SessionMode] wire name (NULL = `default`).
+     * Both can change while the session lives; the next task of the session uses the new value, a running task keeps the old one.
+     */
+    const val V4_MODEL = "ALTER TABLE sessions ADD COLUMN model_id TEXT"
+    const val V4_MODE = "ALTER TABLE sessions ADD COLUMN mode TEXT"
+
     fun migrate(db: DbScope, now: Long) {
         val version = db.queryOne("PRAGMA user_version") { it.int(0) } ?: 0
         check(version <= VERSION) { "store schema $version is newer than this runtime ($VERSION)" }
@@ -119,6 +128,11 @@ internal object Schema {
         if (version < 3) {
             db.exec(V3)
             db.exec("PRAGMA user_version = 3")
+        }
+        if (version < 4) {
+            db.exec(V4_MODEL)
+            db.exec(V4_MODE)
+            db.exec("PRAGMA user_version = 4")
         }
     }
 }

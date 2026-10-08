@@ -93,9 +93,9 @@ class ThirdPartyAcpTest {
     }
 
     @Test
-    fun `session load is not offered, so a scope cannot be changed by loading a session`() = test { pair, _ ->
+    fun `session load is offered, and loading cannot change the scope (see SessionLifecycleAcpTest)`() = test { pair, _ ->
         val info = pair.initialize()
-        assertEquals(false, info.capabilities.loadSession)
+        assertEquals(true, info.capabilities.loadSession)
     }
 
     @Test

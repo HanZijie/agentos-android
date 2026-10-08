@@ -21,8 +21,9 @@
 | 提交输入 | `session/prompt` | ACP v1：本轮结束才返回 `stopReason`（第 5 节）。输入在开始运行前已经持久化 |
 | 取消任务 | `session/cancel` | 取消会话里所有未结束的任务（第 6 节） |
 | 新建会话 | `session/new` | 自动选会话扩展见 session-selection.md |
-| 取回历史、断线续读 | `session/load`、增量恢复扩展 | M2（W10） |
-| 关闭会话 | `session/close` | 暂不启用 |
+| 取回会话和历史 | `session/load`、`session/resume` | 已实现（acp-mapping.md 4a）；归属按 `ownerKey`，别人的会话一律 `session_not_found` |
+| 断线续读（按事件游标补发） | 增量恢复扩展 | M2（W10） |
+| 列出、分叉、删除、关闭会话 | `session/list`、`session/fork`、`session/delete`、`session/close` | 已实现（acp-mapping.md 4a） |
 
 ## 2. 会话状态
 

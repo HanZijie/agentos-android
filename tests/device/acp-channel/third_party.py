@@ -22,6 +22,12 @@
   spoofed-name           clientInfo 里冒充别的 App 的包名没有用：注册表里只有真实的包名；工具确认卡的发起者一行和 callerPackage 是真实包名
   list-shape             listAcpCallers / AcpCallerDebugReceiver list 每项的键固定
   settings-actions       setAcpCaller 的 allowed / denied / removed、answerAuthorization 与 list 一致
+  live                   （--live）真实模型下的会话级模型选择：可选模型、setModel 后照常回答、load 看到切换后的模型
+  sessions               会话的完整生命周期，经真实的 Binder 和真实的 AgentOS（client 的 tp-sessions 场景）：新建、两轮、会话 ID、列表（带标题）、
+                         另一条连接 load（历史完整、按序、之后能继续）、resume（不重放）、fork（新会话，带着已结束的几轮）、模式（只读 / 聊天 / 回默认，
+                         load 能看到）、模型（自定义端点没有可选的，setModel 是 UNSUPPORTED）、自带 MCP 服务器（http、回环、云元数据、私网、userinfo、
+                         CRLF 头、禁用头整批被拒绝且不留会话；合规但连不上的会话照常建立、状态里说明哪一个）、close 保留会话、delete 之后和从没有过一样
+                         都是 SESSION_NOT_FOUND
 
 用法：
   ./gradlew --max-workers=2 :app:assembleDebug :tests:device:acp-channel:client:assembleDebug -Pagentos.skipPiBundle=true
@@ -65,6 +71,7 @@ class Ctx:
         self.adb = adb
         self.args = args
         self.fm = None
+        self.held = False
 
     # ---------------------------------------------------------------- 调试入口
 
@@ -161,10 +168,16 @@ class Ctx:
     def hold_agent(self):
         """:agent 留在前台服务（电脑端接入打开，C6），否则后台广播里 :agent 起不了前台服务、进程被冻结。"""
         r = acp.run_one(self.adb, "hold-agent", INAPP_ACTIVITY, "desktop-access", {"on": True}, 60)
+        self.held = True
         self.adb.sh("input keyevent KEYCODE_HOME", check=False)
         return bool(r and r.get("ok"))
 
     def release_agent(self):
+        # the in-app runner resets the model source to the fake endpoint for every scenario not named live-/byok- (ensureTestModel),
+        # so only release when something actually held the agent: a --live run must leave the phone's real model source alone
+        if not self.held:
+            return
+        self.held = False
         acp.run_one(self.adb, "release-agent", INAPP_ACTIVITY, "desktop-access", {"on": False}, 60)
 
     def channels(self):
@@ -622,6 +635,45 @@ SHARED_UID = "org.agentos.test.acp.shared"
 SHARED_ACTIVITY = SHARED_A + "/org.agentos.test.acp.client.ScenarioActivity"
 
 
+def case_sessions(c):
+    c.hold_agent()
+    c.ensure_fake_model()
+    c.reset()
+    c.caller("allow", pkg=CLIENT_PKG)
+    args = {}
+    if c.args.real_mcp:
+        args["realMcpUrl"] = c.args.real_mcp
+        c.consent("mode", mode="allow")  # the scripted model calls the real server's tool; that call needs a confirmation
+    try:
+        r = c.scenario("tp-sessions", args, timeout=480) or {}
+    finally:
+        if c.args.real_mcp:
+            c.consent("mode", mode="off")
+    checks = dict(r.get("checks") or {})
+    if not checks:
+        checks["scenarioReturned"] = False
+    checks["scenarioOk"] = r.get("ok") is True
+    # AgentOS 里不留下这个 App 的 MCP 服务器的 URL 和头（只在内存里）：整个 logcat 里搜不到测试用的令牌
+    log = c.adb.run("logcat", "-d", "-b", "all", check=False)
+    log_text = log if isinstance(log, str) else getattr(log, "stdout", "") or ""
+    checks["tokenNotInLogcat"] = "SECRET-DEVICE-TOKEN" not in log_text
+    checks["hostNotInAgentLog"] = "no-such-host.invalid" not in "\n".join(l for l in log_text.splitlines() if "AgentOS" in l)
+    return verdict(checks, f"notes={json.dumps(r.get('notes') or {}, ensure_ascii=False)[:300]}", scenario=r)
+
+
+def case_live(c):
+    """Real model: runs only with --live, after the phone's model source is the real vendor preset (configure_real_keys.py)."""
+    if not c.args.live:
+        return {"ok": True, "summary": "skipped (needs --live and a real vendor preset on the phone)"}
+    # no hold_agent here: it runs an in-app scenario, and those reset the model source to the fake endpoint (ensureTestModel).
+    # The test client is in the foreground and bound to the ACP service, which keeps :agent from being frozen.
+    c.caller("allow", pkg=CLIENT_PKG)
+    r = c.scenario("tp-live", {}, timeout=420) or {}
+    checks = dict(r.get("checks") or {}) or {"scenarioReturned": False}
+    checks["scenarioOk"] = r.get("ok") is True
+    return verdict(checks, f"notes={json.dumps(r.get('notes') or {}, ensure_ascii=False)[:300]}", scenario=r)
+
+
 def build_tools():
     root = os.path.expanduser("~/Library/Android/sdk/build-tools")
     if not os.path.isdir(root):
@@ -695,7 +747,7 @@ CASES = [
     ("denied-cooldown", case_denied_cooldown), ("pending-timeout", case_pending_timeout), ("abandon", case_abandon),
     ("revoke-closes", case_revoke_closes), ("revoke-after-detach", case_revoke_after_detach), ("spoofed-name", case_spoofed_name), ("list-shape", case_list_shape),
     ("catalog-tools", case_catalog_tools),
-    ("settings-actions", case_settings_actions), ("shared-uid", case_shared_uid), ("signature-changed", case_signature_changed),
+    ("settings-actions", case_settings_actions), ("sessions", case_sessions), ("live", case_live), ("shared-uid", case_shared_uid), ("signature-changed", case_signature_changed),
 ]
 
 
@@ -708,6 +760,8 @@ def main():
     ap.add_argument("--no-clear", action="store_true")
     ap.add_argument("--skip-resign", action="store_true")
     ap.add_argument("--skip-shared-uid", action="store_true")
+    ap.add_argument("--real-mcp", default="", help="sessions: also attach this public Streamable HTTP MCP server and call one of its tools")
+    ap.add_argument("--live", action="store_true", help="run the live case (real model already configured on the phone; does not change it)")
     a = ap.parse_args()
     if not a.serial:
         sys.exit("need --serial or ANDROID_SERIAL")

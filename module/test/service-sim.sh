@@ -219,9 +219,18 @@ setup() { # name, then scenario variables as KEY=VALUE
 }
 
 run() {
+    # BusyBox ash has a builtin `sleep` (Ubuntu's busybox 1.36: "sleep is a shell builtin"), and builtins win
+    # over PATH. The shim in $SIM/bin/sleep would never run, the virtual clock would never advance and
+    # service.sh would really sleep until the 240 s watchdog below kills it. A shell function wins over
+    # builtins in every shell, so route `sleep` to the shim explicitly. The shim is still an external process,
+    # so its $PPID is the same shell that a PATH lookup would have forked it from.
+    cat >"$SIM/run-service.sh" <<'EOF'
+sleep() { "$SIM/bin/sleep" "$@"; }
+. "$SIM/mod/service.sh"
+EOF
     # $SIM_SHELL unquoted on purpose: may be "busybox sh" (CI runs dash, bash --posix and busybox ash)
-    PATH="$SIM/bin:$PATH" AGENTOS_PROCFS="$SIM/proc" AGENTOS_DATA="$SIM/data" AGENTOS_TMPDIR="$SIM/tmp" \
-        $SIM_SHELL "$SIM/mod/service.sh" >"$SIM/stdout" 2>&1 &
+    PATH="$SIM/bin:$PATH" AGENTOS_MODDIR="$SIM/mod" AGENTOS_PROCFS="$SIM/proc" AGENTOS_DATA="$SIM/data" \
+        AGENTOS_TMPDIR="$SIM/tmp" $SIM_SHELL "$SIM/run-service.sh" >"$SIM/stdout" 2>&1 &
     _sp=$!
     (sleep 240 && kill -9 $_sp 2>/dev/null) &
     _wd=$!

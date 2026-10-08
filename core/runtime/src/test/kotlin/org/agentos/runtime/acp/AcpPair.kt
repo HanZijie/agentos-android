@@ -13,6 +13,8 @@ import com.agentclientprotocol.model.McpServer
 import com.agentclientprotocol.model.PermissionOption
 import com.agentclientprotocol.model.RequestPermissionOutcome
 import com.agentclientprotocol.model.RequestPermissionResponse
+import com.agentclientprotocol.model.SessionId
+import com.agentclientprotocol.model.SessionInfo
 import com.agentclientprotocol.model.SessionUpdate
 import com.agentclientprotocol.protocol.Protocol
 import com.agentclientprotocol.transport.StdioTransport
@@ -76,20 +78,45 @@ class AcpPair(
         },
     )
 
-    suspend fun newSession(meta: JsonObject? = null, mcpServers: List<McpServer> = emptyList()): ClientSession =
-        client.newSession(SessionCreationParameters("/sdcard", mcpServers, _meta = meta)) { _, _ ->
-            object : ClientSessionOperations {
-                override suspend fun requestPermissions(
-                    toolCall: SessionUpdate.ToolCallUpdate,
-                    permissions: List<PermissionOption>,
-                    _meta: JsonElement?,
-                ): RequestPermissionResponse = RequestPermissionResponse(RequestPermissionOutcome.Cancelled)
+    private val recordingOperations = object : ClientSessionOperations {
+        override suspend fun requestPermissions(
+            toolCall: SessionUpdate.ToolCallUpdate,
+            permissions: List<PermissionOption>,
+            _meta: JsonElement?,
+        ): RequestPermissionResponse = RequestPermissionResponse(RequestPermissionOutcome.Cancelled)
 
-                override suspend fun notify(notification: SessionUpdate, _meta: JsonElement?) {
-                    stray += notification to _meta
-                }
-            }
+        override suspend fun notify(notification: SessionUpdate, _meta: JsonElement?) {
+            stray += notification to _meta
         }
+    }
+
+    suspend fun newSession(meta: JsonObject? = null, mcpServers: List<McpServer> = emptyList()): ClientSession =
+        client.newSession(SessionCreationParameters("/sdcard", mcpServers, _meta = meta)) { _, _ -> recordingOperations }
+
+    /** `session/load`：重放的历史在 load 返回之前就进了 [strayUpdates]。 */
+    suspend fun loadSession(id: String, meta: JsonObject? = null, mcpServers: List<McpServer> = emptyList()): ClientSession =
+        client.loadSession(SessionId(id), SessionCreationParameters("/sdcard", mcpServers, _meta = meta)) { _, _ -> recordingOperations }
+
+    suspend fun resumeSession(id: String, meta: JsonObject? = null, mcpServers: List<McpServer> = emptyList()): ClientSession =
+        client.resumeSession(SessionId(id), SessionCreationParameters("/sdcard", mcpServers, _meta = meta)) { _, _ -> recordingOperations }
+
+    suspend fun forkSession(id: String, meta: JsonObject? = null, mcpServers: List<McpServer> = emptyList()): ClientSession =
+        client.forkSession(SessionId(id), SessionCreationParameters("/sdcard", mcpServers, _meta = meta)) { _, _ -> recordingOperations }
+
+    suspend fun listSessions(cwd: String? = null): List<SessionInfo> = client.listSessions(cwd, null, null).toList()
+
+    /** 不属于任何一轮 prompt 的通知（重放、会话信息更新…）里的更新，按到达顺序。 */
+    fun strayUpdates(): List<SessionUpdate> = synchronized(stray) { stray.map { it.first } }
+
+    /** Agent 发出的每条 session_info_update 的 `_meta."org.agentos"` 对象，按发出顺序。 */
+    fun infoMetas(): List<JsonObject> = synchronized(agentLines) {
+        agentLines.mapNotNull { line ->
+            val o = kotlinx.serialization.json.Json.parseToJsonElement(line) as JsonObject
+            val update = ((o["params"] as? JsonObject)?.get("update") as? JsonObject) ?: return@mapNotNull null
+            if ((update["sessionUpdate"] as? kotlinx.serialization.json.JsonPrimitive)?.content != "session_info_update") return@mapNotNull null
+            (update["_meta"] as? JsonObject)?.get(ProfileExtensions.META_KEY) as? JsonObject
+        }
+    }
 
     /** 发一轮 prompt，收集全部事件。 */
     suspend fun prompt(session: ClientSession, text: String): List<Event> =

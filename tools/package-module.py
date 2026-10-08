@@ -18,8 +18,8 @@ Steps (docs/implementation-plan.md W7, section 2):
   5. Deterministic zip (sorted entries, fixed timestamps from SOURCE_DATE_EPOCH or the HEAD commit),
      plus <zip>.sha256 and build-info.json.
 
-Signing: release APKs are signed by Gradle from AGENTOS_SIGNING_* environment variables (README
-"开发"). An unsigned APK cannot be installed by `pm`, so it is refused unless --allow-unsigned (CI offline
+Signing: release APKs are signed by Gradle from AGENTOS_SIGNING_* environment variables (docs/development.md
+"项目发布证书"). An unsigned APK cannot be installed by `pm`, so it is refused unless --allow-unsigned (CI offline
 checks only; the zip is then named *-unsigned.zip). Secrets are never read or printed here.
 """
 
@@ -390,7 +390,7 @@ def stage(version: str, version_code: str, apks: list[tuple[str, Path]], allow_u
         cert = apk_cert_sha256(apk)
         if cert is None and not allow_unsigned:
             raise PackagingError(f"{apk} is not signed; pm cannot install it. Set AGENTOS_SIGNING_* "
-                                 "(README 开发) or use --variant debug; --allow-unsigned only for offline checks")
+                                 "(docs/development.md) or use --variant debug; --allow-unsigned only for offline checks")
         rel = f"app/AgentOS-{version}.apk" if kind == "app" else f"app/AgentOS-Runner-{version}.apk"
         data = apk.read_bytes()
         entries[rel] = data

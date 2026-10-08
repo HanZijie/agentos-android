@@ -66,8 +66,45 @@ class EventLog internal constructor(
     fun readTask(sessionId: String, taskId: String): List<EventEnvelope> =
         read(sessionId, 0, Int.MAX_VALUE).filter { it.taskId == taskId }
 
+    /**
+     * 分叉用（`session/fork`）：把 [fromSession] 里属于 [taskIds] 的事件按原顺序拷到 [toSession]，sequence 重新从 [toSession] 的末尾接着编，
+     * 时间戳保持原样。确认（`consent.*`）和 Hook（`hook.*`）事件不拷：它们记的是当时的一次授权，不属于对话内容，也不该因为分叉被带到新会话里。
+     * 返回拷了多少条。
+     */
+    fun copyTasks(fromSession: String, toSession: String, taskIds: Set<String>): Int {
+        if (taskIds.isEmpty()) return 0
+        var copied = 0
+        var cursor = 0L
+        var sequence = lastSequence(toSession)
+        while (true) {
+            val batch = read(fromSession, cursor, COPY_BATCH)
+            if (batch.isEmpty()) break
+            for (e in batch) {
+                cursor = e.sequence
+                if (e.taskId !in taskIds) continue
+                if (e.eventType.startsWith("consent.") || e.eventType.startsWith("hook.")) continue
+                sequence++
+                db.exec(
+                    "INSERT INTO events (session_id, sequence, task_id, event_type, timestamp, payload, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    toSession, sequence, e.taskId, e.eventType, e.timestamp, e.payload.toString(),
+                    e.error?.let { RuntimeJson.encodeToString(ErrorInfo.serializer(), it) },
+                )
+                copied++
+            }
+        }
+        if (copied > 0) {
+            db.exec("UPDATE sessions SET last_sequence = ? WHERE id = ?", sequence, toSession)
+            onAppend(toSession, sequence)
+        }
+        return copied
+    }
+
     fun lastSequence(sessionId: String): Long =
         db.queryOne("SELECT last_sequence FROM sessions WHERE id = ?", sessionId) { it.long(0) } ?: 0
+
+    private companion object {
+        const val COPY_BATCH = 500
+    }
 
     /** 某个任务最近一次 [eventType] 事件的时间（毫秒）；没有时 null。走 events_task_idx。 */
     fun lastTimestamp(taskId: String, eventType: String): Long? =

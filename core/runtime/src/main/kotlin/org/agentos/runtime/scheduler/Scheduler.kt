@@ -21,6 +21,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.agentos.runtime.Ids
 import org.agentos.runtime.broker.CapabilityBroker
+import org.agentos.runtime.broker.SessionToolView
 import org.agentos.runtime.errors.AgentOsException
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.errors.ErrorInfo
@@ -33,9 +34,12 @@ import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.FinishReason
 import org.agentos.runtime.ports.HostPort
+import org.agentos.runtime.ports.ModelSpec
 import org.agentos.runtime.ports.ToolScope
 import org.agentos.runtime.ports.TurnOutcome
 import org.agentos.runtime.ports.warn
+import org.agentos.runtime.store.SessionMode
+import org.agentos.runtime.store.SessionRecord
 import org.agentos.runtime.store.SessionState
 import org.agentos.runtime.store.Store
 import org.agentos.runtime.store.StoreTx
@@ -258,13 +262,16 @@ internal class Scheduler(
     }
 
     private suspend fun startNext(sessionId: String, ownerKey: String) {
-        val model = host.models.activeModel.value
+        val active = host.models.activeModel.value
+        var model: ModelSpec? = null
         val started = store.write { tx ->
             val t = tx.tasks.nextQueued(sessionId)
             if (t == null) {
                 changeState(tx, sessionId, SessionState.CREATED, "queue_empty")
                 return@write null
             }
+            // 会话选的模型（session/set_model）优先；没有 key（active 为 null）时和以前一样，任务以 model_not_configured 失败
+            model = modelFor(tx.sessions.get(sessionId), active)
             if (model == null) {
                 failTask(tx, t, ErrorCode.MODEL_NOT_CONFIGURED.info("No model is configured. Choose a model and enter its key in AgentOS settings."), "not_started")
                 afterTask(tx, sessionId)
@@ -286,6 +293,20 @@ internal class Scheduler(
         refreshCounts()
     }
 
+    /**
+     * 这个会话下一轮用的模型：会话选了一个 [SessionRecord.modelId] 且它还在 `HostPort.models.choices` 里就用它，
+     * 否则（没选、或这个模型现在不可选了，例如用户换了厂商）用 [active]。[active] 为 null（没有可用的 key）时一律 null：
+     * 会话级模型只是在**同一个 key 下**换模型，不能绕过“没配置”。
+     * 思考档位：选中的模型支持推理（`reasoning`）时沿用用户的设置，否则关闭。
+     */
+    private fun modelFor(session: SessionRecord?, active: ModelSpec?): ModelSpec? {
+        if (active == null) return null
+        val id = session?.modelId ?: return active
+        val choice = host.models.choices.value.firstOrNull { it.id == id } ?: return active
+        val reasoning = (choice.spec.model["reasoning"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+        return choice.spec.copy(thinkingLevel = if (reasoning) active.thinkingLevel else "off")
+    }
+
     private fun launchRunner(task: TaskRecord, ownerKey: String, model: org.agentos.runtime.ports.ModelSpec) {
         val caller = CallerIdentity(task.callerUid, task.callerKind, task.callerLabel, task.callerPackage)
         val entry = Running(task.id, ownerKey, task.executionDeadline)
@@ -294,10 +315,11 @@ internal class Scheduler(
             val outcome: TurnOutcome = try {
                 // 工具目录和 Skill 目录在这里（任务开始时）取一次：目录之后变了，进行中的任务不受影响，下一个任务用新的
                 prepareTools()
-                val scope = sessionToolScope(task)
-                val sessionConfig = AgentSessionConfig(model, systemPrompt(scope), broker.declarations(scope), config.maxToolRounds)
+                prepareSessionTools(task.sessionId)
+                val (scope, view) = sessionToolScope(task)
+                val sessionConfig = AgentSessionConfig(model, systemPrompt(scope), broker.declarations(scope, view), config.maxToolRounds)
                 val coreSession = cores.acquire(task.sessionId, sessionConfig)
-                val runner = TaskRunner(task.sessionId, task.id, ownerKey, caller, scope, coreSession, broker, store, config)
+                val runner = TaskRunner(task.sessionId, task.id, ownerKey, caller, scope, view, coreSession, broker, store, config)
                 entry.runner = runner
                 if (entry.fenced) runner.fence()
                 if (entry.cancelReason == null) cancelledBeforeStart(task)?.let { entry.cancelReason = it }
@@ -327,14 +349,30 @@ internal class Scheduler(
         }
     }
 
+    /** 会话级工具（调用方自带的 MCP 服务器）掉线了就在任务开始前重连一次；和 [prepareTools] 一样，失败不影响任务开始。 */
+    private suspend fun prepareSessionTools(sessionId: String) {
+        val timeout = config.toolPrepareTimeoutMillis
+        if (timeout <= 0) return
+        try {
+            withTimeoutOrNull(timeout) { host.sessionTools.prepare(sessionId, timeout) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            host.log.warn(TAG, "session tool preparation failed: ${e.javaClass.simpleName}")
+        }
+    }
+
     /**
      * 这个任务所在会话的工具范围（docs/third-party-acp.md 4.5）：会话创建时定下，之后不会变；没带 = [ToolScope.ALL]，对所有调用方一样。
      * 调用方策略（4.4，默认放开）可以再收窄：会话是谁建的、这个任务是谁提的，两个身份各过一遍。会话读不到时按“没有任何工具”处理（宁可少给）。
      */
-    private suspend fun sessionToolScope(task: TaskRecord): ToolScope {
-        val session = store.read { it.sessions.get(task.sessionId) } ?: return ToolScope.NONE
+    private suspend fun sessionToolScope(task: TaskRecord): Pair<ToolScope, SessionToolView> {
+        val session = store.read { it.sessions.get(task.sessionId) } ?: return ToolScope.NONE to SessionToolView(task.sessionId, SessionMode.CHAT)
         val creator = CallerIdentity(session.callerUid, session.callerKind)
-        return broker.scopeFor(CallerIdentity(task.callerUid, task.callerKind, task.callerLabel, task.callerPackage), broker.scopeFor(creator, session.scope))
+        val scope = broker.scopeFor(CallerIdentity(task.callerUid, task.callerKind, task.callerLabel, task.callerPackage), broker.scopeFor(creator, session.scope))
+        // 会话模式（session/set_mode）只在范围之上再收一层；聊天模式没有任何工具，也不写 Skill 目录
+        val view = SessionToolView(task.sessionId, session.mode)
+        return (if (session.mode == SessionMode.CHAT) ToolScope.NONE else scope) to view
     }
 
     /**

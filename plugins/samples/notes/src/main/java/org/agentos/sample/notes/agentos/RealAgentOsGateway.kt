@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import org.agentos.acp.AgentOs
 import org.agentos.acp.AgentOsConnection
 import org.agentos.acp.AgentOsEvent as SdkEvent
@@ -38,7 +39,7 @@ class RealAgentOsGateway(context: Context) : AgentOsGateway {
 
     override fun prompt(text: String): Flow<GatewayEvent> = flow {
         val s = session ?: throw AgentOsException(AgentOsError.DISCONNECTED, "no session")
-        emitAll(s.prompt(text).map(SdkMapping::fromSdk))
+        emitAll(s.prompt(text).mapNotNull(SdkMapping::fromSdk))
     }.catch { e ->
         // 只捕获上游（SDK 这一侧）；取消不会进到这里
         throw when (e) {
@@ -114,6 +115,12 @@ internal object SdkMapping {
         org.agentos.acp.AgentOsError.TOO_LARGE -> AgentOsError.TOO_LARGE
         org.agentos.acp.AgentOsError.DISCONNECTED -> AgentOsError.DISCONNECTED
         org.agentos.acp.AgentOsError.FAILED -> AgentOsError.FAILED
+        // 这个 App 只用 newSession(toolScope) 和 prompt：不带 MCP 服务器、不回到旧会话、不换模式和模型。这三种只会来自请求本身的
+        // 问题或旧版本的 AgentOS，对用户来说就是“失败了”，界面不单独写文案
+        org.agentos.acp.AgentOsError.SESSION_NOT_FOUND,
+        org.agentos.acp.AgentOsError.INVALID_REQUEST,
+        org.agentos.acp.AgentOsError.UNSUPPORTED,
+        -> AgentOsError.FAILED
     }
 
     /** SDK 异常的 message 只用于日志（SDK 保证不含用户文字），照搬给 detail 没问题。 */
@@ -121,7 +128,8 @@ internal object SdkMapping {
 
     fun fromSdk(ref: org.agentos.acp.ToolRef): ToolRef = ToolRef(ref.plugin, ref.tool)
 
-    fun fromSdk(event: SdkEvent): GatewayEvent = when (event) {
+    /** 思考和历史里的用户消息只在调用方要求时才有（这个 App 都没要）；万一来了就跳过（null），不当作文字。 */
+    fun fromSdk(event: SdkEvent): GatewayEvent? = when (event) {
         is SdkEvent.Text -> GatewayEvent.Text(event.chunk)
         is SdkEvent.ToolCall -> GatewayEvent.ToolCall(
             id = event.id,
@@ -132,6 +140,7 @@ internal object SdkMapping {
             ref = event.ref?.let(::fromSdk),
         )
         is SdkEvent.Done -> GatewayEvent.Done(event.stopReason)
+        is SdkEvent.Thought, is SdkEvent.UserMessage -> null
     }
 
     fun notImplemented(e: NotImplementedError): AgentOsException =

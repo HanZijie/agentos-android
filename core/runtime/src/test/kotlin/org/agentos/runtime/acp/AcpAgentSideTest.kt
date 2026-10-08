@@ -89,10 +89,11 @@ class AcpAgentSideTest {
     fun `initialize declares ACP v1, the capabilities and the AgentOS profile`() = test { pair ->
         val info = pair.initialize()
         assertEquals(1, info.protocolVersion)
-        assertEquals(false, info.capabilities.loadSession)
+        assertEquals(true, info.capabilities.loadSession)
         assertEquals(true, info.capabilities.promptCapabilities.embeddedContext)
         assertEquals(false, info.capabilities.promptCapabilities.image)
-        assertEquals(false, info.capabilities.mcpCapabilities.http)
+        assertEquals(true, info.capabilities.mcpCapabilities.http, "the test host has session tools")
+        assertEquals(false, info.capabilities.mcpCapabilities.sse)
         assertEquals("agentos", info.implementation?.name)
         val meta = info._meta!!.jsonObject[ProfileExtensions.META_KEY]!!.jsonObject
         assertEquals(1, meta["profile"]!!.jsonPrimitive.content.toInt())

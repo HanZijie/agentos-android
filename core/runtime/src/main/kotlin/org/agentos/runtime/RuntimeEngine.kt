@@ -34,7 +34,12 @@ import org.agentos.runtime.ports.AgentCoreFactory
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.HostPort
+import org.agentos.runtime.ports.ModelChoice
 import org.agentos.runtime.ports.OutboundGate
+import org.agentos.runtime.ports.SessionMcpResult
+import org.agentos.runtime.ports.SessionMcpServer
+import org.agentos.runtime.ports.SessionToolPort
+import org.agentos.runtime.ports.ToolScope
 import org.agentos.runtime.quota.Admission
 import org.agentos.runtime.quota.CallerQuota
 import org.agentos.runtime.quota.CallerQuotaConfig
@@ -50,6 +55,7 @@ import org.agentos.runtime.scheduler.CoreSessions
 import org.agentos.runtime.scheduler.Recovery
 import org.agentos.runtime.scheduler.Scheduler
 import org.agentos.runtime.scheduler.SchedulerConfig
+import org.agentos.runtime.store.SessionMode
 import org.agentos.runtime.store.SessionRecord
 import org.agentos.runtime.store.Store
 import org.agentos.runtime.store.TaskRecord
@@ -352,6 +358,161 @@ class RuntimeEngine internal constructor(
         return store.read { it.tasks.get(taskId) }
     }
 
+    // ------------------------------------------------------------------ 会话生命周期（session/list | load | resume | fork | delete | close）
+
+    /**
+     * 调用方能看到的会话（ACP `session/list`），最近活动在前；[cwd] 非 null 时只要 cwd 相同的。
+     * 范围就是 [canAccess]：第三方 App 只看到自己的，AgentOS 自己（SELF）看到全部（不含系统流）。最多 [limit] 个。
+     */
+    suspend fun listSessions(caller: CallerIdentity, cwd: String? = null, limit: Int = MAX_LISTED_SESSIONS): List<SessionRecord> {
+        awaitReady()
+        val all = store.read { tx ->
+            if (caller.kind == CallerKind.SELF) tx.sessions.listAll().sortedByDescending { it.lastActivityAt } else tx.sessions.listByOwner(caller.ownerKey, limit)
+        }
+        return all.filter { canAccess(caller, it) && (cwd == null || it.cwd == cwd) }.take(limit)
+    }
+
+    /**
+     * 分叉（ACP `session/fork`）：从 [sessionId] 新建一个会话，带着它到目前为止**已经结束的**对话（事件日志里已结束任务的部分，
+     * 加上最近一次稳定的 Pi messages）。进行中的一轮不带过去。新会话属于 [caller]。
+     *
+     * [toolScope]：分叉请求自己带的范围，**只能收窄**——新会话的范围是原会话的范围与它的交集（原会话没带范围就用它）；
+     * 不带就原样继承。模型和模式继承原会话；之后各自独立。
+     */
+    suspend fun forkSession(caller: CallerIdentity, sessionId: String, toolScope: List<ToolRef>? = null): SessionRecord = intake {
+        awaitReady()
+        val forked = store.write { tx ->
+            val source = tx.sessions.get(sessionId)?.takeIf { canAccess(caller, it) } ?: throw AgentOsException(ErrorCode.SESSION_NOT_FOUND, "no such session")
+            val scope = narrowedScope(source.toolScope, toolScope)
+            val created = tx.sessions.fork(source, Ids.session(tx.now), caller, scope?.let { ToolScope.normalize(it) }, tx.now)
+            tx.events.append(
+                PendingEvent(
+                    created.id, null, EventTypes.SESSION_CREATED,
+                    buildJsonObject {
+                        put("ownerKey", caller.ownerKey)
+                        put("callerKind", caller.kind.name.lowercase())
+                        put("callerUid", caller.uid)
+                        put("via", "session/fork")
+                        put("forkedFrom", source.id)
+                        created.toolScope?.let { put("toolScope", ToolScope.toJson(it)) }
+                    },
+                ),
+            )
+            // 已经结束的任务的事件按原样拷过去（历史重放读它们）；没结束的、结果未知的不带
+            val finished = tx.tasks.listBySession(source.id).filter { it.state.terminal }.mapTo(HashSet()) { it.id }
+            tx.events.copyTasks(source.id, created.id, finished)
+            created
+        }
+        forked
+    }
+
+    /**
+     * 删除会话和它的一切（ACP `session/delete`）：先取消没结束的任务并等它们停下（最多 [AcpConfig.cancelWaitMillis]，
+     * 没停下就拒绝，会话原样保留），再释放 Pi 会话和会话级工具，最后删 Store 里的会话、任务、事件、messages。
+     */
+    suspend fun deleteSession(caller: CallerIdentity, sessionId: String) {
+        session(caller, sessionId)
+        if (!stopSession(sessionId, by = "delete")) {
+            throw AgentOsException(ErrorCode.BUSY, "the session is still stopping; try again in a moment")
+        }
+        releaseSession(sessionId)
+        store.write { it.sessions.delete(sessionId) }
+    }
+
+    /**
+     * 关闭会话（ACP `session/close`）：取消没结束的任务并等它们停下，释放这个会话占的内存（Pi 会话、会话级工具的连接、
+     * “本会话内不再询问”的记忆）。**会话本身和它的历史保留**，以后可以 `session/load | resume` 回来。
+     * 任务没在 [AcpConfig.cancelWaitMillis] 内停下时不抛错（取消已经发出），只是不释放。
+     */
+    suspend fun closeSession(caller: CallerIdentity, sessionId: String) {
+        session(caller, sessionId)
+        if (stopSession(sessionId, by = "close")) releaseSession(sessionId)
+    }
+
+    /** 请求取消会话里没结束的任务并等它们停下；全部停下返回 true。 */
+    private suspend fun stopSession(sessionId: String, by: String): Boolean {
+        scheduler.cancel(sessionId, by = by)
+        val pending = store.read { tx -> tx.tasks.listBySession(sessionId).filter { !it.state.terminal && it.state != TaskState.UNKNOWN }.map { it.id } }
+        if (pending.isEmpty()) return true
+        return withTimeoutOrNull(config.acp.cancelWaitMillis) { pending.forEach { scheduler.awaitSettled(it) }; true } ?: false
+    }
+
+    private suspend fun releaseSession(sessionId: String) {
+        cores.discard(sessionId)
+        broker.forgetSession(sessionId)
+        host.sessionTools.detach(sessionId)
+    }
+
+    /** 两个范围收窄：`requested` 没带就是 [parent]；[parent] 没带就是 `requested`；都带了取交集。 */
+    private fun narrowedScope(parent: List<ToolRef>?, requested: List<ToolRef>?): List<ToolRef>? = when {
+        requested == null -> parent
+        parent == null -> requested
+        else -> parent.toSet().intersect(requested.toSet()).toList()
+    }
+
+    // ------------------------------------------------------------------ 会话的模型、模式、会话级工具
+
+    /** 会话可以选的模型（ACP `session/set_model`、配置项 `model`）：同一个 key 下的模型，见 `ModelConfigPort.choices`。 */
+    fun availableModels(): List<ModelChoice> = host.models.choices.value
+
+    /**
+     * 会话现在用的模型 id：会话选了而且还可选就是它，否则是用户在设置里选的那个（它在可选列表里的话）；都没有时 null。
+     * 只在 [availableModels] 非空时有意义。
+     */
+    fun currentModelId(session: SessionRecord): String? {
+        val choices = host.models.choices.value
+        session.modelId?.takeIf { id -> choices.any { it.id == id } }?.let { return it }
+        val activeId = host.models.activeModel.value?.id
+        return choices.firstOrNull { it.id == activeId }?.id ?: choices.firstOrNull()?.id
+    }
+
+    /**
+     * 给会话选模型。[modelId] 必须在 [availableModels] 里（否则 invalid_params，不回显传进来的值）；null = 回到跟随用户的设置。
+     * 下一个任务起生效，进行中的任务不受影响。返回更新后的会话。
+     */
+    suspend fun setSessionModel(caller: CallerIdentity, sessionId: String, modelId: String?): SessionRecord {
+        session(caller, sessionId)
+        if (modelId != null && host.models.choices.value.none { it.id == modelId }) {
+            throw AgentOsException(ErrorCode.INVALID_PARAMS, "unknown model for this session")
+        }
+        store.write { it.sessions.setModel(sessionId, modelId, it.now) }
+        return session(caller, sessionId)
+    }
+
+    /** 给会话设模式（[SessionMode]）。只在会话的工具范围之上再收一层，永远不会放宽。下一个任务起生效。返回更新后的会话。 */
+    suspend fun setSessionMode(caller: CallerIdentity, sessionId: String, mode: SessionMode): SessionRecord {
+        session(caller, sessionId)
+        store.write { it.sessions.setMode(sessionId, mode, it.now) }
+        return session(caller, sessionId)
+    }
+
+    /**
+     * `session/load` 重放历史时要重放的任务：会话的任务不超过 [maxTurns] 个返回 null（全部重放），否则是最近 [maxTurns] 个的 ID。
+     */
+    suspend fun replayTaskIds(caller: CallerIdentity, sessionId: String, maxTurns: Int): Set<String>? {
+        session(caller, sessionId)
+        val tasks = store.read { tx -> tx.tasks.listBySession(sessionId) }
+        return if (tasks.size <= maxTurns) null else tasks.takeLast(maxTurns).mapTo(HashSet()) { it.id }
+    }
+
+    /** 这个构建接了会话级工具的实现（`HostPort.sessionTools` 不是 [SessionToolPort.NONE]）：ACP 的 `mcpCapabilities.http` 据此声明。 */
+    val supportsSessionTools: Boolean get() = host.sessionTools !== SessionToolPort.NONE
+
+    /** 会话里还没结束的任务（排队、运行、取消中）里最新的一个；没有返回 null。`session/load | resume` 告诉客户端有一轮还在跑。 */
+    suspend fun activeTask(caller: CallerIdentity, sessionId: String): TaskRecord? {
+        session(caller, sessionId)
+        return store.read { tx -> tx.tasks.listBySession(sessionId).lastOrNull { !it.state.terminal && it.state != TaskState.UNKNOWN } }
+    }
+
+    /**
+     * 把调用方自带的 MCP 服务器挂到会话上（ACP `mcpServers`），替换原来挂的那批；见 `SessionToolPort.attach`。
+     * 形状或限制不对抛 `SessionMcpRejected`（调用方映射成 invalid_params）。会话必须是 [caller] 能访问的。
+     */
+    suspend fun attachSessionTools(caller: CallerIdentity, sessionId: String, servers: List<SessionMcpServer>): List<SessionMcpResult> {
+        session(caller, sessionId)
+        return host.sessionTools.attach(sessionId, caller, servers)
+    }
+
     /** AgentOS App（SELF）看全部会话；其他调用方只看自己的；系统流谁都不能当会话用。 */
     fun canAccess(caller: CallerIdentity, session: SessionRecord): Boolean = when {
         session.id == EventTypes.SYSTEM_STREAM -> false
@@ -376,4 +537,9 @@ class RuntimeEngine internal constructor(
 
     /** 测试与诊断用。 */
     internal val storeForTesting: Store get() = store
+
+    companion object {
+        /** [listSessions] 一次最多返回多少个会话。 */
+        const val MAX_LISTED_SESSIONS = 200
+    }
 }

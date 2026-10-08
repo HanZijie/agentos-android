@@ -21,6 +21,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.agentos.runtime.net.HostFetch
 import org.agentos.runtime.pi.ModelCatalog
+import org.agentos.runtime.ports.ModelChoice
 import org.agentos.runtime.ports.ModelConfigPort
 import org.agentos.runtime.ports.ModelSpec
 import org.agentos.runtime.ports.RuntimeLog
@@ -67,6 +68,15 @@ class ModelSources(
 
     private val active = MutableStateFlow<ModelSpec?>(null)
     override val activeModel: StateFlow<ModelSpec?> = active.asStateFlow()
+
+    private val selectable = MutableStateFlow<List<ModelChoice>>(emptyList())
+
+    /**
+     * 会话可以选的模型（ACP `session/set_model`）：用户选的是厂商预设时，该厂商目录里**能用同一把 key** 的模型
+     * （`secrets` 按 baseUrl 匹配：端点不同的模型拿不到 key，不会出现在这里）；自定义端点没有“同一个 key 下的其他模型”可选，是空的。
+     * 和 [activeModel] 一起变：没有可用的 key（[activeModel] 为 null）时也是空的。
+     */
+    override val choices: StateFlow<List<ModelChoice>> = selectable.asStateFlow()
 
     private var loaded = false
     private var record: Record? = null
@@ -304,6 +314,7 @@ class ModelSources(
         problems.clear()
         record = null
         active.value = null
+        selectable.value = emptyList()
         // 清除 = 立即作废（F9）：不像更换那样把旧 key 留给进行中的这一轮
         secrets.revoke()
         secrets.destroyMasterKey()
@@ -318,6 +329,17 @@ class ModelSources(
         val baseUrl = rec.model.str("baseUrl")
         val usable = secrets.isSet && baseUrl != null && resolves(baseUrl) && PROBLEM_KEY_ENDPOINT_MISMATCH !in problems
         active.value = if (usable) ModelSpec(rec.model, rec.source.thinkingLevel) else null
+        selectable.value = if (usable) selectableModels(rec) else emptyList()
+    }
+
+    /** [install] 用：[rec] 是厂商预设时，目录里同一个厂商下、key 对它的端点也有效、且协议受支持的模型。 */
+    private fun selectableModels(rec: Record): List<ModelChoice> {
+        if (rec.source.kind != KIND_PRESET) return emptyList()
+        val cat = catalog.getOrNull() ?: return emptyList()
+        val provider = cat.provider(rec.source.provider ?: return emptyList()) ?: return emptyList()
+        return provider.models
+            .filter { it.api in ModelSpec.SUPPORTED_APIS && resolves(it.baseUrl) }
+            .map { ModelChoice(it.id, it.name, ModelSpec(it.json, rec.source.thinkingLevel)) }
     }
 
     private fun resolve(s: Source, cat: ModelCatalog): Resolved = when (s.kind) {
