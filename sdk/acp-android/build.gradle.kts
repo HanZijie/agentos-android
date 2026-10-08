@@ -22,4 +22,5 @@ dependencies {
     api(libs.acp)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

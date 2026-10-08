@@ -7,6 +7,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import org.agentos.sample.notes.agentos.AgentScheduleUseCase
+import org.agentos.sample.notes.agentos.GatewayProvider
+import org.agentos.sample.notes.agentos.PrefsRunMarker
 import org.agentos.sample.notes.data.NoteRepository
 import org.agentos.sample.notes.data.SqliteNoteStore
 import org.agentos.sample.notes.tools.NotesTools
@@ -21,6 +24,18 @@ object NotesGraph {
 
     val repository: NoteRepository by lazy { NoteRepository(SqliteNoteStore(appContext)) }
     val tools: NotesTools by lazy { NotesTools(repository) }
+
+    /**
+     * “让 AgentOS 安排”的用例，进程内单例：面板按钮和 debug 的 ask_agent 用的是同一个，所以旋转屏幕、退出再进都不影响进行中的一轮。
+     * 进程被回收后上一轮丢了的处理见 [AgentScheduleUseCase.restoreInterrupted]（MainActivity 重建时调）。
+     */
+    val agentSchedule: AgentScheduleUseCase by lazy {
+        AgentScheduleUseCase(
+            scope = appScope,
+            gatewayFactory = { GatewayProvider.create(appContext) },
+            marker = PrefsRunMarker(appContext.getSharedPreferences("notes_agentos", Context.MODE_PRIVATE)),
+        )
+    }
 
     @Volatile private var initJob: Job? = null
 

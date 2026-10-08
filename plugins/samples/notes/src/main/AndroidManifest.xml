@@ -4,6 +4,13 @@
 
     <!-- 不申请任何权限：数据只在自己的 SQLite 里，不联网 -->
 
+    <!-- “让 AgentOS 安排”完成后的“在日历 / 闹钟中查看”和“打开 AgentOS”要知道对应 App 装没装（包可见性，只看启动入口） -->
+    <queries>
+        <package android:name="org.agentos.sample.calendar" />
+        <package android:name="org.agentos.sample.alarm" />
+        <package android:name="org.agentos.app" />
+    </queries>
+
     <application
         android:name=".NotesApplication"
         android:allowBackup="false"

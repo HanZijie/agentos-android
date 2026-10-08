@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalResources
 import org.agentos.sample.notes.R
 import org.agentos.sample.notes.ui.editor.EditorScreen
 import org.agentos.sample.notes.ui.home.HomeScreen
+import org.agentos.sample.notes.ui.schedule.SchedulePanel
 import org.agentos.sample.notes.ui.search.SearchScreen
 
 /** 根：导航栈（首页 → 搜索 / 编辑页）+ 全局提示条。页面之间用横向滑动 + 淡入淡出过渡。 */
@@ -90,6 +91,9 @@ fun NotesApp(vm: NotesViewModel) {
             }
         }
     }
+
+    // “让 AgentOS 安排”的底部面板：放在这一层，旋转屏幕、退出编辑页都不影响进行中的一轮
+    SchedulePanel(vm.schedule)
 }
 
 private fun depth(screen: Screen): Int = when (screen) {
