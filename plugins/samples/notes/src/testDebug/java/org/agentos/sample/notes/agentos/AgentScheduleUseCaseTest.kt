@@ -374,6 +374,16 @@ class AgentScheduleUseCaseTest {
         assertFalse(e.marker.on)
     }
 
+    @Test fun `the default prompt is NoteSchedulePrompt, and only an injected builder can change it`() = runTest {
+        val gw = FakeAgentOsGateway(FakeScripts.byName("no_time", now)!!)
+        val custom = AgentScheduleUseCase(backgroundScope, { gw }, { now }, { Locale.US }, promptFor = { text, _, _ -> "RAW:$text" })
+        custom.open(note); custom.start(); settle()
+        assertEquals("RAW:" + note.text, gw.promptedText)
+        val e = env("no_time")
+        runIt(e)
+        assertEquals(NoteSchedulePrompt.build(note.text, now, Locale.SIMPLIFIED_CHINESE), e.gateways.single().promptedText)
+    }
+
     @Test fun `runToEnd goes through the same path and reports the end`() = runTest {
         val e = env("success")
         val out = e.useCase.runToEnd(note, 150_000)
