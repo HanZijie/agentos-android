@@ -28,6 +28,14 @@ import org.agentos.acp.AcpAndroid
 import org.agentos.app.BuildConfig
 import org.agentos.app.agent.supervisor.SupervisorStatus
 import org.agentos.app.agent.supervisor.SupervisorStatusReceiver
+import org.agentos.app.agent.acp.AcpAccessPolicy
+import org.agentos.app.agent.acp.AcpDecision
+import org.agentos.app.agent.acp.CallerEntry
+import org.agentos.app.agent.acp.CallerListener
+import org.agentos.app.agent.acp.CallerRegistry
+import org.agentos.app.agent.acp.CallerState
+import org.agentos.app.agent.acp.PackageCallerResolver
+import org.agentos.extensions.registry.FileBackedTextFile
 import org.agentos.runtime.AgentRuntime
 import org.agentos.runtime.AgentRuntimes
 import org.agentos.runtime.RuntimeConfig
@@ -159,7 +167,58 @@ class AgentProcess private constructor(val app: Context) {
 
     val acp = AcpConnections(this)
 
+    // ------------------------------------------------------------------ 第三方 App 接入 ACP（docs/third-party-acp.md 4.1）
+
+    /** 第三方 App 的授权记录：files/acp/callers.json（原子写，备份 + 损坏时 fail closed）。 */
+    val callers = CallerRegistry(
+        primary = FileBackedTextFile(File(app.filesDir, "$ACP_DIR/callers.json")),
+        backup = FileBackedTextFile(File(app.filesDir, "$ACP_DIR/callers.backup.json")),
+        quarantine = FileBackedTextFile(File(app.filesDir, "$ACP_DIR/callers.json.corrupt")),
+    )
+    private val callerResolver = PackageCallerResolver(app)
+
+    /** IAcpService.open 的准入：AgentOS 自己 SELF，其他 UID 按 [AcpAccessPolicy] 查授权记录，不阻塞。 */
+    fun admitAcp(callerUid: Int): AcpDecision = AcpAccessPolicy.decide(callerUid, Process.myUid(), callerResolver, callers)
+
+    /** IAgentControl.listAcpCallers：每项带这个 App 现在开着的通道数。 */
+    fun listCallersJson(): JSONArray {
+        val arr = JSONArray()
+        for (e in callers.entries()) arr.put(JSONObject(callers.toJson(e, acp.channelsOf(e.packageName), activeTasksOf(e.packageName)).toString()))
+        return arr
+    }
+
+    /** IAgentControl.setAcpCaller。denied / removed 时 [CallerListener.onRevoked] 已经关了它的通道。 */
+    fun setCaller(packageName: String?, state: String?): JSONObject? =
+        callers.set(packageName, state)?.let { JSONObject(callers.toJson(it, acp.channelsOf(it.packageName), activeTasksOf(it.packageName)).toString()) }
+
+    /** IAgentControl.answerAuthorization。 */
+    fun answerAuthorization(requestId: String?, allow: Boolean): Boolean = callers.decide(requestId, allow)
+
+    /** 这个 App 进行中的任务数（等 A 给出按调用方统计的接口之前为 0）。 */
+    private fun activeTasksOf(@Suppress("UNUSED_PARAMETER") packageName: String): Int = 0
+
+    private val callerListener = object : CallerListener {
+        override fun onPending(entry: CallerEntry) {
+            Log.i(TAG, "authorization requested by ${entry.packageName} (request ${entry.requestId?.take(8)})")
+        }
+
+        override fun onResolved(requestId: String, state: CallerState, timedOut: Boolean) {
+            Log.i(TAG, "authorization ${requestId.take(8)} resolved: ${state.wire}${if (timedOut) " (timed out)" else ""}")
+        }
+
+        override fun onRevoked(packageName: String, signingDigest: String) {
+            // 立即关它现有的通道；进行中的任务的取消见 cancelTasksOf
+            val closed = acp.closeFor(packageName, signingDigest, "authorization revoked")
+            Log.i(TAG, "authorization of $packageName revoked: closed $closed channel(s)")
+            cancelTasksOf(packageName)
+        }
+    }
+
+    /** 撤销时取消这个 App 进行中的任务。需要运行时按调用方取消的接口（见报告），接上之前只关通道。 */
+    private fun cancelTasksOf(@Suppress("UNUSED_PARAMETER") packageName: String) = Unit
+
     init {
+        callers.setListener(callerListener)
         AcpAndroid.ensureInitialized()
         installCrashHandler()
         // BIND_AUTO_CREATE：:ext 随 :agent 存活；目录和策略到了之后才有第三方工具（之前 fail closed）
@@ -410,6 +469,7 @@ class AgentProcess private constructor(val app: Context) {
         /** BYOK 模型来源（明文部分 + key 的密文），CE 存储 files/ 下。 */
         const val BYOK_DIR = "byok"
         const val JEV_DIR = "jev"
+        const val ACP_DIR = "acp"
 
         /** B 的 core/pi-runtime/build.mjs 生成的厂商预设。 */
         const val MODEL_CATALOG_ASSET = "model-catalog.json"

@@ -120,21 +120,33 @@ class AgentControl(private val process: AgentProcess) : IAgentControl.Stub() {
 
     // ------------------------------------------------------------------ v5：第三方 App 接入 ACP（docs/third-party-acp.md 4.3）
     //
-    // 第一个提交只有接口（D 和备忘录据此动手）：CallerRegistry 接上之前，列表为空，其余方法报 registry_unavailable。
-
     override fun listAcpCallers(): String {
         enforceSelf()
-        return "[]"
+        return acp { process.listCallersJson().toString() }
     }
 
     override fun setAcpCaller(packageName: String?, state: String?): String {
         enforceSelf()
-        throw IllegalStateException("agentos.acp.registry_unavailable: the caller registry is not wired yet")
+        return acp { process.setCaller(packageName, state)?.toString() ?: "null" }
     }
 
     override fun answerAuthorization(requestId: String?, allow: Boolean): Boolean {
         enforceSelf()
-        return false
+        return acp { process.answerAuthorization(requestId, allow) }
+    }
+
+    /** 第三方接入的方法只让 `agentos.acp.*` 的异常回到调用方；其他异常换成只带类型名的 `agentos.acp.internal`。 */
+    private inline fun <T> acp(block: () -> T): T = try {
+        block()
+    } catch (e: IllegalArgumentException) {
+        if (e.message?.startsWith("agentos.acp.") == true) throw e
+        throw IllegalStateException("agentos.acp.internal: ${e.javaClass.simpleName}")
+    } catch (e: IllegalStateException) {
+        if (e.message?.startsWith("agentos.acp.") == true) throw e
+        throw IllegalStateException("agentos.acp.internal: ${e.javaClass.simpleName}")
+    } catch (e: Exception) {
+        Log.w(TAG, "ACP caller call failed: ${e.javaClass.simpleName}")
+        throw IllegalStateException("agentos.acp.internal: ${e.javaClass.simpleName}")
     }
 
     /** Jev 方法只让 `agentos.jev.*` 的异常回到调用方；其他异常换成只带类型名的 `agentos.jev.internal`（消息里不会有 key）。 */
