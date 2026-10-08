@@ -140,6 +140,23 @@ class AgentOsMappingTest {
     }
 
     @Test
+    fun `no scope sends no meta at all, an empty scope is an explicit zero tools`() {
+        assertNull(AgentOsMapping.sessionMeta(null))
+        val empty = AgentOsMapping.sessionMeta(emptyList())!!
+        assertEquals(0, ((empty["org.agentos"] as JsonObject)["toolScope"] as JsonArray).size)
+        assertEquals(1, (((AgentOsMapping.sessionMeta(listOf(ToolRef("a", "b")))!!["org.agentos"] as JsonObject)["toolScope"]) as JsonArray).size)
+    }
+
+    @Test
+    fun `without a scope a tool keeps its final name and has no ref`() {
+        val m = AgentOsMapping.PromptMapper(null)
+        val e = m.map(toolCall("n", "mcp__calendar__calendar__event_list")) as AgentOsEvent.ToolCall
+        assertEquals("mcp__calendar__calendar__event_list", e.tool)
+        assertNull(e.ref)
+        assertEquals(ToolStatus.PENDING_APPROVAL, e.status)
+    }
+
+    @Test
     fun `scope meta rejects shapes the server would refuse`() {
         for (bad in listOf(
             List(33) { ToolRef("p$it", "t") },

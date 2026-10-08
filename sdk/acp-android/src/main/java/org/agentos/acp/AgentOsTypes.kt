@@ -2,13 +2,13 @@ package org.agentos.acp
 
 /**
  * 工具范围里的一项（docs/third-party-acp.md 4.5）：`plugin` 是 plugin.json 的 `name`，`tool` 是服务器报告的**原始**工具名
- * （不用 `mcp__...` 的最终名字：调用方不需要知道后缀规则）。
+ * （不用 `mcp__...` 的最终名字：调用方不需要知道后缀规则）。工具范围是调用方自己的选择：[AgentOsConnection.newSession]。
  */
 data class ToolRef(val plugin: String, val tool: String)
 
 /** 一次工具调用现在的状态。 */
 enum class ToolStatus {
-    /** 模型要调用它，AgentOS 正在等用户在确认框里决定（第三方调用方的每次调用都要确认）。 */
+    /** 模型要调用它，还没有开始执行：多半是 AgentOS 在等用户在确认框里决定（读级工具、用户设了“始终允许”的不需要确认，很快进入 [RUNNING]）。 */
     PENDING_APPROVAL,
 
     /** 用户允许了，工具正在执行。 */
@@ -32,7 +32,8 @@ sealed interface AgentOsEvent {
     /**
      * 一次工具调用的进展；同一个 [id] 会先后出现多次（[ToolStatus.PENDING_APPROVAL] → [ToolStatus.RUNNING] → 终态）。
      *
-     * @property tool 工具名。能对应上本次 toolScope 里的某一项时是它的原始工具名（[ref] 不为 null），否则是 AgentOS 给模型的最终名字。
+     * @property tool 工具名。能对应上本次 toolScope 里的某一项时是它的原始工具名（[ref] 不为 null），否则（没给 toolScope、不在范围里）
+     *   是 AgentOS 给模型的最终名字（`mcp__<插件名>__<服务器>__<工具>`）。
      * @property resultJson 工具结果的文字（不是 ACP 的包装）；还没有结果时为 null。第三方内容，不可信。
      * @property argumentsJson 模型传给工具的参数（JSON 文字）；拿不到时为 null。
      * @property ref 对应的 toolScope 项；对应不上为 null。

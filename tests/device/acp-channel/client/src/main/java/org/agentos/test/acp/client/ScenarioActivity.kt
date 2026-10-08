@@ -13,7 +13,9 @@ import org.json.JSONObject
 /** 第三方身份的场景执行器：通道场景都对测试 Agent 跑；foreign-open 对 AgentOS 跑。 */
 class ScenarioActivity : ScenarioActivityBase() {
     override suspend fun runScenario(name: String, args: JSONObject, runId: String, status: (String) -> Unit): JSONObject? =
-        if (name == "bind-mcp") bindMcp(args) else ChannelScenarios(this, work, runId, ProbeTarget(this), status).run(name, args)
+        if (name == "bind-mcp") bindMcp(args)
+        else ThirdPartyScenarios(this, work, runId, status).run(name, args)
+            ?: ChannelScenarios(this, work, runId, ProbeTarget(this), status).run(name, args)
 
     /**
      * C7b：第三方 App（没有 org.agentos.permission.BIND_MCP_SERVICE，那是 AgentOS 定义的 signature 权限）直接 bind 插件的 MCP 服务，

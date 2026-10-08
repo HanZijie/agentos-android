@@ -50,7 +50,7 @@ import org.agentos.channel.IAcpService
  * ```
  * if (!AgentOs.isInstalled(context)) { ... }
  * val connection = AgentOs.connect(context, onWaiting = { showWaiting() })      // 可能抛 AgentOsException
- * val session = connection.newSession(listOf(ToolRef("alarm", "alarm_create"), ToolRef("calendar", "event_create")))
+ * val session = connection.newSession(listOf(ToolRef("alarm", "alarm_create"), ToolRef("calendar", "event_create")))   // 或 newSession()：不缩小范围
  * session.prompt(text).collect { event -> ... }
  * connection.close()
  * ```
@@ -203,13 +203,19 @@ class AgentOsConnection internal constructor(
     val isConnected: Boolean get() = !closed && transport.channel.isOpen
 
     /**
-     * 新建一个会话。[toolScope] 是这个会话**最多**能用的工具；只能缩小、不能放大（实际可用 = toolScope 与用户当前启用的工具的交集），
-     * 写了不存在的项会被忽略，也不报错。空列表 = 没有任何工具，只能聊天。最多 32 项，每个名字最多 128 字符（否则抛 [IllegalArgumentException]）。
+     * 新建一个会话。[toolScope] 是调用方自己的选择，AgentOS 不强制：
+     * - `null`（默认）：不给范围——会话能用 AgentOS 里全部已启用插件的全部工具（用户已经在 AgentOS 里启用了哪些插件，由用户决定）；
+     * - 非空列表：这个会话**最多**能用这些工具；只能缩小、不能放大（实际可用 = toolScope 与用户当前启用的工具的交集），
+     *   写了不存在的项会被忽略，也不报错。把不可信的文字交给 Agent 时（例如用户的备忘），建议只给任务需要的那几项；
+     * - 空列表：要求零个工具，只能聊天。
+     *
+     * 最多 32 项，每个名字最多 128 字符（否则抛 [IllegalArgumentException]）。工具调用要不要让用户确认，由 AgentOS 的确认规则决定
+     * （和 AgentOS 自己的界面一样：写默认每次确认，用户设了“始终允许”就不再问，高风险每次确认）；SDK 不替用户批准任何东西。
      *
      * @throws AgentOsException [AgentOsError.DISCONNECTED]、[AgentOsError.FAILED] 等
      */
-    suspend fun newSession(toolScope: List<ToolRef>): AgentOsSession {
-        val meta = AgentOsMapping.scopeMeta(toolScope)
+    suspend fun newSession(toolScope: List<ToolRef>? = null): AgentOsSession {
+        val meta = AgentOsMapping.sessionMeta(toolScope)
         val session = try {
             withTimeout(SESSION_TIMEOUT_MILLIS) {
                 client.newSession(SessionCreationParameters(cwd = "/", mcpServers = emptyList(), _meta = meta)) { _, _ -> NoPermissionUi }
@@ -222,7 +228,7 @@ class AgentOsConnection internal constructor(
         } catch (e: Exception) {
             throw AgentOsException(AgentOsError.FAILED, "session/new failed: ${e.javaClass.simpleName}", e)
         }
-        return AgentOsSession(this, session, toolScope.distinct())
+        return AgentOsSession(this, session, toolScope?.distinct())
     }
 
     /** 断开并解除绑定；进行中的 prompt 以 [AgentOsError.DISCONNECTED] 结束。可以重复调用。 */
@@ -260,14 +266,15 @@ class AgentOsConnection internal constructor(
 class AgentOsSession internal constructor(
     private val connection: AgentOsConnection,
     private val session: ClientSession,
-    private val toolScope: List<ToolRef>,
+    private val toolScope: List<ToolRef>?,
 ) {
     /**
      * 发一轮 prompt，返回这一轮的事件流：[AgentOsEvent.Text]、[AgentOsEvent.ToolCall]（同一个 id 多次）、最后一个 [AgentOsEvent.Done]。
      * 流是冷的：开始收集才发送；取消收集等于 [cancel]。失败时流以 [AgentOsException] 结束：[AgentOsError.NO_MODEL]（AgentOS 没配置模型）、
      * [AgentOsError.BUSY]、[AgentOsError.RATE_LIMITED]、[AgentOsError.TOO_LARGE]（文字超过 16,000 字符）、[AgentOsError.DISCONNECTED]、[AgentOsError.FAILED]。
      *
-     * 第三方会话里**每一次**工具调用都会让用户在 AgentOS 里确认（[ToolStatus.PENDING_APPROVAL]），用户没有回答会超时按拒绝处理。
+     * 工具调用是否让用户在 AgentOS 里确认，由 AgentOS 的确认规则决定（见 [AgentOsConnection.newSession]）；要确认的，用户没有回答会超时按拒绝处理
+     * （[ToolStatus.DENIED]）。
      */
     fun prompt(text: String): Flow<AgentOsEvent> = flow {
         if (text.length > AgentOsMapping.MAX_PROMPT_CHARS) throw AgentOsException(AgentOsError.TOO_LARGE, "the text is longer than ${AgentOsMapping.MAX_PROMPT_CHARS} characters")
