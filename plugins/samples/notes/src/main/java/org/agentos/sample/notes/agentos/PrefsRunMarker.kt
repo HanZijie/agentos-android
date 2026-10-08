@@ -1,8 +1,10 @@
 package org.agentos.sample.notes.agentos
 
+import android.annotation.SuppressLint
 import android.content.SharedPreferences
 
 /** 把“上一轮还没走完”的标记放在 SharedPreferences 里：进程被杀后下次启动还在。同步写（commit），免得进程恰好此时被杀。 */
+@SuppressLint("ApplySharedPref") // 有意用 commit：标记必须在进程可能被杀之前落盘
 class PrefsRunMarker(private val prefs: SharedPreferences) : RunMarker {
     override fun set() {
         prefs.edit().putBoolean(KEY, true).commit()

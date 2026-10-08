@@ -62,10 +62,14 @@ object ScheduleItems {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private const val MAX_MESSAGE_CHARS = 200
 
-    fun kindOf(tool: String): ItemKind = when {
-        tool.endsWith("event_create") -> ItemKind.EVENT
-        tool.endsWith("alarm_create") -> ItemKind.ALARM
-        else -> ItemKind.OTHER
+    /** 种类：有 toolScope 的对应项（[ref]）就按它的原始工具名；否则按工具名，允许 `mcp__<插件>__` 这样的前缀。 */
+    fun kindOf(tool: String, ref: ToolRef? = null): ItemKind {
+        val name = ref?.tool ?: tool
+        return when {
+            name == "event_create" || (ref == null && name.endsWith("__event_create")) -> ItemKind.EVENT
+            name == "alarm_create" || (ref == null && name.endsWith("__alarm_create")) -> ItemKind.ALARM
+            else -> ItemKind.OTHER
+        }
     }
 
     fun statusOf(status: ToolStatus): ItemStatus = when (status) {
@@ -85,12 +89,15 @@ object ScheduleItems {
         val old = items.getOrNull(index)
         if (old != null && old.status.isFinal && !statusOf(call.status).isFinal) return items
         val status = statusOf(call.status)
-        val kind = kindOf(call.tool)
-        val base = old ?: ScheduleItem(call.id, kind, call.tool, status)
+        val kind = kindOf(call.tool, call.ref)
+        val base = old ?: ScheduleItem(call.id, kind, call.ref?.tool ?: call.tool, status)
+        // 内容：创建成功时以工具返回的结果为准；在那之前（等确认、创建中）用模型传的参数预览，让用户看得出这一项是什么。
+        // 预览只用于显示，计数只看 status == CREATED。
+        val fromResult = if (status == ItemStatus.CREATED) call.resultJson else null
         val updated = base.copy(
             status = status,
-            event = if (kind == ItemKind.EVENT && status == ItemStatus.CREATED) parseEvent(call.resultJson) ?: base.event else base.event,
-            alarm = if (kind == ItemKind.ALARM && status == ItemStatus.CREATED) parseAlarm(call.resultJson) ?: base.alarm else base.alarm,
+            event = if (kind == ItemKind.EVENT) parseEvent(fromResult) ?: base.event ?: parseEvent(call.argumentsJson) else base.event,
+            alarm = if (kind == ItemKind.ALARM) parseAlarm(fromResult) ?: base.alarm ?: parseAlarm(call.argumentsJson) else base.alarm,
             message = when (status) {
                 ItemStatus.DENIED, ItemStatus.FAILED -> messageOf(call.resultJson) ?: base.message
                 else -> base.message

@@ -24,6 +24,29 @@ class ScheduleItemsTest {
         assertEquals(ItemKind.ALARM, ScheduleItems.kindOf("mcp__alarm__alarm_create"))
         assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("note_delete"))
         assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("event_create_all"))
+        assertEquals(ItemKind.OTHER, ScheduleItems.kindOf("my_event_create"))
+        assertEquals(ItemKind.ALARM, ScheduleItems.kindOf("anything", ToolRef("alarm", "alarm_create")))
+        assertEquals("a ref wins over a misleading name", ItemKind.OTHER, ScheduleItems.kindOf("mcp__x__event_create", ToolRef("notes", "note_delete")))
+    }
+
+    @Test fun `while waiting the card previews the arguments, and the result replaces them`() {
+        val args = """{"title":"和王总开会（模型的写法）","start":"2026-10-09T15:00:00","location":"3 号会议室"}"""
+        val waiting = fold(GatewayEvent.ToolCall("e1", "event_create", ToolStatus.PENDING_APPROVAL, null, argumentsJson = args, ref = ToolRef("calendar", "event_create")))
+        assertEquals("和王总开会（模型的写法）", waiting.single().event!!.title)
+        assertEquals(ItemStatus.AWAITING_APPROVAL, waiting.single().status)
+        assertEquals("a preview is not a created item", 0, ScheduleSummary(waiting).eventCount)
+        val done = ScheduleItems.apply(waiting, GatewayEvent.ToolCall("e1", "event_create", ToolStatus.COMPLETED, eventJson, argumentsJson = args, ref = ToolRef("calendar", "event_create")))
+        assertEquals("the tool's own result wins", "和王总开会", done.single().event!!.title)
+        val denied = ScheduleItems.apply(waiting, GatewayEvent.ToolCall("e1", "event_create", ToolStatus.DENIED, "denied by user"))
+        assertEquals("a refused card still shows what was refused", "和王总开会（模型的写法）", denied.single().event!!.title)
+        assertEquals(0, ScheduleSummary(denied).eventCount)
+    }
+
+    @Test fun `alarm arguments preview the same way, and broken arguments are ignored`() {
+        val a = fold(GatewayEvent.ToolCall("a1", "alarm_create", ToolStatus.RUNNING, null, argumentsJson = """{"time":"07:00","label":"跑步","days":["mon"]}""", ref = ToolRef("alarm", "alarm_create")))
+        assertEquals("07:00", a.single().alarm!!.time)
+        val bad = fold(GatewayEvent.ToolCall("a2", "alarm_create", ToolStatus.RUNNING, null, argumentsJson = "not json", ref = ToolRef("alarm", "alarm_create")))
+        assertNull(bad.single().alarm)
     }
 
     @Test fun `every tool status maps to an item status`() {
@@ -91,6 +114,18 @@ class ScheduleItemsTest {
         assertEquals(ItemStatus.CREATED, e.status)
         assertEquals(ItemKind.EVENT, e.kind)
         assertEquals("和王总开会", e.event!!.title)
+    }
+
+    @Test fun `an item may start already running or already completed, with no approval step`() {
+        val running = fold(call("e1", "event_create", ToolStatus.RUNNING), call("e1", "event_create", ToolStatus.COMPLETED, eventJson))
+        assertEquals(ItemStatus.CREATED, running.single().status)
+        assertEquals("和王总开会", running.single().event!!.title)
+        val direct = fold(call("a1", "alarm_create", ToolStatus.COMPLETED, alarmJson))
+        assertEquals(ItemStatus.CREATED, direct.single().status)
+        assertEquals("07:00", direct.single().alarm!!.time)
+        val summary = ScheduleSummary(running + direct)
+        assertEquals(1, summary.eventCount)
+        assertEquals(1, summary.alarmCount)
     }
 
     @Test fun `items keep their first-seen order`() {

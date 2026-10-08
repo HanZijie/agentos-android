@@ -107,6 +107,22 @@ class AgentScheduleUseCaseTest {
         assertTrue("approval is flagged while a card waits", e.seen.filterIsInstance<ScheduleState.Running>().any { it.awaitingApproval })
     }
 
+    // 用户在 AgentOS 里为工具设了“始终允许”：没有 PENDING_APPROVAL，状态机、卡片、汇总都不能依赖“每次都有确认”
+    @Test fun `no approval step at all, running straight to completed, is just as good`() = runTest {
+        val e = env("no_confirm")
+        val end = runIt(e) as ScheduleState.Done
+        e.assertPath(ScheduleState.Ready::class.java, ScheduleState.Checking::class.java, ScheduleState.Running::class.java, ScheduleState.Done::class.java)
+        val running = e.seen.filterIsInstance<ScheduleState.Running>()
+        assertFalse("never flagged as waiting for a confirmation", running.any { it.awaitingApproval })
+        assertTrue(running.flatMap { it.items }.none { it.status == ItemStatus.AWAITING_APPROVAL })
+        assertEquals("the event card went creating -> created", listOf(ItemStatus.CREATING, ItemStatus.CREATED), running.flatMap { it.items }.filter { it.id == "e1" }.map { it.status }.distinct())
+        assertEquals("the alarm card appeared already created (result only, no RUNNING)", listOf(ItemStatus.CREATED), running.flatMap { it.items }.filter { it.id == "a1" }.map { it.status }.distinct())
+        assertEquals(1, end.summary.eventCount)
+        assertEquals(1, end.summary.alarmCount)
+        assertEquals("和王总开会", end.summary.createdEvents.single().event!!.title)
+        assertEquals("跑步", end.summary.createdAlarms.single().alarm!!.label)
+    }
+
     @Test fun `streamed text accumulates`() = runTest {
         val e = env(FakeScript(prompt = listOf(
             FakeStep.Emit(GatewayEvent.Text("你")), FakeStep.Emit(GatewayEvent.Text("好")), FakeStep.Emit(GatewayEvent.Done("end_turn")),

@@ -13,7 +13,7 @@ object FakeScripts {
     val names: List<String> = listOf(
         "success", "first_run", "reject", "no_time", "no_model", "auth_timeout", "denied", "disconnect",
         "busy", "rate_limited", "too_large", "failed", "not_installed",
-        "hold_auth", "hold_running", "hold_approval", "slow", "hold_forever",
+        "no_confirm", "hold_auth", "hold_running", "hold_approval", "slow", "hold_forever",
     )
 
     fun byName(name: String, now: ZonedDateTime = ZonedDateTime.now()): FakeScript? = when (name) {
@@ -21,6 +21,21 @@ object FakeScripts {
         "success" -> script(prompt = work(now, event = Outcome.CREATED, alarm = Outcome.CREATED))
         // 第一次使用：先等授权，再成功
         "first_run" -> script(connect = listOf(FakeStep.AuthWait, FakeStep.Delay(3_000)), prompt = work(now, Outcome.CREATED, Outcome.CREATED))
+        // 用户在 AgentOS 里为这两个工具设了“始终允许”：没有 PENDING_APPROVAL，直接 RUNNING → COMPLETED（闹钟连 RUNNING 都没有，只有结果）
+        "no_confirm" -> script(
+            prompt = listOf(
+                FakeStep.Delay(400),
+                text("我找到了两个需要安排的时间：周五下午 3 点的会议，和每周一早上 7 点的跑步。"),
+                call("e1", "event_create", ToolStatus.RUNNING, null),
+                FakeStep.Delay(500),
+                call("e1", "event_create", ToolStatus.COMPLETED, eventResult(now)),
+                FakeStep.Delay(300),
+                call("a1", "alarm_create", ToolStatus.COMPLETED, alarmResult(now)),
+                FakeStep.Delay(300),
+                text("处理好了。"),
+                done(),
+            ),
+        )
         // 日程创建了，闹钟被用户拒绝
         "reject" -> script(prompt = work(now, event = Outcome.CREATED, alarm = Outcome.DENIED))
         // 文字里没有明确时间：什么也不建，给出解释
@@ -101,8 +116,15 @@ object FakeScripts {
 
     private fun text(chunk: String) = FakeStep.Emit(GatewayEvent.Text(chunk))
     private fun done() = FakeStep.Emit(GatewayEvent.Done("end_turn"))
+    /** 和真实事件一致：带模型传的参数，和 toolScope 里对应的那一项（按原始工具名）。 */
     private fun call(id: String, tool: String, status: ToolStatus, result: String?) =
-        FakeStep.Emit(GatewayEvent.ToolCall(id, tool, status, result))
+        FakeStep.Emit(GatewayEvent.ToolCall(id, tool, status, result, argsFor(tool), NotesToolScope.firstOrNull { it.tool == tool }))
+
+    private fun argsFor(tool: String): String? = when (tool) {
+        "event_create" -> """{"title":"和王总开会","start":"明天 15:00","location":"3 号会议室","reminder_minutes":[15]}"""
+        "alarm_create" -> """{"time":"07:00","label":"跑步","days":["mon"]}"""
+        else -> null
+    }
 
     fun eventResult(now: ZonedDateTime): String {
         val start = now.plusDays(1).withHour(15).withMinute(0).withSecond(0).withNano(0)

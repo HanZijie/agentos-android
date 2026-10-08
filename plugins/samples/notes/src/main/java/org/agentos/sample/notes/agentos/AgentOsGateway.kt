@@ -41,8 +41,19 @@ sealed interface GatewayEvent {
     /**
      * 一次工具调用的最新状态；同一个 [id] 会来多次（待确认 → 运行 → 完成 / 被拒绝 / 失败）。
      * [resultJson] 是工具结果的文字（不是 ACP 的包装）；失败时可能是一句错误说明。
+     * [argumentsJson] 是模型传给工具的参数（还没有结果时界面用它预览这一项，**不当作已创建的事实**）；[ref] 是对应的 toolScope 项，
+     * 对得上时按它认种类（比工具名可靠）。
+     *
+     * 注意：不保证每一项都有 PENDING_APPROVAL——用户在 AgentOS 里为工具设了“始终允许”就直接 RUNNING → COMPLETED，甚至只有结果。
      */
-    data class ToolCall(val id: String, val tool: String, val status: ToolStatus, val resultJson: String?) : GatewayEvent
+    data class ToolCall(
+        val id: String,
+        val tool: String,
+        val status: ToolStatus,
+        val resultJson: String?,
+        val argumentsJson: String? = null,
+        val ref: ToolRef? = null,
+    ) : GatewayEvent
 
     /** 这一轮结束。[stopReason] 例如 end_turn / cancelled。 */
     data class Done(val stopReason: String) : GatewayEvent
@@ -78,7 +89,10 @@ interface AgentOsGateway {
     fun close()
 }
 
-/** 备忘录交给 AgentOS 的会话只能用这两个工具（docs/third-party-acp.md 5）。 */
+/**
+ * 备忘录**自己选择**的最小工具范围（docs/third-party-acp.md 5）：只让 AgentOS 用这两个工具，所以备忘文字里的注入指令碰不到别的工具。
+ * 这不是 AgentOS 的要求（别的第三方 App 可以不带 toolScope），只是备忘录对自己的约束，不要去掉。
+ */
 val NotesToolScope: List<ToolRef> = listOf(
     ToolRef("alarm", "alarm_create"),
     ToolRef("calendar", "event_create"),
