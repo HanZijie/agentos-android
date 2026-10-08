@@ -9,6 +9,8 @@ name: portable-tests
 
 on:
   push:
+    # 只在 main 上跑 push；功能分支靠 pull_request，避免同一个提交跑两遍
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -55,6 +57,9 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
 
       - uses: android-actions/setup-android@v3
+        with:
+          # action 默认是 "tools platform-tools"；旧的 tools 包已从 SDK 仓库下线，sdkmanager 会以 exit 1 失败
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -117,6 +122,8 @@ jobs:
       # Gradle 配置全部项目时 AGP 需要 Android SDK
       - uses: android-actions/setup-android@v3
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        with:
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
