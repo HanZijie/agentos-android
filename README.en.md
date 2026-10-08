@@ -174,10 +174,22 @@ if (AgentOs.isInstalled(context)) {
             is AgentOsEvent.Text -> { /* text from the Agent */ }
             is AgentOsEvent.ToolCall -> { /* tool state: awaiting confirmation / running / done / denied / failed */ }
             is AgentOsEvent.Done -> { /* finished */ }
+            else -> Unit // more types may be added later (Thought and UserMessage exist today); keep an else
         }
     }
+    saveSomewhere(session.sessionId) // keep the session id
 }
 ```
+
+A session can be continued later. Keep `session.sessionId`; afterwards (including after AgentOS restarts) use it to come back to the session and get its full history:
+
+```kotlin
+val session = connection.loadSession(savedSessionId)     // only a session this app created; someone else's or a deleted one is SESSION_NOT_FOUND
+session.history.forEach { /* UserMessage / Text / Thought / ToolCall, in order */ }
+session.prompt("move that meeting to 4 pm").collect { /* as usual */ }
+```
+
+There are also `listSessions()`, `forkSession()`, `deleteSession()` and `session.close()`; a mode per session with `setMode(SessionMode.READ_ONLY)` (read only / chat; it only narrows, never widens) and a model with `setModel(...)` (only models under the key the user configured); and `newSession(mcpServers = listOf(McpHttpServer(name, "https://…", headers)))` to bring your own Streamable HTTP MCP server, visible only to that session, with its URL and headers kept only in AgentOS memory and **every call confirmed by the user**. Session lifecycle, mode and model, and caller-supplied MCP servers are recent additions and have so far been verified end to end only on an API 36 emulator (device case `third_party.py --only sessions`), not on a physical phone. An older AgentOS does not have these methods: check `connection.capabilities` first.
 
 A complete example is in [`plugins/samples/notes`](plugins/samples/notes). The interface contract is in section 4.7 of [docs/third-party-acp.md](docs/third-party-acp.md) (Chinese).
 

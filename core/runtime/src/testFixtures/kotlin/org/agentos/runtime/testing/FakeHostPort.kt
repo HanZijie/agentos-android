@@ -21,6 +21,7 @@ import org.agentos.runtime.ports.HookOutcome
 import org.agentos.runtime.ports.HookPort
 import org.agentos.runtime.ports.HookRequest
 import org.agentos.runtime.ports.HostPort
+import org.agentos.runtime.ports.ModelChoice
 import org.agentos.runtime.ports.ModelConfigPort
 import org.agentos.runtime.ports.ModelSpec
 import org.agentos.runtime.ports.RuntimeLog
@@ -178,12 +179,16 @@ class FakeHostPort(
     override val hooks: FakeHookPort = FakeHookPort(),
     override val approvals: FakeApprovalPolicyPort = FakeApprovalPolicyPort(),
     override val skills: FakeSkillPort = FakeSkillPort(),
+    override val sessionTools: org.agentos.runtime.ports.SessionToolPort = FakeSessionToolPort(),
     override val clock: ManualClock = ManualClock(),
     override val log: CollectingLog = CollectingLog(),
     databaseFile: File = Files.createTempDirectory("agentos-store").resolve("agent.db").toFile(),
     model: ModelSpec? = FAKE_MODEL,
     credentials: Map<String, String> = mapOf(FAKE_BASE_URL to "fake-key-0123456789"),
 ) : HostPort {
+    /** [sessionTools] 是假实现时的它（测试断言用）；构造时换成别的实现（例如 NONE）则抛异常。 */
+    val fakeSessionTools: FakeSessionToolPort get() = sessionTools as FakeSessionToolPort
+
     val activeModel = MutableStateFlow(model)
     val safeMode = MutableStateFlow(SafeModeState.OFF)
 
@@ -196,8 +201,12 @@ class FakeHostPort(
         override val databasePath: String = databaseFile.absolutePath
     }
 
+    /** 会话可以选的模型（`ModelConfigPort.choices`）；默认没有。 */
+    val choices = MutableStateFlow<List<ModelChoice>>(emptyList())
+
     override val models: ModelConfigPort = object : ModelConfigPort {
         override val activeModel: StateFlow<ModelSpec?> = this@FakeHostPort.activeModel
+        override val choices: StateFlow<List<ModelChoice>> = this@FakeHostPort.choices
     }
 
     // 只适合测试：这里用 startsWith 做字符串前缀匹配，生产不要照抄（前缀匹配会把 key 交给 https://api.example.com.evil.net）。
@@ -232,6 +241,70 @@ class FakeHostPort(
                 put("contextWindow", 200_000)
                 put("maxTokens", 8_192)
             },
+        )
+    }
+}
+
+
+/**
+ * `SessionToolPort` 的假实现（会话级工具）：记录每个会话 attach 过什么，给每个“连得上”的服务器一个写级工具 `ses__<server>__ping`，
+ * 调用它返回 `pong:<server>`。可以让指定名字的服务器连不上，或让整批被拒绝。
+ */
+class FakeSessionToolPort : org.agentos.runtime.ports.SessionToolPort {
+    class Attached(val owner: org.agentos.runtime.ports.CallerIdentity, val servers: List<org.agentos.runtime.ports.SessionMcpServer>)
+
+    val attached = java.util.concurrent.ConcurrentHashMap<String, Attached>()
+    val detached: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+    val invocations: MutableList<org.agentos.runtime.ports.ToolInvocation> = java.util.Collections.synchronizedList(mutableListOf())
+    private val tools = java.util.concurrent.ConcurrentHashMap<String, List<org.agentos.runtime.ports.CatalogTool>>()
+
+    /** 非 null 时 [attach] 一律抛它。 */
+    @Volatile var reject: org.agentos.runtime.ports.SessionMcpRejected? = null
+
+    /** 这些名字的服务器“连不上”。 */
+    @Volatile var unreachable: Set<String> = emptySet()
+
+    override suspend fun attach(
+        sessionId: String,
+        owner: org.agentos.runtime.ports.CallerIdentity,
+        servers: List<org.agentos.runtime.ports.SessionMcpServer>,
+    ): List<org.agentos.runtime.ports.SessionMcpResult> {
+        reject?.let { throw it }
+        attached[sessionId] = Attached(owner, servers)
+        tools[sessionId] = servers.filter { it.name !in unreachable }.map {
+            org.agentos.runtime.ports.CatalogTool(
+                name = "ses__${it.name}__ping",
+                description = "Ping ${it.name}",
+                inputSchema = buildJsonObject { put("type", "object") },
+                risk = org.agentos.runtime.ports.ToolRisk.WRITE,
+                provider = "session:${it.name}",
+            )
+        }
+        return servers.map {
+            if (it.name in unreachable) {
+                org.agentos.runtime.ports.SessionMcpResult(it.name, connected = false, reason = "connect_failed")
+            } else {
+                org.agentos.runtime.ports.SessionMcpResult(it.name, connected = true, toolCount = 1)
+            }
+        }
+    }
+
+    override fun detach(sessionId: String) {
+        detached += sessionId
+        attached.remove(sessionId)
+        tools.remove(sessionId)
+    }
+
+    override fun tools(sessionId: String): List<org.agentos.runtime.ports.CatalogTool> = tools[sessionId].orEmpty()
+
+    override suspend fun invoke(invocation: org.agentos.runtime.ports.ToolInvocation): org.agentos.runtime.ports.ToolInvocationResult {
+        invocations += invocation
+        val tool = tools(invocation.sessionId).firstOrNull { it.name == invocation.name }
+            ?: return org.agentos.runtime.ports.ToolInvocationResult.NotDispatched(
+                org.agentos.runtime.errors.ErrorCode.TOOL_NOT_IN_CATALOG.info("no such session tool"),
+            )
+        return org.agentos.runtime.ports.ToolInvocationResult.Completed(
+            org.agentos.runtime.ports.ToolResult.text("pong:" + tool.provider.removePrefix("session:")),
         )
     }
 }

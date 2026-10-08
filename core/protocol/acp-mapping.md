@@ -1,6 +1,6 @@
 # ACP 在 AgentOS 里的落地：方法范围与事件映射（acp-mapping v1）
 
-- **状态**：v1，W4 冻结 M1 的方法范围、映射规则和“自动选会话”扩展；W9 追加电脑端接入的传输与配对握手（第 10 节）；M2（W10）、M3a（W16）按第 2 节的计划追加。
+- **状态**：v1，W4 冻结 M1 的方法范围、映射规则和“自动选会话”扩展；W9 追加电脑端接入的传输与配对握手（第 10 节）；**会话生命周期、会话级模式与模型、调用方自带的 MCP 服务器、会话建立收尾标记（第 4a–4d 节）已实现**；持久化提交与增量恢复（W10）、`session/request_permission`（W16）按第 2 节的计划追加。
 - **依据**：[acp-profile-v1.md](acp-profile-v1.md)（对外协议的权威文档）、architecture 5.3 / 5.6、[core/contracts/events.md](../contracts/events.md)、[errors.md](../contracts/errors.md)、[binder-channel-v1.md](binder-channel-v1.md)。
 - **实现**：`core/runtime/.../acp/`（`AgentSide.kt`：Agent 端与会话；`UpdateMapper.kt`：事件 → `session/update`；`ProfileExtensions.kt`：`_meta` 约定；`LineTransport.kt`：按行传输），官方 ACP Kotlin SDK 0.30.1 的 Agent 端；电脑端接入：`core/runtime/.../desktop/`（开关、配对、握手、连接管理）+ app 的 `DesktopGateway.kt`（抽象 socket）+ `tools/acp-bridge/`。扩展字段的 schema：[acp-extensions.schema.json](acp-extensions.schema.json)。
 - **测试**：`AcpAgentSideTest`（SDK 的 Kotlin Client，10 例）、`RuntimeStartTest`（启动与恢复期间，4 例）、`LineTransportTest`（8 例）、`DesktopPairingTest`（10 例）、`DesktopGatewayCoreTest`（11 例）；`tests/acp-conformance/`（官方 TypeScript 客户端 1.4.0）：14 例分别经 stdio 和电脑上的网关 + `tools/acp-bridge` 跑（Agent 循环 FakeAgentCore 或真实 Pi），网关配对与安全 9 例；手机上（设备可选）经 `adb forward` 跑同样的 14 例（依赖工具、确认、Jev 的 4 例跳过）、设备专属 3 例、配对与安全 9 例。
@@ -28,11 +28,17 @@
 | `session/prompt` | M1 | 第 5 节；本轮结束才返回 `stopReason` |
 | `session/update`（Agent → Client） | M1 | 第 6 节 |
 | `session/cancel` | M1 | 第 8 节 |
-| `session/load` | M2（W10） | 目前 `loadSession: false`，调用返回 -32601 |
+| `session/load` | 已启用 | 第 4a 节：重放历史后返回；`loadSession: true` |
+| `session/resume` | 已启用 | 第 4a 节：不重放历史 |
+| `session/fork` | 已启用 | 第 4a 节：带着已结束的几轮，范围只能收窄 |
+| `session/list` | 已启用 | 第 4a 节：只列调用方自己的会话（AgentOS 自己的界面看全部） |
+| `session/delete` | 已启用 | 第 4a 节：先停下进行中的任务，再删会话、任务、事件、Pi messages |
+| `session/close` | 已启用 | 第 4a 节：释放内存，保留会话和历史 |
+| `session/set_mode`、配置项 `mode` | 已启用 | 第 4b 节：只能在 toolScope 之上再收一层 |
+| `session/set_model`、配置项 `model` | 已启用（有可选模型时） | 第 4b 节：只能选同一个 key 下的模型 |
+| `mcpServers`（`session/new` 等） | 已启用，只收 `http`（Streamable HTTP） | 第 4c 节；`stdio`、`sse` 返回 `unsupported` |
 | 持久化提交、增量恢复扩展 | M2（W10） | 名字已保留（acp-extensions.schema.json `reservedExtensions`） |
 | `session/request_permission`（Agent → Client） | M3a（W16） | 只能追加拒绝，不能替用户同意（architecture 5.3）。M1 不发 |
-| `session/resume`、`session/fork`、`session/list`、`session/delete` | 不启用 | 返回 -32601 |
-| `session/close`、`session/set_mode`、`session/set_model`、配置项 | 不启用 | 不声明对应能力 |
 | `authenticate` | 不启用 | `authMethods` 为空；电脑端的配对在 ACP 之前、传输层完成（第 10 节） |
 | 客户端的文件系统、终端能力 | 不使用 | Android 上没有对应的工作目录语义；客户端声明了也不调用 |
 
@@ -41,19 +47,20 @@
 | 字段 | 值 |
 |---|---|
 | `protocolVersion` | 1（ACP v1；SDK 按 v1 协商，客户端请求别的版本也答 1） |
-| `agentCapabilities.loadSession` | `false`（W10 起为 true） |
+| `agentCapabilities.loadSession` | `true`（第 4a 节） |
 | `agentCapabilities.promptCapabilities` | `image: false`、`audio: false`、`embeddedContext: true`。Profile：图片等能力验证后再声明 |
-| `agentCapabilities.mcpCapabilities` | `http: false`、`sse: false`：工具来自 AgentOS 的插件，客户端不能传 MCP 服务器 |
+| `agentCapabilities.mcpCapabilities` | `http: true`（构建接了会话级工具时）、`sse: false`：第 4c 节 |
+| `agentCapabilities.sessionCapabilities` | `fork`、`list`、`resume`、`delete`、`close` 都声明（第 4a 节） |
 | `agentInfo` | `{ name: "agentos", title: "AgentOS", version: <App 版本> }` |
 | `authMethods` | `[]` |
-| `_meta."org.agentos"` | `{ profile: 1, runtime, securityLevel: "best_effort", extensions: { sessionAutoSelect: { version: 1 }, toolScope: { version: 1 } } }` |
+| `_meta."org.agentos"` | `{ profile: 1, runtime, securityLevel: "best_effort", extensions: { sessionAutoSelect: { version: 1 }, toolScope: { version: 1 }, sessionSetup: { version: 1 } } }` |
 
 客户端在请求的 `_meta."org.agentos".extensions` 里声明要用的扩展（字符串数组）。`toolScope` 只在这里**声明**让客户端探测，不要求协商（见第 4 节）。
 
 ## 4. `session/new`
 
 - `cwd` 只作标签（记在会话上），不作为文件系统根；可以是任意字符串。
-- `mcpServers` 非空：返回 -32602，`data.agentosCode = unsupported`（Profile：明确拒绝，不静默忽略）。
+- `mcpServers`：第 4c 节。`stdio`、`sse` 返回 -32602（`data.agentosCode = unsupported`，Profile：明确拒绝，不静默忽略）；`http` 挂到这个会话上。
 - `additionalDirectories`：忽略。
 - 返回的 `sessionId` 形如 `ses_<26 位 ULID>`，归属调用方（`ownerKey`）。
 - **自动选会话扩展**：请求带 `_meta."org.agentos".autoSelect.query` 时，运行时在调用方自己的会话里选一个或新建（session-selection.md），返回的 `sessionId` 可能是已有会话；之后发一条 `session/update`（`session_info_update`，普通字段为空），在 `_meta."org.agentos".selection` 里告知 `{ sessionId, created, method, fallbackReason? }`。没有在 `initialize` 里声明 `sessionAutoSelect` 就带上 `autoSelect`：返回 -32602（`invalid_params`）。`query` 为空同样拒绝。
@@ -68,6 +75,66 @@
   - 不要求在 `initialize` 里协商：它只会让会话能用的工具**更少**，不改变任何标准方法的含义。（与 `sessionAutoSelect` 不同，那个会改变 `session/new` 返回的会话。）
 
 选择这种形式而不是单独的 `_agentos/…` 方法，是因为 SDK 的 Agent 只在 `session/new`（和 load / resume / fork）里把会话登记到连接上；单独的方法返回的会话 ID 无法接着发 `session/prompt`。选择结果放在随后的通知里，是因为 SDK 0.30.1 不在 `session/new` 的响应里带 `_meta`。
+
+## 4a. 会话生命周期：`list`、`load`、`resume`、`fork`、`delete`、`close`
+
+**归属**（先于一切）：调用方只能碰自己创建的会话（`ownerKey` = Binder 调用方 UID；电脑端共用一个会话空间；AgentOS 自己看全部）。别人的、已删除的、从没有过的会话，对 `load`、`resume`、`fork`、`delete`、`set_*` 的回答**完全一样**：`session_not_found`（消息 `session_not_found: no such session`），看不出是哪一种；`list` 只列自己的。
+
+| 方法 | 行为 |
+|---|---|
+| `session/list` | 调用方自己的会话，最近活动在前，最多 200 个；`cwd` 过滤。每项：`sessionId`、`cwd`、`title`（第一条 prompt 的第一行，最多 80 字符，还没有为空）、`updatedAt`（ISO 8601）。 |
+| `session/load` | 取回会话。**先**按事件日志把历史重放成 `session/update`（`user_message_chunk`、`agent_message_chunk`、`agent_thought_chunk`、`tool_call`、`tool_call_update`，与实时的一轮用同一个映射），重放完才返回响应。会话很长时只重放最近 `AcpConfig.maxReplayTurns`（200）轮；没结束就停下的一轮里还停在“进行中”的工具调用补一条 `failed`。每条之前过出站背压（`OutboundGate`）。请求里的 `_meta.toolScope` **忽略**：范围属于会话，创建时定下，加载不能改。`mcpServers` 是这次连接要用的那批，**替换**会话原来挂的。 |
+| `session/resume` | 同 `load`，但不重放。 |
+| `session/fork` | 新会话属于调用方，带着原会话**已结束的**任务的事件（`consent.*`、`hook.*` 不拷：那是当时的一次授权，不属于对话内容）和最近一次稳定的 Pi messages，模型、模式、选择元数据沿用；进行中的一轮不带过去。请求的 `toolScope` 只能在原会话的范围之上**收窄**（取交集；空交集 = 没有工具，不是不限制）。**不继承** MCP 服务器（它们的 URL 和头是原会话的），要用在请求的 `mcpServers` 里重新给。审计：`session.created` 带 `forkedFrom`。 |
+| `session/delete` | 先取消没结束的任务并等它们停下（最多 `cancelWaitMillis`，没停下返回 `busy`，会话原样保留），再释放 Pi 会话、会话级工具，删会话、任务、工具调用、Pi messages 和**事件日志**（`events` 没有外键，自己删）。系统流不能删。 |
+| `session/close` | 取消没结束的任务并等它们停下，释放内存（Pi 会话、会话级工具的连接、“本会话内不再询问”的记忆）。**会话和历史保留**，以后可以 `load` 或 `resume` 回来。 |
+
+`load` 和 `resume` 还会在响应之前发 `session_info_update`，`_meta."org.agentos"` 里有 `mcpServers`（各服务器的连接状态）和 `activeTask`（会话里还有一轮没结束 `{taskId, state}`），见第 4d 节。客户端在 `activeTask` 结束前再发 prompt 会排在它后面（第 5 节）；想重来就 `session/cancel`。
+
+**与 ACP SDK 0.30.1 客户端的一个已知行为**：同一条连接上对**同一个会话 ID** 再 `load` 或 `resume`，SDK 的客户端把通知和流式输出继续发给第一次注册的回调和会话对象，新返回的会话对象 prompt 时收不到文字（JVM 复现：第二次 load 之后 `text=0`）。这是锁定版本的行为，不是服务端问题；`sdk:acp-android` 在每条连接上按会话 ID 只保留一份并复用（设备用例 `sessions` 的 `repeatLoadStreams` 覆盖）。直接用官方 SDK 的第三方要自己注意。
+
+## 4b. 会话级模式与模型：`set_mode`、`set_model`、配置项
+
+存在会话上（schema v4：`sessions.mode`、`sessions.model_id`），**下一个任务起生效**，进行中的任务不受影响；随会话保存，`load`、`resume`、`fork` 带回来。`session/new`、`load`、`resume`、`fork` 的响应带 `modes`、`models`、`configOptions`。
+
+**模式只能收窄**：在会话创建时定下的 toolScope（和调用方策略）之上再收一层，任何模式都不会放宽。
+
+| 模式 | 交给模型的工具 |
+|---|---|
+| `default` | toolScope 范围内的全部（写级每次确认，高风险每次确认，用户策略照常生效） |
+| `read_only` | 只有读级工具；写级、高风险、调用方自带的 MCP 工具（写级起步）都不交给模型 |
+| `chat` | 一个都没有，系统提示里也没有 Skill 目录 |
+
+模式隐藏的工具，模型按名字硬调也会在 `authorize` / `execute` 被拒（`tool_not_in_catalog`，文字与工具真不存在时一字不差，也不会弹确认）。存储里读不懂的模式值按 `chat`（最窄）处理，不会放宽。未知的模式、空串 → -32602 `invalid_params`，不改任何东西。
+
+**模型只能在“同一个 key 下的模型”里选**（`ModelConfigPort.choices`）：用户选的是厂商预设时，该厂商目录里 baseUrl 也被同一把 key 覆盖的模型；自定义端点没有可选的（不声明 `models`，`set_model` 返回 `unsupported`）。选不在列表里的 id → -32602，消息不回显传进来的值；不能指定别的端点，也不能带自己的 key。会话选的模型之后不再可选（用户换了厂商）时，回落到用户在设置里选的模型；没有可用的 key 时任务照常以 `model_not_configured` 失败，会话级模型绕不过它。思考档位：所选模型支持推理时沿用用户的设置，否则关闭。
+
+配置项：`mode`（`category: mode`）、`model`（`category: model`，有可选模型时）；值必须是字符串，别的类型、未知的配置项 → -32602。
+
+## 4c. 调用方自带的 MCP 服务器：`mcpServers`
+
+`session/new`、`load`、`resume`、`fork` 的 `mcpServers` 里，调用方可以带自己的 MCP 服务器，**只对这个会话可见**。只收 `http`（Streamable HTTP，MCP 2025-06-18）：`stdio` 要在手机上起任意进程，`sse` 是 MCP 已经弃用的传输，都返回 `unsupported`，错误消息只说第几项和类型，不回显名字、URL、头。构建没接会话级工具时 `mcpCapabilities.http = false`，非空的 `mcpServers` 一律 `unsupported`。
+
+**信任边界**（与插件工具不同，因为来源是调用方、不是用户）：
+
+- 用户没在插件页里审阅过它，所以**不进用户策略**（`ApprovalPolicy`），**永远没有“始终允许”**（那张表的键是插件/服务器/工具，调用方可以随便取名撞上用户给别的工具设的键）；`alwaysAllowOffered = false`。
+- 风险**至少写级**（每次确认）；服务端注解只能调高（`destructiveHint` → 高风险），`readOnlyHint` 不降级。所以 `read_only` 和 `chat` 模式下看不到它们。
+- 工具名 `ses__<服务器>__<工具>`（≤ 64 字符，超长截断加哈希，会话内唯一），**永远不以 `mcp__` 开头**，不会和插件工具或 `read_skill` 重名；`CatalogTool.source = null`，`provider = session:<服务器>`。toolScope 只缩小插件工具，不涉及它们。
+- **URL 和头只在 `:agent` 进程的内存里**：不进 Store、事件、日志、确认框、`toString`、`SessionMcpResult`。进程重启后要调用方在 `load` 或 `resume` 里重新带上来。
+- 会话 `close`、`delete` 时断开并丢弃；`load`、`resume`、`fork` 的 `mcpServers` 是替换，不是追加。
+
+**校验**（整批，失败 → -32602 `invalid_params`，不创建会话，消息写哪条规则、不回显值；数量或总量超限 → `quota_exceeded`，`details.reason = mcp_servers`）：最多 4 个/会话、每个 App 8 个、总共 64 个；名字 `[A-Za-z0-9_.-]{1,48}`；URL 必须 `https`，≤ 2048 字符，无 userinfo，不指向本机、内网、链路本地（含 169.254.169.254）、CGNAT、多播、IPv6 ULA（IPv4 映射按内嵌的 IPv4 判断），不是 `localhost`、`*.local`、`*.internal`、`*.lan`、`*.home.arpa`、无点主机名，数字写法的 IP 只收规范点分十进制；头最多 16 个，禁用 `Host`、`Content-Type`、`Mcp-Session-Id`、`Origin` 等，值不含控制字符；DNS 解析结果只要有一个非公网地址就整个拒绝（防 DNS rebinding）；**不跟随重定向**；响应体有大小上限。
+
+**连不上不让会话失败**：这个服务器的结局是 `connected: false` + 短代码 `reason`（`connect_failed`、`timeout`、`list_failed`、`too_many_tools`…，不含 URL 和头），经第 4d 节的通知告诉调用方；它的工具这次没有，每个任务开始前 AgentOS 再试着连一次（失败后 30 秒内不重试）。
+
+## 4d. 会话建立的通知：`sessionSetup`
+
+`session/new`、`load`、`resume`、`fork` 在响应**之前**可能发 `session/update` 和 `session_info_update`。官方 SDK 的客户端对通知和响应是并发处理的，**响应回来不等于通知都到了**（设备上实测出过：偶尔拿不到 MCP 服务器状态）。所以有一个**要协商**的扩展：
+
+- 客户端在 `initialize` 的 `_meta."org.agentos".extensions` 里带 `"sessionSetup"`；AgentOS 在响应里声明 `extensions.sessionSetup`（旧版本没有，客户端就不等）。
+- 协商了的客户端，每次会话建立的**最后一条通知**、响应之前，是一条 `session_info_update`，`_meta."org.agentos"` 里有 `setup: { replayed: N }`（前面一共重放了 N 条 `session/update`，不含 `session_info_update`；新建、分叉、`resume` 是 0），和这次的 `mcpServers`（`[{name, connected, toolCount, reason?}]`）、`activeTask`（`{taskId, state}`）、`selection`（自动选会话的结果）放在同一个对象里。
+- 客户端等到这条标记**和** N 条 `session/update` 都到齐，才算历史和状态收齐；等不到（SDK 默认 5 秒）就用手上有的。
+- 没协商的客户端不会收到 `setup`；`mcpServers`、`activeTask`、`selection` 仍然在有内容时发（与以前一样）。标准 ACP 客户端看到的只是普通字段为空的 `session_info_update`。
 
 ## 5. `session/prompt`
 
@@ -231,9 +298,12 @@
 
 ## 12. 待定与已知限制
 
-- `session/load`、持久化提交、增量恢复：W10。
+- 持久化提交、增量恢复（`clientRequestId` 幂等提交、事件游标补发）：W10。`session/load` 已实现（第 4a 节），它重放的是已提交的历史，不是按游标补发。
 - `session/request_permission`：W16。
 - 图片输入：模型与真机验证后打开 `promptCapabilities.image`。
-- `session/load` 启用时（W10）：必须忽略请求里的 `toolScope`，用会话创建时存下的那个（4.5：scope 属于会话，加载不能改）。
+- `session/load`、`resume` 忽略请求里的 `toolScope`，用会话创建时存下的那个（4.5：scope 属于会话，加载不能改）；有测试覆盖。
+- 会话级 MCP 服务器只实现了 POST 响应流：没有服务端推送的 GET 流、没有 SSE 断线续传，也不回复服务端发来的请求（ping、sampling）。
+- 重放历史是整段发的，不分页；会话很长时只发最近 200 轮。
+- 图片输入仍然关闭，`promptCapabilities.image = false`。
 - 第三方 App 的配额计数在内存里，:agent 进程重启后清零（见 session-scheduling.md 第 5.1 节）。
 - SDK 的 Kotlin Client 会把 prompt 之前到达的会话通知并进下一轮的事件流；自带界面（W8）如果要读自动选会话的结果，应从那一轮的事件里取 `session_info_update`。

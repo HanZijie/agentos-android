@@ -204,12 +204,12 @@ class CallerPackageStoreTest {
     }
 
     @Test
-    fun `a version 2 database opens, moves to version 3, and its old tasks have no package`() {
+    fun `a version 2 database opens, moves up to the current version, and its old tasks have no package`() {
         val first = runtime()
         var oldTask = ""
         run(first) { oldTask = first.oneTurn(notes).first.id }
-        assertEquals(3L, rawSql(first.databaseFile), "a new database is created at version 3")
-        rawSql(first.databaseFile, "ALTER TABLE tasks DROP COLUMN caller_package", "PRAGMA user_version = 2")
+        assertEquals(4L, rawSql(first.databaseFile), "a new database is created at the current version")
+        rawSql(first.databaseFile, "ALTER TABLE tasks DROP COLUMN caller_package", "ALTER TABLE sessions DROP COLUMN model_id", "ALTER TABLE sessions DROP COLUMN mode", "PRAGMA user_version = 2")
         assertEquals(2L, rawSql(first.databaseFile))
 
         val second = runtime(file = first.databaseFile)
@@ -220,7 +220,7 @@ class CallerPackageStoreTest {
             val (fresh, _) = second.oneTurn(notes)
             assertEquals("org.agentos.sample.notes", second.engine.task(fresh.id)!!.callerPackage)
         }
-        assertEquals(3L, rawSql(second.databaseFile))
+        assertEquals(4L, rawSql(second.databaseFile))
         second.host.deleteDatabase()
     }
 
@@ -228,14 +228,14 @@ class CallerPackageStoreTest {
     fun `a version 1 database goes through both steps`() {
         val first = runtime()
         run(first) { first.oneTurn(TestRuntime.SELF) }
-        rawSql(first.databaseFile, "ALTER TABLE tasks DROP COLUMN caller_package", "ALTER TABLE sessions DROP COLUMN tool_scope", "PRAGMA user_version = 1")
+        rawSql(first.databaseFile, "ALTER TABLE tasks DROP COLUMN caller_package", "ALTER TABLE sessions DROP COLUMN tool_scope", "ALTER TABLE sessions DROP COLUMN model_id", "ALTER TABLE sessions DROP COLUMN mode", "PRAGMA user_version = 1")
         val second = runtime(file = first.databaseFile)
         run(second) {
             val (task, _) = second.oneTurn(notes)
             assertEquals("org.agentos.sample.notes", second.engine.task(task.id)!!.callerPackage)
             assertNull(second.engine.session(notes, second.engine.storeForTesting.read { it.tasks.get(task.id)!!.sessionId }).toolScope)
         }
-        assertEquals(3L, rawSql(second.databaseFile))
+        assertEquals(4L, rawSql(second.databaseFile))
         second.host.deleteDatabase()
     }
 }

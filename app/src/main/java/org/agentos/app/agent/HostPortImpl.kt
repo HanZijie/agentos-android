@@ -17,6 +17,7 @@ import org.agentos.runtime.ports.HookRequest
 import org.agentos.runtime.ports.HostPort
 import org.agentos.runtime.ports.RuntimeLog
 import org.agentos.runtime.ports.SafeModeState
+import org.agentos.runtime.ports.SessionToolPort
 import org.agentos.runtime.ports.SkillCatalog
 import org.agentos.runtime.ports.SkillContent
 import org.agentos.runtime.ports.SkillPort
@@ -41,6 +42,7 @@ import org.agentos.runtime.ports.ToolPort
  * | consent | [ConsentCoordinator]（见 AgentProcess）：前台对话框、后台通知（D5.2）；[NotOpen.CONSENT] 只是构造默认值 | — |
  * | skills | [ExtensionClient.skills]：`:ext` 里 ExtensionSkillPort 的代理（C7b） | — |
  * | hooks | [NotOpen.HOOKS]：没有 Hook，NO_OPINION | W22 |
+ * | sessionTools | `core:extensions` 的 SessionToolHost：调用方在 `mcpServers` 里带的 Streamable HTTP 服务器，只在内存里，随会话存在 | — |
  */
 class HostPortImpl(
     override val storage: AndroidStore,
@@ -53,6 +55,8 @@ class HostPortImpl(
     override val skills: SkillPort = NotOpen.SKILLS,
     /** 工具调用的用户确认：默认一律拒绝；AgentProcess 传入 ConsentCoordinator（D5.2，release 和 debug 都是）。 */
     override val consent: ConsentPort = NotOpen.CONSENT,
+    /** 调用方在 ACP `mcpServers` 里带来的、只对它自己的会话可见的 MCP 服务器（Streamable HTTP）；默认不支持。AgentProcess 传入 SessionToolHost。 */
+    override val sessionTools: SessionToolPort = SessionToolPort.NONE,
 ) : HostPort {
     override val hooks: HookPort = NotOpen.HOOKS
     override val clock: Clock = Clock.SYSTEM

@@ -14,6 +14,8 @@ import org.agentos.acp.AgentOsConnection
 import org.agentos.acp.AgentOsError
 import org.agentos.acp.AgentOsEvent
 import org.agentos.acp.AgentOsException
+import org.agentos.acp.McpHttpServer
+import org.agentos.acp.SessionMode
 import org.agentos.acp.ToolRef
 import org.agentos.channel.ChannelConfig
 import org.agentos.test.acp.AcpConn
@@ -31,6 +33,8 @@ import org.json.JSONObject
  *   主机端据此在连接已建好之后撤销。
  * - `tp-detach`：发一个长 prompt，看到第一段输出后自己关通道（不取消任务）；返回时任务还在 AgentOS 里跑、通道已经没有了。
  * - `tp-spoof`：用别的 App 的包名、名字去“冒充”：open 不带任何名字，initialize 的 clientInfo 里写别人的包名；AgentOS 只看 UID。
+ * - `tp-sessions`：会话的完整生命周期（新建 → 列表 → 另一条连接 load / resume → fork → 模式 → 模型 → 自带 MCP 服务器 → close → delete），
+ *   全部经真实的 Binder 和真实的 AgentOS；每一项返回一个布尔，由 third_party.py 核对。
  */
 class ThirdPartyScenarios(private val ctx: Context, private val scope: CoroutineScope, private val runId: String, private val status: (String) -> Unit) {
 
@@ -41,6 +45,7 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
         "tp-detach" -> detach(args)
         "tp-spoof" -> spoof(args)
         "tp-info" -> info()
+        "tp-sessions" -> sessions(args)
         else -> null
     }
 
@@ -113,6 +118,7 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
                                 is AgentOsEvent.Text -> text.append(e.chunk)
                                 is AgentOsEvent.ToolCall -> events.put(JSONObject().put("id", e.id).put("tool", e.tool).put("status", e.status.name).put("ref", e.ref?.let { "${it.plugin}:${it.tool}" } ?: JSONObject.NULL))
                                 is AgentOsEvent.Done -> done = e.stopReason
+                                is AgentOsEvent.Thought, is AgentOsEvent.UserMessage -> Unit // prompt() 默认不发思考；用户消息只在 loadSession 的历史里
                             }
                         }
                     }
@@ -221,5 +227,136 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
         } finally {
             c.dispose()
         }
+    }
+
+    // ------------------------------------------------------------------ tp-sessions
+
+    private suspend fun sessions(args: JSONObject): JSONObject {
+        val checks = JSONObject()
+        val notes = JSONObject()
+        fun check(name: String, ok: Boolean) { checks.put(name, ok) }
+        suspend fun errorOf(block: suspend () -> Unit): String? = try { block(); null } catch (e: AgentOsException) { e.error.name }
+        // 诊断：失败时看得到异常类型和消息，而不是只有一个枚举名
+        suspend fun detailOf(block: suspend () -> Unit): String = try { block(); "no exception" } catch (e: AgentOsException) { "${e.error.name}: ${e.message} cause=${e.cause?.javaClass?.name}: ${e.cause?.message?.take(120)}" }
+        fun shape(h: List<AgentOsEvent>) = h.groupingBy { it::class.simpleName ?: "?" }.eachCount().toString()
+
+        val first = AgentOs.connect(ctx)
+        val second = AgentOs.connect(ctx)
+        try {
+            val caps = first.capabilities
+            notes.put("capabilities", caps.toString())
+            check("capabilitiesAllOn", caps.loadSession && caps.resumeSession && caps.forkSession && caps.listSessions && caps.deleteSession && caps.closeSession && caps.mcpHttpServers)
+
+            // ---- 新建、两轮、会话 ID
+            val p1 = """{"chunks":3,"chunkChars":4,"text":"A","intervalMs":0}"""
+            val p2 = """{"chunks":2,"chunkChars":4,"text":"B","intervalMs":0}"""
+            val s1 = first.newSession()
+            check("sessionIdShape", s1.sessionId.startsWith("ses_") && s1.sessionId.length == 30)
+            check("newHistoryEmpty", s1.history.isEmpty() && s1.activeTaskId == null && s1.mcpServers.isEmpty())
+            val t1 = withTimeout(90_000) { s1.prompt(p1).toList() }
+            val t2 = withTimeout(90_000) { s1.prompt(p2).toList() }
+            check("turnsEnded", (t1.last() as? AgentOsEvent.Done)?.stopReason == "end_turn" && (t2.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
+            check("liveTurnDoesNotEchoUser", t1.none { it is AgentOsEvent.UserMessage } && t1.none { it is AgentOsEvent.Thought })
+
+            // ---- 列表
+            val listed = first.listSessions()
+            check("listedWithTitle", listed.any { it.sessionId == s1.sessionId && it.title == p1.lineSequence().first().take(80) && it.updatedAt != null })
+
+            // ---- 另一条连接 load：历史按顺序完整，之后能继续
+            val loaded = second.loadSession(s1.sessionId)
+            notes.put("loadedHistory", shape(loaded.history))
+            notes.put("loadedText", loaded.history.filterIsInstance<AgentOsEvent.Text>().joinToString("") { it.chunk }.take(200))
+            val users = loaded.history.filterIsInstance<AgentOsEvent.UserMessage>().map { it.text }
+            check("loadReplaysUserMessages", users == listOf(p1, p2))
+            // 重放出来的答案和当时实时流出来的完全一样（都来自同一份事件日志）
+            fun textOf(events: List<AgentOsEvent>) = events.filterIsInstance<AgentOsEvent.Text>().joinToString("") { it.chunk }
+            val replayedText = textOf(loaded.history)
+            notes.put("liveText", (textOf(t1) + textOf(t2)).take(80))
+            check("loadReplaysAnswers", replayedText.isNotEmpty() && replayedText == textOf(t1) + textOf(t2))
+            val order = loaded.history.map { it::class.simpleName }
+            check("loadHistoryInOrder", order.indexOf("UserMessage") < order.indexOf("Text") && order.lastIndexOf("UserMessage") > order.indexOf("Text"))
+            val t3 = withTimeout(90_000) { loaded.prompt(p1).toList() }
+            check("loadedSessionContinues", (t3.last() as? AgentOsEvent.Done)?.stopReason == "end_turn" && loaded.sessionId == s1.sessionId)
+
+            // ---- 同一条连接上再 load 同一个会话：历史是最新的，而且返回的会话照常流式输出
+            val again = second.loadSession(s1.sessionId)
+            check("repeatLoadHasFullHistory", again.history.filterIsInstance<AgentOsEvent.UserMessage>().map { it.text } == listOf(p1, p2, p1))
+            val t4 = withTimeout(90_000) { again.prompt(p2).toList() }
+            check("repeatLoadStreams", textOf(t4).isNotEmpty() && (t4.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
+            notes.put("repeatLoadText", textOf(t4).take(40))
+
+            // ---- resume：不重放
+            val resumed = second.resumeSession(s1.sessionId)
+            check("resumeHasNoHistory", resumed.history.isEmpty())
+
+            // ---- fork：独立的新会话，历史是到目前为止的
+            val forked = first.forkSession(s1.sessionId)
+            check("forkIsNewSession", forked.sessionId != s1.sessionId)
+            val forkView = second.loadSession(forked.sessionId)
+            check("forkCarriesFinishedTurns", forkView.history.filterIsInstance<AgentOsEvent.UserMessage>().map { it.text } == listOf(p1, p2, p1, p2))
+            check("listHasBoth", first.listSessions().map { it.sessionId }.containsAll(listOf(s1.sessionId, forked.sessionId)))
+
+            // ---- 模式
+            check("modeStartsDefault", s1.mode == SessionMode.DEFAULT)
+            s1.setMode(SessionMode.READ_ONLY)
+            check("modeSetReadOnly", s1.mode == SessionMode.READ_ONLY)
+            check("modeSeenByLoad", second.loadSession(s1.sessionId).mode == SessionMode.READ_ONLY)
+            s1.setMode(SessionMode.CHAT)
+            val chatTurn = withTimeout(90_000) { s1.prompt(p2).toList() }
+            check("chatModeStillAnswers", (chatTurn.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
+            s1.setMode(SessionMode.DEFAULT)
+            check("modeBackToDefault", s1.mode == SessionMode.DEFAULT)
+
+            // ---- 模型：测试用的是自定义端点，没有“同一个 key 下的其他模型”可选
+            notes.put("availableModels", s1.availableModels.size)
+            check("noModelChoicesOnCustomEndpoint", s1.availableModels.isEmpty() && s1.model == null)
+            check("setModelUnsupported", errorOf { s1.setModel("gpt-whatever") } == "UNSUPPORTED")
+
+            // ---- 自带 MCP 服务器：不合规的整批被拒绝，不留下会话
+            val before = first.listSessions().size
+            val bad = mapOf(
+                "http" to McpHttpServer("a", "http://example.com/mcp"),
+                "loopback" to McpHttpServer("a", "https://127.0.0.1/mcp"),
+                "metadata" to McpHttpServer("a", "https://169.254.169.254/latest/meta-data"),
+                "private" to McpHttpServer("a", "https://192.168.1.10/mcp"),
+                "userinfo" to McpHttpServer("a", "https://user:pw@example.com/mcp"),
+                "crlf" to McpHttpServer("a", "https://example.com/mcp", listOf("X-Test" to "a\r\nHost: evil")),
+                "forbiddenHeader" to McpHttpServer("a", "https://example.com/mcp", listOf("Host" to "evil")),
+            )
+            val rejected = JSONObject()
+            for ((label, server) in bad) rejected.put(label, errorOf { first.newSession(mcpServers = listOf(server)) } ?: "ACCEPTED")
+            notes.put("rejectedDetail", detailOf { first.newSession(mcpServers = listOf(bad.getValue("http"))) })
+            notes.put("rejected", rejected)
+            check("badMcpServersRejected", bad.keys.all { rejected.getString(it) == "INVALID_REQUEST" })
+            check("rejectedLeftNoSession", first.listSessions().size == before)
+
+            // ---- 自带 MCP 服务器：地址合规但连不上，会话照常建立，状态里说明哪一个
+            val down = first.newSession(mcpServers = listOf(McpHttpServer("down", "https://no-such-host.invalid/mcp", listOf("Authorization" to "Bearer SECRET-DEVICE-TOKEN"))))
+            notes.put("mcpStatus", down.mcpServers.joinToString { "${it.name}:${it.connected}:${it.reason}" })
+            check("unreachableServerReported", down.mcpServers.size == 1 && down.mcpServers[0].name == "down" && !down.mcpServers[0].connected && down.mcpServers[0].reason != null)
+            val downTurn = withTimeout(90_000) { down.prompt(p1).toList() }
+            check("sessionWorksWithUnreachableServer", (downTurn.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
+
+            // ---- close 保留会话；delete 彻底删除；找不到的和别人的一个样
+            s1.close()
+            val afterClose = second.loadSession(s1.sessionId)
+            notes.put("afterCloseHistory", shape(afterClose.history))
+            check("closedSessionStillLoads", afterClose.history.isNotEmpty())
+            first.deleteSession(forked.sessionId)
+            check("deletedGoneFromList", first.listSessions().none { it.sessionId == forked.sessionId })
+            check("deletedNotFound", errorOf { second.loadSession(forked.sessionId) } == "SESSION_NOT_FOUND")
+            check("neverExistedNotFound", errorOf { second.loadSession("ses_00000000000000000000000000") } == "SESSION_NOT_FOUND")
+            check("deleteTwiceNotFound", errorOf { first.deleteSession(forked.sessionId) } == "SESSION_NOT_FOUND")
+            first.deleteSession(down.sessionId)
+        } catch (e: AgentOsException) {
+            notes.put("exception", e.error.name + ": " + (e.message ?: ""))
+            check("noException", false)
+        } finally {
+            first.close()
+            second.close()
+        }
+        var all = true
+        for (k in checks.keys()) if (!checks.getBoolean(k)) all = false
+        return JSONObject().put("ok", all && !notes.has("exception")).put("checks", checks).put("notes", notes)
     }
 }

@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentos.org/schemas/acp-extensions/v1.json",
   "title": "AgentOS ACP Profile v1 — extensions",
-  "description": "AgentOS 在 ACP v1 之上的扩展数据（core/protocol/acp-profile-v1.md、acp-mapping.md 第 5 节）。所有扩展数据都放在标准对象的 `_meta` 里，键名固定为 \"org.agentos\"；不在标准对象根上加字段，不改变标准方法的含义。扩展在 initialize 时协商：服务端在响应里声明支持的扩展，客户端在请求里声明要用的；没协商就使用扩展的请求返回 -32602（agentosCode = invalid_params），不静默降级（例外：toolScope 只声明、不要求协商，因为它只会让会话的工具更少）。状态：sessionAutoSelect v1 在 W4 冻结；toolScope v1 在 W24/W25 追加；持久化提交与增量恢复在 W10 追加（名字已保留，见 reservedExtensions）。实现：core/runtime/.../acp/ProfileExtensions.kt。",
+  "description": "AgentOS 在 ACP v1 之上的扩展数据（core/protocol/acp-profile-v1.md、acp-mapping.md 第 5 节）。所有扩展数据都放在标准对象的 `_meta` 里，键名固定为 \"org.agentos\"；不在标准对象根上加字段，不改变标准方法的含义。扩展在 initialize 时协商：服务端在响应里声明支持的扩展，客户端在请求里声明要用的；没协商就使用扩展的请求返回 -32602（agentosCode = invalid_params），不静默降级（例外：toolScope 只声明、不要求协商，因为它只会让会话的工具更少）。状态：sessionAutoSelect v1 在 W4 冻结；toolScope v1 在 W24/W25 追加；sessionSetup v1（会话建立收尾标记，要协商）随会话生命周期一起追加；持久化提交与增量恢复在 W10 追加（名字已保留，见 reservedExtensions）。实现：core/runtime/.../acp/ProfileExtensions.kt。",
   "$comment": "只追加：已冻结的字段不改名、不改类型；新增字段必须是可选的。",
 
   "$defs": {
     "extensionName": {
-      "description": "扩展名。v1 有 sessionAutoSelect 和 toolScope。",
+      "description": "扩展名。v1 有 sessionAutoSelect、toolScope 和 sessionSetup。",
       "type": "string",
-      "enum": ["sessionAutoSelect", "toolScope"]
+      "enum": ["sessionAutoSelect", "toolScope", "sessionSetup"]
     },
 
     "initializeRequestMeta": {
@@ -53,7 +53,13 @@
                   "properties": { "version": { "const": 1 } }
                 },
                 "toolScope": {
-                  "description": "session/new 的 _meta.org.agentos.toolScope 可用。只声明让客户端探测，不要求在 initialize 里协商（它只会让会话的工具更少）。",
+                  "description": "session/new 的 _meta.org.agentos.toolScope 可用。只声明让客户端探测，不要求在 initialize 里协商（它只会让会话的工具更少）。session/fork 的 toolScope 只能在原会话的范围之上再收窄；session/load、resume 忽略它。",
+                  "type": "object",
+                  "required": ["version"],
+                  "properties": { "version": { "const": 1 } }
+                },
+                "sessionSetup": {
+                  "description": "会话建立收尾标记（acp-mapping.md 第 4d 节）。要在 initialize 里协商；协商了的客户端，session/new、load、resume、fork 在响应之前的最后一条通知是带 setup 的 session_info_update（见 sessionSetupMeta）。",
                   "type": "object",
                   "required": ["version"],
                   "properties": { "version": { "const": 1 } }
@@ -134,6 +140,49 @@
           "type": "object",
           "required": ["selection"],
           "properties": { "selection": { "$ref": "#/$defs/selection" } }
+        }
+      }
+    },
+
+    "sessionInfoMeta": {
+      "description": "会话建立（session/new、load、resume、fork）时，服务端在响应之前发的 session_info_update 的 _meta（普通字段 title 等为空）。只有有内容的键才出现；setup 只对协商了 sessionSetup 的客户端发，并且和其他键放在同一条、是最后一条通知（acp-mapping.md 第 4d 节）。",
+      "type": "object",
+      "required": ["org.agentos"],
+      "properties": {
+        "org.agentos": {
+          "type": "object",
+          "properties": {
+            "selection": { "$ref": "#/$defs/selection" },
+            "setup": {
+              "description": "sessionSetup：收尾标记。replayed = 前面一共重放了多少条 session/update（不含 session_info_update）；新建、分叉、resume 是 0。客户端等标记和这么多条都到齐才算历史收齐。",
+              "type": "object",
+              "required": ["replayed"],
+              "properties": { "replayed": { "type": "integer", "minimum": 0 } }
+            },
+            "mcpServers": {
+              "description": "这次挂的会话级 MCP 服务器各自的结局（acp-mapping.md 第 4c 节）。连不上的服务器不会让会话建立失败。reason 是短代码，不含 URL 和头。",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "connected", "toolCount"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "connected": { "type": "boolean" },
+                  "toolCount": { "type": "integer", "minimum": 0 },
+                  "reason": { "description": "connect_failed、timeout、list_failed、too_many_tools…；仅 connected = false 时。", "type": "string" }
+                }
+              }
+            },
+            "activeTask": {
+              "description": "load、resume 时这个会话里还有一轮没结束。",
+              "type": "object",
+              "required": ["taskId", "state"],
+              "properties": {
+                "taskId": { "type": "string", "pattern": "^tsk_[0-9A-Z]{26}$" },
+                "state": { "enum": ["queued", "running", "cancelling"] }
+              }
+            }
+          }
         }
       }
     },

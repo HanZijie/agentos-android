@@ -172,10 +172,22 @@ if (AgentOs.isInstalled(context)) {
             is AgentOsEvent.Text -> { /* Agent 的文字 */ }
             is AgentOsEvent.ToolCall -> { /* 工具状态：等待确认 / 执行中 / 已完成 / 被拒绝 / 失败 */ }
             is AgentOsEvent.Done -> { /* 结束 */ }
+            else -> Unit // 以后可能增加新类型（现在有 Thought、UserMessage），带上 else
         }
     }
+    saveSomewhere(session.sessionId) // 会话 ID 存下来
 }
 ```
+
+会话可以接着聊：存下 `session.sessionId`，以后（包括 AgentOS 重启之后）用它回到这个会话，拿到完整的历史：
+
+```kotlin
+val session = connection.loadSession(savedSessionId)     // 只能是这个 App 自己创建的会话；别人的、已删除的都是 SESSION_NOT_FOUND
+session.history.forEach { /* UserMessage / Text / Thought / ToolCall，按顺序 */ }
+session.prompt("刚才说的会，改到 4 点").collect { /* 照常 */ }
+```
+
+另有 `listSessions()`、`forkSession()`、`deleteSession()`、`session.close()`；给会话换模式 `setMode(SessionMode.READ_ONLY)`（只读 / 聊天，只会收窄，不会放宽）和模型 `setModel(...)`（只能选用户配置的那把 key 下的）；以及 `newSession(mcpServers = listOf(McpHttpServer(name, "https://…", headers)))`：带上自己的 Streamable HTTP MCP 服务器，只对这个会话可见，URL 和头只在 AgentOS 的内存里，**每次调用都要用户确认**。会话生命周期、模式与模型、自带 MCP 服务器是后加的，目前只在 API 36 模拟器上跑通了端到端（设备用例 `third_party.py --only sessions`），真机验证待做；旧版本的 AgentOS 没有这些方法，先看 `connection.capabilities`。
 
 完整示例见 [`plugins/samples/notes`](plugins/samples/notes)，接口约定见 [docs/third-party-acp.md](docs/third-party-acp.md) 第 4.7 节。
 

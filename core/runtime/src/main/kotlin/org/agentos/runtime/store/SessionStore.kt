@@ -52,6 +52,46 @@ class SessionStore internal constructor(private val db: DbScope) {
         db.exec("UPDATE sessions SET last_activity_at = ? WHERE id = ?", now, id)
     }
 
+    /** 会话模型（[org.agentos.runtime.ports.ModelChoice.id]）；null = 跟随用户在设置里选的模型。 */
+    fun setModel(id: String, modelId: String?, now: Long) {
+        db.exec("UPDATE sessions SET model_id = ?, last_activity_at = ? WHERE id = ?", modelId, now, id)
+    }
+
+    /** 会话模式。 */
+    fun setMode(id: String, mode: SessionMode, now: Long) {
+        db.exec("UPDATE sessions SET mode = ?, last_activity_at = ? WHERE id = ?", mode.wire, now, id)
+    }
+
+    /**
+     * 删除一个会话和它的一切：任务、工具调用、Pi messages（外键级联）以及**事件日志**（events 没有外键，要自己删）。
+     * 调用方先确认没有未结束的任务。系统流不能删。
+     */
+    fun delete(id: String) {
+        require(id != EventTypes.SYSTEM_STREAM) { "the system stream cannot be deleted" }
+        db.exec("DELETE FROM events WHERE session_id = ?", id)
+        db.exec("DELETE FROM sessions WHERE id = ?", id)
+    }
+
+    /**
+     * 分叉（ACP `session/fork`）：新会话 [newId] 带着 [source] 的 cwd、选择元数据、模型和模式，以及它**最近一次稳定的** Pi messages
+     * （最近一个正常结束的任务之后的上下文；进行中的一轮不带过去）。事件日志由 [EventLog.copyTasks] 另外拷。
+     * 新会话属于 [caller]；[toolScope] 由调用方（引擎）按“只能收窄”算好。
+     */
+    fun fork(source: SessionRecord, newId: String, caller: CallerIdentity, toolScope: List<ToolRef>?, now: Long): SessionRecord {
+        create(newId, caller, source.cwd, now, toolScope)
+        db.exec(
+            "UPDATE sessions SET first_query = ?, first_answer = ?, latest_answer = ?, recent_turns = ?, model_id = ?, mode = ? WHERE id = ?",
+            source.selection.firstQuery, source.selection.firstAnswer, source.selection.latestAnswer,
+            RuntimeJson.encodeToString(TURNS, source.selection.recentTurns), source.modelId, source.mode.wire.takeIf { source.mode != SessionMode.DEFAULT }, newId,
+        )
+        db.exec(
+            "INSERT INTO pi_messages (session_id, messages, stable_messages, updated_at) " +
+                "SELECT ?, stable_messages, stable_messages, ? FROM pi_messages WHERE session_id = ? AND stable_messages IS NOT NULL",
+            newId, now, source.id,
+        )
+        return requireNotNull(get(newId))
+    }
+
     fun setFirstQueryIfAbsent(id: String, query: String) {
         if (query.isBlank()) return
         db.exec("UPDATE sessions SET first_query = ? WHERE id = ? AND first_query IS NULL", query.take(SELECTION_TEXT_LIMIT), id)
@@ -111,6 +151,8 @@ class SessionStore internal constructor(private val db: DbScope) {
             recentTurns = RuntimeJson.decodeFromString(TURNS, r.string(13)),
         ),
         toolScope = ToolScope.fromJson(r.stringOrNull(14)),
+        modelId = r.stringOrNull(15),
+        mode = SessionMode.fromStored(r.stringOrNull(16)),
     )
 
     companion object {
@@ -120,6 +162,6 @@ class SessionStore internal constructor(private val db: DbScope) {
         private val TURNS = ListSerializer(PairSerializer(String.serializer(), String.serializer()))
 
         private const val SELECT = "SELECT id, owner_key, caller_kind, caller_uid, state, pause_reason, cwd, created_at, " +
-            "last_activity_at, last_sequence, first_query, first_answer, latest_answer, recent_turns, tool_scope FROM sessions"
+            "last_activity_at, last_sequence, first_query, first_answer, latest_answer, recent_turns, tool_scope, model_id, mode FROM sessions"
     }
 }

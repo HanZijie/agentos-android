@@ -117,7 +117,7 @@ class AgentOsMappingTest {
         assertEquals(AgentOsError.BUSY, AgentOsMapping.fromRpc(rpc(-32047, null)).error)
         assertEquals(AgentOsError.TOO_LARGE, AgentOsMapping.fromRpc(rpc(-32602, "invalid_params", "too_large")).error)
         assertEquals(AgentOsError.TOO_LARGE, AgentOsMapping.fromRpc(rpc(-32046, null)).error)
-        assertEquals(AgentOsError.FAILED, AgentOsMapping.fromRpc(rpc(-32602, "invalid_params", "bad_scope")).error)
+        assertEquals(AgentOsError.INVALID_REQUEST, AgentOsMapping.fromRpc(rpc(-32602, "invalid_params", "bad_scope")).error)
         assertEquals(AgentOsError.FAILED, AgentOsMapping.fromRpc(rpc(-32051, "model_timeout")).error)
         assertEquals(AgentOsError.FAILED, AgentOsMapping.fromRpc(JsonRpcException(-32603, "x")).error)
     }
