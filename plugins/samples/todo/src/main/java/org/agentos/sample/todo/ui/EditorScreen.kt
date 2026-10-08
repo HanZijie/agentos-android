@@ -160,7 +160,7 @@ private fun EditorContent(vm: TodoViewModel, initial: Todo?, todos: List<Todo>, 
     val subtasks = if (live != null && live.parentId == null) todos.filter { it.parentId == live.id }.sortedWith(compareBy({ it.createdAt }, { it.id })) else emptyList()
 
     fun addTag(raw: String) {
-        val cleaned = raw.trim().trimStart('#').trim().replace(",", "").replace("，", "")
+        val cleaned = raw.trim().trimStart('#').trim().replace(",", "").replace("，", "")  // i18n-ok: strips the full-width comma typed on a Chinese keyboard (input handling), not UI text
         if (cleaned.isEmpty() || cleaned.length > TodoLimits.MAX_TAG_CHARS || tags.size >= TodoLimits.MAX_TAGS) return
         if (tags.any { TodoQueries.tagKey(it) == TodoQueries.tagKey(cleaned) }) return
         tags = ArrayList(tags + cleaned)
@@ -358,7 +358,7 @@ private fun EditorContent(vm: TodoViewModel, initial: Todo?, todos: List<Todo>, 
             OutlinedTextField(
                 value = tagInput,
                 onValueChange = { v ->
-                    if (v.endsWith(",") || v.endsWith("，")) { addTag(v); tagInput = "" } else tagInput = v
+                    if (v.endsWith(",") || v.endsWith("，")) { addTag(v); tagInput = "" } else tagInput = v  // i18n-ok: full-width comma also ends a tag (input handling), not UI text
                 },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text(stringResource(R.string.tag_hint)) },

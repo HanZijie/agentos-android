@@ -84,7 +84,7 @@ data class QuickAddInput(val title: String, val priority: Priority?)
  * 从标题里去掉。别的 `!` 照原样留在标题里（“搞定这个!”不受影响）。
  */
 object QuickAddParser {
-    private val TOKEN = Regex("(^|\\s)[!！]([123])(?=\\s|$)")
+    private val TOKEN = Regex("(^|\\s)[!！]([123])(?=\\s|$)")  // i18n-ok: quick-add accepts the full-width exclamation mark (input parsing), not UI text
 
     fun parse(text: String): QuickAddInput {
         var priority: Priority? = null

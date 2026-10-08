@@ -158,7 +158,7 @@ object TodoQueries {
         for (item in raw) {
             val tag = item.trim().trimStart('#').trim()
             if (tag.isEmpty()) continue
-            if (tag.any { it == ',' || it == '，' || it == '\n' || it == '\r' }) {
+            if (tag.any { it == ',' || it == '，' || it == '\n' || it == '\r' }) {  // i18n-ok: rejects the full-width comma in a tag (input validation), not UI text
                 throw TodoException(TodoException.Kind.INVALID, "Tag \"${tag.take(20)}\" must not contain commas or line breaks.")
             }
             if (tag.length > TodoLimits.MAX_TAG_CHARS) {
