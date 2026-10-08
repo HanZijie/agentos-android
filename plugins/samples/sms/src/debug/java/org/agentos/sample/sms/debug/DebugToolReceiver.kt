@@ -28,6 +28,7 @@ import org.agentos.sample.sms.tools.SmsDump
  * {"mode":"full|partial|compose_only","permissions":{"read_sms":true,"send_sms":true},
  *  "settings":{"mask_codes":true,"allow_short_numbers":false,"rate_limit":5},
  *  "outbox":[{"id","to","text","parts","state","sent_parts","delivered_parts","error","created_at","updated_at"}…],
+ *  "drafts":[{"id","to","text","created_at"}…],
  *  "total":N,"offset":0,"count":N,"next_offset":null,"now":"…","time_zone":"…"}
  * ```
  * - `outbox` 是**本 App 发出的**短信（新到旧，分页，`next_offset` 为 null 表示最后一页）；**不读系统短信库**，dump 里没有任何收到的短信内容。
@@ -36,8 +37,8 @@ import org.agentos.sample.sms.tools.SmsDump
  * ```
  * adb shell am broadcast -n org.agentos.sample.sms/.debug.DebugToolReceiver --es cmd reset
  * ```
- * **只清 outbox**（返回 `{"cleared":N,"outbox_remaining":0}`）。不碰系统短信库（非默认短信应用也删不掉），不改设置、不改权限。
- * 清空 outbox 同时清掉发送频率和去重的历史。
+ * **只清本 App 自己的记录**：outbox 和 `sms_compose` 留下的草稿（返回 `{"cleared":N,"outbox_remaining":0,"drafts_cleared":M}`）。
+ * 不碰系统短信库（非默认短信应用也删不掉），不改设置、不改权限。清空 outbox 同时清掉发送频率和去重的历史。
  *
  * ## 改设置（测试用；用户在设置页做同样的事）
  * ```
@@ -82,6 +83,7 @@ class DebugToolReceiver : BroadcastReceiver() {
             access = graph.gateway.access(),
             settings = graph.settings.current,
             outbox = graph.outbox,
+            drafts = graph.drafts,
             nowMillis = System.currentTimeMillis(),
             zone = ZoneId.systemDefault(),
             offset = offset,
@@ -90,11 +92,13 @@ class DebugToolReceiver : BroadcastReceiver() {
     }
 
     private fun reset(context: Context): JsonObject {
-        val outbox = SmsGraph.get(context).outbox
-        val cleared = outbox.clear()
+        val graph = SmsGraph.get(context)
+        val cleared = graph.outbox.clear()
+        val draftsCleared = graph.drafts.clear() // 草稿也是本 App 自己的记录，不是系统短信
         return buildJsonObject {
             put("cleared", cleared)
-            put("outbox_remaining", outbox.count())
+            put("outbox_remaining", graph.outbox.count())
+            put("drafts_cleared", draftsCleared)
         }
     }
 

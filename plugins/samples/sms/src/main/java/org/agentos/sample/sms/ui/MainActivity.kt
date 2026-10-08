@@ -91,6 +91,7 @@ private fun SmsRoot(graph: SmsGraph, requestedTab: Int?) {
     val access = remember(refresh) { graph.gateway.access() }
     val settings by graph.settings.values.collectAsState()
     val outbox by graph.outbox.recent.collectAsState()
+    val drafts by graph.drafts.recent.collectAsState()
 
     var tab by rememberSaveable { mutableIntStateOf(requestedTab ?: if (access.mode == SmsMode.FULL) Tab.CHATS.ordinal else Tab.STATUS.ordinal) }
     var openThread by rememberSaveable { mutableStateOf<String?>(null) }
@@ -147,7 +148,18 @@ private fun SmsRoot(graph: SmsGraph, requestedTab: Int?) {
                     onCloseThread = { openThread = null },
                     onGoStatus = { tab = Tab.STATUS.ordinal },
                 )
-                Tab.AGENT -> AgentScreen(outbox, settings.rateLimit, padding)
+                Tab.AGENT -> AgentScreen(
+                    entries = outbox,
+                    drafts = drafts,
+                    rateLimit = settings.rateLimit,
+                    padding = padding,
+                    onOpenDraft = {
+                        // 本 App 在前台，系统允许打开短信界面
+                        graph.gateway.openComposer(it.to, it.text)
+                        graph.drafts.remove(it.id)
+                    },
+                    onDismissDraft = { graph.drafts.remove(it.id) },
+                )
                 Tab.SETTINGS -> SettingsScreen(
                     settings = settings,
                     padding = padding,

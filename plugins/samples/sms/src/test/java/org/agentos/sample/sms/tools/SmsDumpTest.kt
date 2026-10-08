@@ -9,6 +9,8 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.agentos.sample.sms.data.Drafts
+import org.agentos.sample.sms.data.InMemoryDraftStore
 import org.agentos.sample.sms.data.InMemoryOutboxStore
 import org.agentos.sample.sms.data.Outbox
 import org.agentos.sample.sms.data.SmsAccess
@@ -23,10 +25,11 @@ import org.junit.Test
 class SmsDumpTest {
     private var now = 1_760_000_000_000L
     private val outbox = Outbox(InMemoryOutboxStore()) { now }
+    private val drafts = Drafts(InMemoryDraftStore()) { now }
     private val zone = ZoneOffset.ofHours(8)
 
     private fun dump(access: SmsAccess = SmsAccess(true, true), settings: SmsSettingsValues = SmsSettingsValues(), offset: Int = 0, limit: Int? = null): JsonObject =
-        SmsDump.build(access, settings, outbox, now, zone, offset, limit)
+        SmsDump.build(access, settings, outbox, drafts, now, zone, offset, limit)
 
     @Test fun `an empty dump still has mode permissions and settings`() {
         val d = dump()
@@ -93,6 +96,14 @@ class SmsDumpTest {
         assertEquals(count, d["next_offset"]!!.jsonPrimitive.int)
         val rest = dump(offset = count, limit = 500)
         assertEquals(400 - count, rest["count"]!!.jsonPrimitive.int.coerceAtMost(400 - count))
+    }
+
+    @Test fun `pending compose drafts are listed too`() {
+        drafts.add("+8613800138000", "draft for review")
+        val items = dump()["drafts"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(1, items.size)
+        assertEquals("draft for review", items[0]["text"]!!.jsonPrimitive.content)
+        assertEquals("+8613800138000", items[0]["to"]!!.jsonPrimitive.content)
     }
 
     @Test fun `the dump never contains system messages - only what this app sent`() {

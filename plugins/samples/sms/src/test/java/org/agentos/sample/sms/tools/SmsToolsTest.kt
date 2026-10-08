@@ -492,6 +492,20 @@ class SmsToolsTest {
         assertEquals(0, rig.outbox.count())
     }
 
+    @Test fun `compose also keeps the draft for the user because Android may block the screen from the background`() {
+        val r = ok("sms_compose", """{"to":"+8613800138000","text":"draft text"}""")
+        assertEquals("1", r.str("draft_id"))
+        assertTrue(r.str("note").contains("silently block"))
+        assertTrue(r.str("note").contains("Agent sends"))
+        val kept = rig.drafts.recent.value.single()
+        assertEquals("+8613800138000", kept.to)
+        assertEquals("draft text", kept.text)
+        // nothing is kept when no screen could be opened
+        gateway.composerAvailable = false
+        fail("sms_compose", """{"to":"13900139000","text":"x"}""")
+        assertEquals(1, rig.drafts.count())
+    }
+
     @Test fun `compose works without text and for short numbers - the user presses send`() {
         ok("sms_compose", """{"to":"10086"}""")
         assertEquals(listOf("10086" to null), gateway.composed)
@@ -570,7 +584,7 @@ class SmsToolsTest {
         val revoking = object : org.agentos.sample.sms.data.SmsGateway by gateway {
             override fun threads(): org.agentos.sample.sms.data.ThreadScan = throw SecurityException("READ_SMS revoked")
         }
-        val tools = SmsTools(revoking, rig.outbox, rig.settings, clock = { rig.now })
+        val tools = SmsTools(revoking, rig.outbox, rig.drafts, rig.settings, clock = { rig.now })
         val out = runBlocking { tools.find("sms_thread_list")!!.handler(JsonObject(emptyMap())) }
         assertTrue(out.isError)
         assertTrue(out.text.contains("Permission denied"))
@@ -580,7 +594,7 @@ class SmsToolsTest {
         val broken = object : org.agentos.sample.sms.data.SmsGateway by gateway {
             override fun search(query: String, max: Int): List<org.agentos.sample.sms.data.SmsRecord> = error("boom")
         }
-        val tools = SmsTools(broken, rig.outbox, rig.settings)
+        val tools = SmsTools(broken, rig.outbox, rig.drafts, rig.settings)
         val out = runBlocking { tools.find("sms_search")!!.handler(kotlinx.serialization.json.buildJsonObject { put("query", kotlinx.serialization.json.JsonPrimitive("x")) }) }
         assertTrue(out.isError)
         assertTrue(out.text.startsWith("Unexpected error"))

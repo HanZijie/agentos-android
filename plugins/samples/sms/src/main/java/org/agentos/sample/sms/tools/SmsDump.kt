@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.agentos.sample.sms.data.Drafts
 import org.agentos.sample.sms.data.Outbox
 import org.agentos.sample.sms.data.OutboxEntry
 import org.agentos.sample.sms.data.SmsAccess
@@ -31,6 +32,7 @@ object SmsDump {
         access: SmsAccess,
         settings: SmsSettingsValues,
         outbox: Outbox,
+        drafts: Drafts,
         nowMillis: Long,
         zone: ZoneId,
         offset: Int = 0,
@@ -68,6 +70,21 @@ object SmsDump {
                 },
             )
             put("outbox", buildJsonArray { page.forEach { add(it) } })
+            put(
+                "drafts",
+                buildJsonArray {
+                    drafts.recent.value.forEach {
+                        add(
+                            buildJsonObject {
+                                put("id", it.id)
+                                put("to", it.to)
+                                put("text", it.text?.let { t -> JsonPrimitive(t) } ?: JsonNull)
+                                put("created_at", iso(it.createdAt, zone))
+                            },
+                        )
+                    }
+                },
+            )
             put("total", total)
             put("offset", start)
             put("count", page.size)

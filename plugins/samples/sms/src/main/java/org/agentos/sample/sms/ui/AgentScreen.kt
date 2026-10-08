@@ -18,9 +18,11 @@ import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import java.time.ZoneId
 import java.util.Locale
 import org.agentos.sample.sms.R
+import org.agentos.sample.sms.data.DraftEntry
 import org.agentos.sample.sms.data.OutboxEntry
 import org.agentos.sample.sms.data.OutboxState
 import org.agentos.sample.sms.rules.RateLimit
@@ -44,8 +47,15 @@ import org.agentos.sample.sms.ui.theme.LocalSmsExtras
 
 /** “Agent 发送记录”：来自 outbox（本 App 发出的），显示状态、段数、时间和失败原因。 */
 @Composable
-fun AgentScreen(entries: List<OutboxEntry>, rateLimit: Int, padding: PaddingValues) {
-    if (entries.isEmpty()) {
+fun AgentScreen(
+    entries: List<OutboxEntry>,
+    drafts: List<DraftEntry>,
+    rateLimit: Int,
+    padding: PaddingValues,
+    onOpenDraft: (DraftEntry) -> Unit,
+    onDismissDraft: (DraftEntry) -> Unit,
+) {
+    if (entries.isEmpty() && drafts.isEmpty()) {
         Box(
             Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
             contentAlignment = Alignment.Center,
@@ -71,6 +81,18 @@ fun AgentScreen(entries: List<OutboxEntry>, rateLimit: Int, padding: PaddingValu
         item {
             Text(stringResource(R.string.agent_title), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
         }
+        if (drafts.isNotEmpty()) {
+            item {
+                Text(stringResource(R.string.drafts_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 4.dp))
+                Text(
+                    stringResource(R.string.drafts_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                )
+            }
+            items(drafts, key = { "draft" + it.id }) { DraftCard(it, onOpenDraft, onDismissDraft) }
+        }
         item {
             Text(
                 stringResource(R.string.agent_summary, recent, rateLimit),
@@ -86,6 +108,32 @@ fun AgentScreen(entries: List<OutboxEntry>, rateLimit: Int, padding: PaddingValu
             )
         }
         items(entries, key = { it.id }) { EntryCard(it) }
+    }
+}
+
+@Composable
+private fun DraftCard(draft: DraftEntry, onOpen: (DraftEntry) -> Unit, onDismiss: (DraftEntry) -> Unit) {
+    SectionCard(container = MaterialTheme.colorScheme.tertiaryContainer) {
+        Text(
+            draft.to,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            draft.text ?: stringResource(R.string.draft_no_text),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { onOpen(draft) }) { Text(stringResource(R.string.draft_open), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            TextButton(onClick = { onDismiss(draft) }) { Text(stringResource(R.string.draft_dismiss), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
     }
 }
 

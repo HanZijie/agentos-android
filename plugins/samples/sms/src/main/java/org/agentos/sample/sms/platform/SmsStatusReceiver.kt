@@ -35,7 +35,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
                 }
             }
         }
-        Log.i(TAG, "${callback.kind.wire} id=${callback.outboxId} part=${callback.part} resultCode=$resultCode")
+        Log.i(TAG, "${callback.kind.wire} id=${callback.outboxId} part=${callback.part} resultCode=$resultCode pdu=${intent.hasExtra("pdu")} status=${deliveryStatus(intent)}")
     }
 
     /** 状态报告 PDU 里的 TP-Status；拿不到就是 null。 */

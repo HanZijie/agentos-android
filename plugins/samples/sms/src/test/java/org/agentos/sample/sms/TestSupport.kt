@@ -1,5 +1,7 @@
 package org.agentos.sample.sms
 
+import org.agentos.sample.sms.data.Drafts
+import org.agentos.sample.sms.data.InMemoryDraftStore
 import org.agentos.sample.sms.data.InMemoryOutboxStore
 import org.agentos.sample.sms.data.InMemorySmsSettings
 import org.agentos.sample.sms.data.MessageQuery
@@ -82,7 +84,8 @@ class Rig(
     var now: Long = 1_760_000_000_000L, // 2025-10-09T08:53:20Z
 ) {
     val outbox = Outbox(InMemoryOutboxStore()) { now }
-    val tools = SmsTools(gateway, outbox, settings, clock = { now }, zone = { java.time.ZoneOffset.ofHours(8) })
+    val drafts = Drafts(InMemoryDraftStore()) { now }
+    val tools = SmsTools(gateway, outbox, drafts, settings, clock = { now }, zone = { java.time.ZoneOffset.ofHours(8) })
 
     suspend fun call(name: String, json: String = "{}") =
         tools.find(name)!!.handler(kotlinx.serialization.json.Json.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject)

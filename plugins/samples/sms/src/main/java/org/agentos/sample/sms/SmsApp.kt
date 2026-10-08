@@ -2,7 +2,9 @@ package org.agentos.sample.sms
 
 import android.app.Application
 import android.content.Context
+import org.agentos.sample.sms.data.Drafts
 import org.agentos.sample.sms.data.Outbox
+import org.agentos.sample.sms.data.PrefsDraftStore
 import org.agentos.sample.sms.data.PrefsSmsSettings
 import org.agentos.sample.sms.data.SmsGateway
 import org.agentos.sample.sms.data.SmsSettings
@@ -16,8 +18,9 @@ import org.agentos.sample.sms.tools.SmsTools
 class SmsGraph private constructor(context: Context) {
     val gateway: SmsGateway = AndroidSmsGateway(context)
     val outbox: Outbox = Outbox(SqliteOutboxStore(context))
+    val drafts: Drafts = Drafts(PrefsDraftStore(context))
     val settings: SmsSettings = PrefsSmsSettings(context)
-    val tools: SmsTools = SmsTools(gateway, outbox, settings)
+    val tools: SmsTools = SmsTools(gateway, outbox, drafts, settings)
 
     companion object {
         @Volatile

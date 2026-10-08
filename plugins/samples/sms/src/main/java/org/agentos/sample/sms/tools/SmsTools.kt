@@ -18,6 +18,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.agentos.sample.sms.data.Drafts
 import org.agentos.sample.sms.data.MessageQuery
 import org.agentos.sample.sms.data.Outbox
 import org.agentos.sample.sms.data.OutboxEntry
@@ -48,6 +49,7 @@ import org.agentos.sample.sms.rules.ShortNumberRules
 class SmsTools(
     private val gateway: SmsGateway,
     private val outbox: Outbox,
+    private val drafts: Drafts,
     private val settings: SmsSettings,
     private val clock: () -> Long = System::currentTimeMillis,
     private val zone: () -> ZoneId = { ZoneId.systemDefault() },
@@ -280,7 +282,8 @@ class SmsTools(
         title = "Open the messaging screen with a draft",
         description = "Open the phone's own messaging screen with the recipient and optional text filled in; the USER reads it and presses send. Nothing is sent by this tool. " +
             "Needs no SMS permission, so it works even when reading and sending are blocked. Use it when the user wants to review or edit a message themselves, " +
-            "or when sms_send is unavailable. Returns opened=true once the screen was handed to the system.",
+            "or when sms_send is unavailable. Returns opened=true once the screen was handed to the system; Android can block that while this app is in the background, " +
+            "so the draft is also kept in the Messages app for the user to open.",
         schema = schema(required = listOf("to")) {
             put("to", stringProp("Exactly one phone number, digits with an optional leading +."))
             put("text", stringProp("Optional message text to prefill, at most ${SendRules.MAX_TEXT_CHARS} characters."))
@@ -293,12 +296,20 @@ class SmsTools(
         if (!gateway.openComposer(to, text)) {
             throw SmsToolException("No messaging screen could be opened on this phone. Tell the user to open their messaging app and write the message there.")
         }
+        // Android may silently refuse to open a screen for an app that is in the background; keep the draft where the user can open it.
+        val draft = drafts.add(to, text)
         ToolOutput.json(
             buildJsonObject {
                 put("opened", true)
+                put("draft_id", draft.id)
                 put("to", to)
                 put("prefilled_text", text != null)
-                put("note", "The messaging screen was opened with a draft. The user has to press send; nothing was sent.")
+                put(
+                    "note",
+                    "The messaging screen was handed to the system with a draft. Nothing was sent; the user has to press send. " +
+                        "Android can silently block a screen that a background app opens, so if the user sees nothing, " +
+                        "tell them to open the Messages app: the draft is waiting on its \"Agent sends\" tab.",
+                )
             },
         )
     }
