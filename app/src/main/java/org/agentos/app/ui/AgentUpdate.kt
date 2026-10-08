@@ -6,6 +6,8 @@ import com.agentclientprotocol.model.SessionUpdate
 import com.agentclientprotocol.model.StopReason
 import com.agentclientprotocol.model.ToolCallContent
 import com.agentclientprotocol.model.ToolCallStatus
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
 
 /**
  * What the conversation screen needs from one ACP turn, independent of the SDK types, so the state
@@ -35,36 +37,37 @@ sealed interface AgentUpdate {
     data class Ignored(val type: String) : AgentUpdate
 
     companion object {
-        fun fromSdk(update: SessionUpdate): AgentUpdate = when (update) {
-            is SessionUpdate.AgentMessageChunk -> MessageChunk(update.content.displayText())
-            is SessionUpdate.AgentThoughtChunk -> ThoughtChunk(update.content.displayText())
+        /** [strings]: the words of the placeholders that stand for non-text content (image, audio, link, resource). */
+        fun fromSdk(update: SessionUpdate, strings: Strings): AgentUpdate = when (update) {
+            is SessionUpdate.AgentMessageChunk -> MessageChunk(update.content.displayText(strings))
+            is SessionUpdate.AgentThoughtChunk -> ThoughtChunk(update.content.displayText(strings))
             is SessionUpdate.ToolCall -> ToolCallStarted(
                 callId = update.toolCallId.value,
-                title = update.title.ifBlank { "工具调用" },
+                title = update.title, // may be blank: ChatItem.Tool.displayTitle picks the placeholder when it is drawn
                 kind = update.kind?.name?.lowercase(),
                 status = ToolStatus.from(update.status) ?: ToolStatus.PENDING,
-                detail = update.content?.detailText(),
+                detail = update.content?.detailText(strings),
             )
             is SessionUpdate.ToolCallUpdate -> ToolCallUpdated(
                 callId = update.toolCallId.value,
                 title = update.title?.takeIf { it.isNotBlank() },
                 status = ToolStatus.from(update.status),
-                detail = update.content?.detailText(),
+                detail = update.content?.detailText(strings),
             )
             else -> Ignored(update::class.simpleName ?: "unknown")
         }
 
-        private fun ContentBlock.displayText(): String = when (this) {
+        private fun ContentBlock.displayText(strings: Strings): String = when (this) {
             is ContentBlock.Text -> text
-            is ContentBlock.Image -> "［图片］"
-            is ContentBlock.Audio -> "［音频］"
-            is ContentBlock.ResourceLink -> "［链接：$name］"
-            is ContentBlock.Resource -> "［资源］"
+            is ContentBlock.Image -> strings.get(R.string.chat_content_image)
+            is ContentBlock.Audio -> strings.get(R.string.chat_content_audio)
+            is ContentBlock.ResourceLink -> strings.get(R.string.chat_content_link, name)
+            is ContentBlock.Resource -> strings.get(R.string.chat_content_resource)
         }
 
-        private fun List<ToolCallContent>.detailText(): String? =
+        private fun List<ToolCallContent>.detailText(strings: Strings): String? =
             filterIsInstance<ToolCallContent.Content>()
-                .joinToString("\n") { it.content.displayText() }
+                .joinToString("\n") { it.content.displayText(strings) }
                 .takeIf { it.isNotBlank() }
     }
 }
@@ -103,7 +106,7 @@ sealed interface TurnOutcome {
 }
 
 /** Maps one SDK event of a prompt flow; returns the stop reason for the final response event. */
-internal fun Event.toUi(): Pair<AgentUpdate?, String?> = when (this) {
-    is Event.SessionUpdateEvent -> AgentUpdate.fromSdk(update) to null
+internal fun Event.toUi(strings: Strings): Pair<AgentUpdate?, String?> = when (this) {
+    is Event.SessionUpdateEvent -> AgentUpdate.fromSdk(update, strings) to null
     is Event.PromptResponseEvent -> null to TurnOutcome.stopReasonWire(response.stopReason)
 }

@@ -46,6 +46,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.acp.AcpServiceContract
 import org.agentos.acp.BinderAcpTransport
 import org.agentos.app.agent.AcpService
@@ -82,6 +84,8 @@ interface AgentConnection {
  */
 class LocalAcpClient(private val context: Context, parent: CoroutineScope) : AgentConnection {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + CoroutineName("local-acp"))
+    /** Error notices are rendered in the language of the screen at the moment of the failure. */
+    private val strings: Strings = AndroidStrings(context)
     private val mutex = Mutex()
     private val state = MutableStateFlow(ChatState.Connection.DISCONNECTED)
     override val connection: StateFlow<ChatState.Connection> = state.asStateFlow()
@@ -112,7 +116,7 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
         var stopReason: String? = null
         return try {
             s.prompt(listOf(ContentBlock.Text(text))).collect { event ->
-                val (update, stop) = event.toUi()
+                val (update, stop) = event.toUi(strings)
                 if (update != null) onUpdate(update)
                 if (stop != null) stopReason = stop
             }

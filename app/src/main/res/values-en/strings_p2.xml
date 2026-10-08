@@ -263,4 +263,22 @@
     <string name="settings_clear_jev_message">Clearing takes effect immediately: the saved key and its encryption key are deleted, and any auto-selection in progress is aborted. After that a new session is created every time, until you set it up again.</string>
     <string name="settings_clear_model_title">Clear the model and key?</string>
     <string name="settings_clear_model_message">Clearing takes effect immediately: the saved key and its encryption key are deleted. Every model request after that fails, including the next request of the turn in progress, which won\'t be finished with the old key.\n\nIf you only want to switch vendor, model or key, use “Change” instead. That takes effect from the next request and doesn\'t interrupt the turn in progress.</string>
+
+    <!-- ============ Conversation notices and placeholders (ChatState, ChatController, AgentUpdate) ============ -->
+    <string name="chat_tool_default_title">Tool call</string>
+    <string name="chat_notice_cancelled">Cancelled</string>
+    <string name="chat_notice_max_turn_requests">Stopped: tool-call rounds exceeded the limit</string>
+    <string name="chat_notice_max_turn_requests_hint">You can say “continue” to carry on</string>
+    <string name="chat_notice_max_tokens">The reply reached the length limit</string>
+    <string name="chat_notice_max_tokens_hint">You can say “continue” to carry on</string>
+    <string name="chat_notice_refusal">The model declined this request</string>
+    <string name="chat_notice_turn_ended">Turn ended (%1$s)</string>
+    <string name="chat_notice_new_session">Started a new conversation</string>
+    <string name="chat_notice_new_session_hint">The previous conversation is no longer available after the runtime restarted</string>
+    <string name="chat_notice_screen_closed">This turn was still running when the screen closed</string>
+    <string name="chat_notice_screen_closed_hint">The runtime will finish it; from M2 you can go back to the original conversation to see the result</string>
+    <string name="chat_content_image">[Image]</string>
+    <string name="chat_content_audio">[Audio]</string>
+    <string name="chat_content_link">[Link: %1$s]</string>
+    <string name="chat_content_resource">[Resource]</string>
 </resources>

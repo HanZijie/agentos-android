@@ -14,6 +14,8 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.agentos.app.i18n.ResStrings
+import org.agentos.app.i18n.Strings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -59,11 +61,11 @@ class ChatControllerTest {
      * Runs [block] with a controller whose scope is on the test scheduler but not backgroundScope:
      * advanceUntilIdle() does not wait for background work, so the turn would never run.
      */
-    private fun withController(block: suspend TestScope.(ChatController, FakeAgent) -> Unit) = runTest {
+    private fun withController(strings: Strings = ResStrings.zh, block: suspend TestScope.(ChatController, FakeAgent) -> Unit) = runTest {
         val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         val agent = FakeAgent()
         try {
-            block(ChatController(agent, scope), agent)
+            block(ChatController(agent, scope, strings), agent)
         } finally {
             scope.cancel()
         }
@@ -134,26 +136,30 @@ class ChatControllerTest {
     }
 
     @Test
-    fun cancelSendsSessionCancelOnceAndEndsWithCancelled() = withController { c, agent ->
-        c.send("long task")
-        advanceUntilIdle()
-        c.cancel()
-        c.cancel() // second tap while cancelling is ignored
-        assertEquals(ChatState.Turn.CANCELLING, c.state.value.turn)
-        advanceUntilIdle()
-        assertEquals(1, agent.cancels)
-        assertEquals(ChatState.Turn.IDLE, c.state.value.turn)
-        assertEquals("已取消", (c.state.value.items.last() as ChatItem.Notice).title)
+    fun cancelSendsSessionCancelOnceAndEndsWithCancelled() {
+        for ((strings, title) in listOf(ResStrings.zh to "已取消", ResStrings.en to "Cancelled")) withController(strings) { c, agent ->
+            c.send("long task")
+            advanceUntilIdle()
+            c.cancel()
+            c.cancel() // second tap while cancelling is ignored
+            assertEquals(ChatState.Turn.CANCELLING, c.state.value.turn)
+            advanceUntilIdle()
+            assertEquals(1, agent.cancels)
+            assertEquals(ChatState.Turn.IDLE, c.state.value.turn)
+            assertEquals(title, (c.state.value.items.last() as ChatItem.Notice).title)
+        }
     }
 
     @Test
-    fun replacedSessionIsAnnounced() = withController { c, agent ->
-        agent.replacedOnce = true
-        c.send("after restart")
-        advanceUntilIdle()
-        agent.finish.complete(TurnOutcome.Finished("end_turn"))
-        advanceUntilIdle()
-        assertTrue(c.state.value.items.any { it is ChatItem.Notice && it.title == "已开始新的会话" })
+    fun replacedSessionIsAnnounced() {
+        for ((strings, title) in listOf(ResStrings.zh to "已开始新的会话", ResStrings.en to "Started a new conversation")) withController(strings) { c, agent ->
+            agent.replacedOnce = true
+            c.send("after restart")
+            advanceUntilIdle()
+            agent.finish.complete(TurnOutcome.Finished("end_turn"))
+            advanceUntilIdle()
+            assertTrue(c.state.value.items.any { it is ChatItem.Notice && it.title == title })
+        }
     }
 
     @Test
@@ -168,15 +174,18 @@ class ChatControllerTest {
     }
 
     @Test
-    fun closingTheScreenMidTurnDetachesWithoutCancelling() = withController { c, agent ->
-        c.send("keep going")
-        advanceUntilIdle()
-        agent.emit!!(AgentUpdate.MessageChunk("partial"))
-        c.onScreenFinished()
-        advanceUntilIdle()
-        assertTrue(agent.closed)
-        assertEquals("a disconnect is not a cancel (F7)", 0, agent.cancels)
-        assertFalse(c.state.value.busy)
-        assertEquals("界面关闭时这一轮还在进行", (c.state.value.items.last() as ChatItem.Notice).title)
+    fun closingTheScreenMidTurnDetachesWithoutCancelling() {
+        val titles = listOf(ResStrings.zh to "界面关闭时这一轮还在进行", ResStrings.en to "This turn was still running when the screen closed")
+        for ((strings, title) in titles) withController(strings) { c, agent ->
+            c.send("keep going")
+            advanceUntilIdle()
+            agent.emit!!(AgentUpdate.MessageChunk("partial"))
+            c.onScreenFinished()
+            advanceUntilIdle()
+            assertTrue(agent.closed)
+            assertEquals("a disconnect is not a cancel (F7)", 0, agent.cancels)
+            assertFalse(c.state.value.busy)
+            assertEquals(title, (c.state.value.items.last() as ChatItem.Notice).title)
+        }
     }
 }
