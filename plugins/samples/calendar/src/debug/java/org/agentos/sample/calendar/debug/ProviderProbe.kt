@@ -91,24 +91,47 @@ object ProviderProbe {
             },
         )
 
-        // g: ContentObserver 通知
-        val latch = CountDownLatch(1)
+        // g: ContentObserver 通知——不同的写法会不会通知：单条 insert / applyBatch / update / delete，以及同步适配器的批量写入
         val ht = HandlerThread("probe-observer").also { it.start() }
-        var t0 = 0L
-        var latency = -1L
-        val obs = object : ContentObserver(Handler(ht.looper)) {
-            override fun onChange(selfChange: Boolean) {
-                if (latency < 0) latency = System.currentTimeMillis() - t0
-                latch.countDown()
+        // 同时在三个 URI 上各挂一个观察者（根、events、instances），看是谁收到
+        fun notified(label: String, op: () -> Unit): String {
+            val hits = java.util.concurrent.ConcurrentHashMap<String, Long>()
+            var t0 = 0L
+            val roots = listOf("root" to CalendarContract.CONTENT_URI, "events" to Events.CONTENT_URI, "instances" to Instances.CONTENT_URI)
+            val observers = roots.map { (name, uri) ->
+                val obs = object : ContentObserver(Handler(ht.looper)) {
+                    override fun onChange(selfChange: Boolean) {
+                        hits.putIfAbsent(name, System.currentTimeMillis() - t0)
+                    }
+                }
+                r.registerContentObserver(uri, true, obs)
+                obs
             }
+            t0 = System.currentTimeMillis()
+            op()
+            Thread.sleep(4000)
+            observers.forEach { r.unregisterContentObserver(it) }
+            return "$label: " + if (hits.isEmpty()) "no notification in 4 s" else hits.entries.sortedBy { it.value }.joinToString(",") { "${it.key}@${it.value}ms" }
         }
-        r.registerContentObserver(CalendarContract.CONTENT_URI, true, obs)
-        t0 = System.currentTimeMillis()
-        event("observer trigger")
-        val got = latch.await(3, TimeUnit.SECONDS)
-        r.unregisterContentObserver(obs)
+        val syncUri = Events.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(Calendars.ACCOUNT_NAME, acct).appendQueryParameter(Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL).build()
+        val observed = ArrayList<String>()
+        var obsId = -1L
+        observed += notified("single insert") { obsId = event("observer single") }
+        observed += notified("applyBatch insert") {
+            r.applyBatch(CalendarContract.AUTHORITY, arrayListOf(android.content.ContentProviderOperation.newInsert(Events.CONTENT_URI).withValues(ContentValues().apply {
+                put(Events.CALENDAR_ID, cal); put(Events.TITLE, "observer batch"); put(Events.DTSTART, 1_791_770_400_000L); put(Events.DTEND, 1_791_774_000_000L); put(Events.EVENT_TIMEZONE, "Asia/Shanghai")
+            }).build()))
+        }
+        observed += notified("single update") { r.update(ContentUris.withAppendedId(Events.CONTENT_URI, obsId), ContentValues().apply { put(Events.TITLE, "observer renamed") }, null, null) }
+        observed += notified("single delete") { r.delete(ContentUris.withAppendedId(Events.CONTENT_URI, obsId), null, null) }
+        observed += notified("sync-adapter-style applyBatch insert") {
+            r.applyBatch(CalendarContract.AUTHORITY, arrayListOf(android.content.ContentProviderOperation.newInsert(syncUri).withValues(ContentValues().apply {
+                put(Events.CALENDAR_ID, cal); put(Events.TITLE, "observer sync batch"); put(Events.DTSTART, 1_791_770_400_000L); put(Events.DTEND, 1_791_774_000_000L); put(Events.EVENT_TIMEZONE, "Asia/Shanghai")
+            }).build()))
+        }
         ht.quitSafely()
-        put("g_content_observer_notified", if (got) "yes, after ${latency} ms" else "no notification within 3 s")
+        put("g_content_observer", observed.joinToString(" | "))
 
         // h: 全天重复 + UNTIL 日期 + DURATION P1D → Instances
         val begin = 1_791_763_200_000L // 2026-10-12T00:00Z
@@ -142,6 +165,36 @@ object ProviderProbe {
         )
 
         put("z_cleanup_calendars_removed", ProviderFixtures.deleteTestCalendars(context))
+    }
+
+    /**
+     * 外部变化通知探测：[seconds] 秒内同时监听 ContentObserver（根 / events / instances）和系统的 `ACTION_PROVIDER_CHANGED` 广播，
+     * 返回收到的每一条（相对开始的毫秒）。期间从 adb shell 或别的 App 往系统日历写点东西来观察。
+     */
+    fun watch(context: Context, seconds: Int): JsonObject {
+        val r = context.contentResolver
+        val ht = HandlerThread("probe-watch").also { it.start() }
+        val t0 = System.currentTimeMillis()
+        val got = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val observers = listOf("observer:root" to CalendarContract.CONTENT_URI, "observer:events" to Events.CONTENT_URI, "observer:instances" to Instances.CONTENT_URI).map { (name, uri) ->
+            object : ContentObserver(Handler(ht.looper)) {
+                override fun onChange(selfChange: Boolean, uri: android.net.Uri?) {
+                    got += "${System.currentTimeMillis() - t0}ms $name $uri"
+                }
+            }.also { r.registerContentObserver(uri, true, it) }
+        }
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: android.content.Intent) {
+                got += "${System.currentTimeMillis() - t0}ms broadcast ${i.action} ${i.data}"
+            }
+        }
+        val filter = android.content.IntentFilter(android.content.Intent.ACTION_PROVIDER_CHANGED).apply { addDataScheme("content"); addDataAuthority(CalendarContract.AUTHORITY, null) }
+        context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        Thread.sleep(seconds * 1000L)
+        context.unregisterReceiver(receiver)
+        observers.forEach { r.unregisterContentObserver(it) }
+        ht.quitSafely()
+        return buildJsonObject { put("seconds", seconds); put("count", got.size); put("events", got.joinToString("\n")) }
     }
 
     private fun attempt(block: () -> String?): String = try {

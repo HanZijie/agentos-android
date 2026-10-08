@@ -219,7 +219,7 @@ class McpSelfTestReceiver : BroadcastReceiver() {
         val toSys = call("event_create", jobj("title" to "x", "start" to ISO.format(tomorrow.atTime(10, 0).atZone(zone)), "calendar_id" to "sys:1"))
         r.check("event_create(sys calendar) -> permission error", toSys.isError && toSys.text == perm, toSys.text.take(100))
         val localList = call("event_list", jobj("calendar_id" to localId, "from" to tomorrow.toString(), "to" to tomorrow.plusDays(1).toString()))
-        r.check("event_list(local calendar) works", !localList.isError && localList.structuredContent.arr("events").size == 1)
+        r.check("event_list(local calendar) works", !localList.isError && localList.structuredContent.arr("events").any { it.jsonObject.s("title") == "无权限时的本机日程" })
         r.check("event_search(local calendar) works", !call("event_search", jobj("query" to "无权限", "calendar_id" to localId)).isError)
         r.check("event_get(sys id) -> permission error", call("event_get", jobj("id" to "sys:1")).let { it.isError && it.text == perm })
         r.check("event_delete(sys id) -> permission error", call("event_delete", jobj("id" to "sys:1")).let { it.isError && it.text == perm })

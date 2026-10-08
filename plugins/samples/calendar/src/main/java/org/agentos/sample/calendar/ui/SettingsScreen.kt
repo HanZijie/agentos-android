@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +56,8 @@ fun SettingsScreen(
     var picking by remember { mutableStateOf(false) }
     val defaultCal = data.calendar(data.defaultWriteId)
     val automatic = repo.configuredDefaultId == null || data.calendar(repo.configuredDefaultId.orEmpty()) == null
+    val locale = LocalConfiguration.current.locales[0]
+    val autoLabel = stringResource(R.string.settings_default_auto)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize()) {
             ScreenTopBar(stringResource(R.string.settings_title), onBack)
@@ -65,7 +68,7 @@ fun SettingsScreen(
                 SectionCard {
                     SettingRow(
                         stringResource(R.string.settings_language),
-                        context.resources.configuration.locales[0].let { it.getDisplayName(it) },
+                        locale.getDisplayName(locale),
                         onClick = {
                             // 系统的“应用语言”页：默认跟随系统，也可以只给本 App 指定中文 / 英文
                             try {
@@ -94,7 +97,7 @@ fun SettingsScreen(
                         stringResource(R.string.settings_default_calendar),
                         buildString {
                             append(defaultCal?.name.orEmpty())
-                            if (automatic) append(" · ").append(context.getString(R.string.settings_default_auto))
+                            if (automatic) append(" · ").append(autoLabel)
                         },
                         onClick = { picking = true },
                     )
@@ -129,14 +132,19 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingRow(title: String, value: String, onClick: (() -> Unit)?) {
+    // 标题在上、当前值在下：英文和 1.3 倍字体下值也不会被挤到截断
     Row(
-        Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.width(12.dp))
-        Text(value, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (onClick != null) Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+        if (onClick != null) {
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

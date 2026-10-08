@@ -47,7 +47,11 @@ fun CalendarRoot(vm: CalendarViewModel, openRequest: String?, onOpenRequestHandl
     val access by repo.systemAccess.collectAsStateWithLifecycle()
     val defaultWriteId by repo.defaultWriteId.collectAsStateWithLifecycle()
     var today by remember { mutableStateOf(LocalDate.now(repo.zone)) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { today = LocalDate.now(repo.zone) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        today = LocalDate.now(repo.zone)
+        // 从系统日历 App / 设置回来：别处可能改过数据（Provider 的变化通知在 API 36 上要晚好几秒才到，这里兜底）
+        repo.refresh()
+    }
     val firstDay = remember { CalendarData.systemFirstDayOfWeek() }
     val data = remember(calendars, snapshot, today, access, defaultWriteId) { CalendarData(calendars, snapshot, repo.zone, today, firstDay, access, defaultWriteId) }
     val fmt = rememberFmt()

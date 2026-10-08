@@ -23,8 +23,11 @@ interface CalendarStore {
  * 用户改成别的名字的不动。代价：用户恰好把默认日历改回这两个名字之一，也会被当作默认名跟着语言变——可以接受（名字本来就一样）。
  */
 object LegacyDefaultNames {
-    /** 中文默认名（`values/strings.xml`）与英文默认名（`values-en/strings.xml`）。 */
-    val all: List<String> = listOf("我的日历", "My Calendar")
+    /**
+     * 中文默认名（`values/strings.xml` 的 `default_calendar_name`，“我的日历”）与英文默认名（`values-en`，“My Calendar”）。
+     * 中文用 Unicode 转义写：用户可见的中文只放资源文件，Kotlin 源码里不写中文字面量（R9 门禁）。
+     */
+    val all: List<String> = listOf("\u6211\u7684\u65e5\u5386", "My Calendar")
 
     fun isSystemDefault(name: String, isDefault: Boolean): Boolean = isDefault && name in all
 

@@ -15,6 +15,7 @@ import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Instances
 import android.provider.CalendarContract.Reminders
+import android.util.Log
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -54,6 +55,7 @@ class SystemBackend(private val context: Context, private val time: TimeEnv = Ti
 
     override fun calendars(): List<CalendarInfo> {
         if (!hasAccess()) return emptyList()
+        ensureObserver()
         return guarded {
             val out = ArrayList<CalendarInfo>()
             resolver.query(
@@ -258,22 +260,40 @@ class SystemBackend(private val context: Context, private val time: TimeEnv = Ti
     // ---- 变化通知 ----
 
     private val observerThread: HandlerThread by lazy { HandlerThread("calendar-observer").also { it.start() } }
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+    private var observer: ContentObserver? = null
 
-    override fun addChangeListener(listener: () -> Unit): AutoCloseable {
+    /**
+     * 注册 ContentObserver。**没有 READ_CALENDAR 时 `registerContentObserver` 本身就会抛 SecurityException**（系统按被观察 URI 的 Provider
+     * 权限校验），所以要等授权之后才注册；仓库在权限变化后会重读日历，走到这里补注册。
+     */
+    @Synchronized
+    private fun ensureObserver() {
+        if (observer != null || listeners.isEmpty() || !hasAccess()) return
         val handler = Handler(observerThread.looper)
-        val fire = Runnable { listener() }
-        val observer = object : ContentObserver(handler) {
+        val fire = Runnable {
+            Log.i(TAG, "system calendar changed (observer): refreshing")
+            listeners.forEach { it() }
+        }
+        val obs = object : ContentObserver(handler) {
             // 云端同步一次会连发很多通知：去抖一下再刷新
             override fun onChange(selfChange: Boolean) {
                 handler.removeCallbacks(fire)
                 handler.postDelayed(fire, OBSERVER_DEBOUNCE_MS)
             }
         }
-        resolver.registerContentObserver(CalendarContract.CONTENT_URI, true, observer)
-        return AutoCloseable {
-            resolver.unregisterContentObserver(observer)
-            handler.removeCallbacks(fire)
+        try {
+            resolver.registerContentObserver(CalendarContract.CONTENT_URI, true, obs)
+            observer = obs
+        } catch (_: SecurityException) {
+            // 权限刚被收回：下次读日历时再试
         }
+    }
+
+    override fun addChangeListener(listener: () -> Unit): AutoCloseable {
+        listeners += listener
+        ensureObserver()
+        return AutoCloseable { listeners -= listener }
     }
 
     // ---- 查询小工具 ----
@@ -348,6 +368,7 @@ class SystemBackend(private val context: Context, private val time: TimeEnv = Ti
     }
 
     private companion object {
+        const val TAG = "CalendarSystem"
         const val DAY = 86_400_000L
         const val PAD_MS = 36L * 3_600_000L
         const val OBSERVER_DEBOUNCE_MS = 300L
