@@ -126,6 +126,9 @@ class AuthorizationDialog private constructor(
             if (!allow) denyButton = b
             column.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
         }
+        // 默认焦点在“拒绝”：触摸模式下 requestFocus 不生效（按钮不是 focusableInTouchMode，见上），
+        // 所以同时标成“默认获得焦点”——切到键盘 / 方向键 / 读屏导航时系统先落在它上面，而不是第一个按钮
+        denyButton?.isFocusedByDefault = true
         denyButton?.requestFocus()
         return ScrollView(activity).apply { addView(column) }
     }
