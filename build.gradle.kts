@@ -106,6 +106,9 @@ subprojects {
                 sourceCompatibility = javaBytecodeTarget
                 targetCompatibility = javaBytecodeTarget
             }
+            // 伪本地化（docs/next-apps-plan.md 7.2 R9）：debug 构建带 en-XA / ar-XB，系统语言切到 en-XA 后，
+            // 没走字符串资源的文字不会变形，一眼能看出；release 不带。
+            buildTypes.getByName("debug").isPseudoLocalesEnabled = true
             if (releaseStoreFile != null) {
                 val release = signingConfigs.create("agentosRelease") {
                     storeFile = releaseStoreFile
