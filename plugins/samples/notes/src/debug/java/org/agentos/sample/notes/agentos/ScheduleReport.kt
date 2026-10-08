@@ -65,6 +65,7 @@ object ScheduleReport {
         put("created", buildJsonObject {
             put("events", summary?.eventCount ?: 0)
             put("alarms", summary?.alarmCount ?: 0)
+            put("todos", summary?.todoCount ?: 0)
             put("denied", summary?.deniedCount ?: 0)
             put("failed", summary?.failedCount ?: 0)
         })
@@ -94,6 +95,10 @@ object ScheduleReport {
             put("time", it.time)
             put("label", it.label)
             put("days", buildJsonArray { it.days.forEach { d -> add(JsonPrimitive(d)) } })
+        }
+        item.todo?.let {
+            put("title", it.title)
+            put("due", it.due?.let(::JsonPrimitive) ?: JsonNull)
         }
         put("message", item.message?.let(::JsonPrimitive) ?: JsonNull)
     }

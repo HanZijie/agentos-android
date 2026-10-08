@@ -87,7 +87,7 @@ class AgentScheduleUseCaseTest {
         assertTrue(end.text.contains("处理好了"))
         val gw = e.gateways.single()
         assertEquals(NotesToolScope, gw.scope)
-        assertEquals(listOf(ToolRef("alarm", "alarm_create"), ToolRef("calendar", "event_create")), gw.scope)
+        assertEquals(listOf(ToolRef("alarm", "alarm_create"), ToolRef("calendar", "event_create"), ToolRef("todo", "todo_create")), gw.scope)
         assertEquals("the connection is closed after a normal end", 1, gw.closeCount)
         assertFalse("the marker is cleared at the end", e.marker.on)
     }
