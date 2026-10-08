@@ -14,7 +14,9 @@
   denied-cooldown        用户拒绝：SDK connect 抛 DENIED；冷却内再 open 直接 denied（不再出现 pending）；冷却过后重新询问（缩短冷却参数）
   pending-timeout        没人决定：等到 ttl 按拒绝记（冷却）；卡片被撤回
   abandon                App 放弃（不再重试）：卡片被撤回，不记拒绝
-  revoke-closes          已连上并有进行中的 prompt 时撤销：通道在几百毫秒内关闭，SDK 的流以 DISCONNECTED 结束；之后 open 是 denied
+  revoke-closes          已连上并有进行中的 prompt 时撤销：通道在几百毫秒内关闭，SDK 的流以 DISCONNECTED 结束；任务在 15 秒内被取消（运行时任务数归零）、
+                         名额释放；之后 open 是 denied；再次允许后能开新通道并跑完一轮 prompt
+  revoke-after-detach    App 自己先关了通道、任务还在跑（F7）：撤销时没有开着的通道，任务靠“见过的 UID”找到并取消
   signature-changed      换签名（apksigner 重签 client）后 open 又是 pending，且标了 signatureChanged；旧签名的通道被撤销；旧授权不继承
   shared-uid             共享 UID（一个 UID 对应两个包）一律 not_open，什么也不记；卸掉其中一个后同一个 App 按普通第三方走授权
   spoofed-name           clientInfo 里冒充别的 App 的包名没有用：注册表里只有真实的包名；工具确认卡的发起者一行和 callerPackage 是真实包名
@@ -67,6 +69,16 @@ class Ctx:
     # ---------------------------------------------------------------- 调试入口
 
     def caller(self, op, timeout=60, **extras):
+        r = self._caller(op, timeout, **extras)
+        # The debug `allow --pkg` looks the package up by NAME. Android hides a package from AgentOS until that package has talked to it
+        # (and a reinstall forgets that), so right after the suite reinstalled the client the lookup fails with not_found. Let the client call
+        # open() once (that also leaves a pending entry, which `allow` then answers) and try again. The product path is by uid and unaffected.
+        if op == "allow" and r.get("ok") is False and "not_found" in json.dumps(r) and extras.get("pkg") == CLIENT_PKG:
+            self.scenario("tp-open", {}, timeout=60)
+            r = self._caller(op, timeout, **extras)
+        return r
+
+    def _caller(self, op, timeout=60, **extras):
         parts = ["am", "broadcast", "-n", CALLER_RECEIVER, "--es", "op", op]
         for k, v in extras.items():
             if isinstance(v, bool):
@@ -126,6 +138,10 @@ class Ctx:
     def result(self, run_id, timeout=150, want_phase=None):
         # without a wanted phase: the FINAL result. tp-hold logs a "ready" record first; taking it as the result raced with the final one
         return acp.collect_result(self.adb, run_id, timeout, want_phase, not_phase=None if want_phase else "ready")
+
+    def first_record(self, run_id, timeout=60):
+        """The first record of a run: the "ready" phase, or, when the scenario failed before getting there, its final record with the error."""
+        return acp.collect_result(self.adb, run_id, timeout)
 
     def wait_for(self, pred, timeout=20, step=0.3):
         t0 = time.time()
@@ -343,37 +359,88 @@ def case_abandon(c):
     return verdict(checks, f"firstState={first.get('state')} removed={bool(gone)}")
 
 
+def new_revocations(c, before, pkg=CLIENT_PKG):
+    """The revoke records (debug `list` -> revocations, in memory in :agent) for [pkg] that were not there in [before]."""
+    seen = {x.get("at") for x in before}
+    return [x for x in (c.caller("list").get("revocations") or []) if x.get("packageName") == pkg and x.get("at") not in seen]
+
+
 def case_revoke_closes(c):
     c.hold_agent()
     c.ensure_fake_model()
     c.reset()
     c.caller("allow", pkg=CLIENT_PKG)
-    # a long but finite prompt (20 s of model output): the runtime has no "cancel this caller's tasks" call yet, so the task
-    # outlives the revoke; the case records that and waits for it to end so the next cases start from an idle :agent
-    run_id = c.start_scenario("tp-hold", {"holdMs": 60000, "prompt": '{"chunks":400,"intervalMs":50}'})
-    ready = c.result(run_id, timeout=60, want_phase="ready")
+    # 50 s of model output: it cannot end by itself inside the 15 s window below, so tasks == 0 can only come from the cancel
+    run_id = c.start_scenario("tp-hold", {"holdMs": 60000, "prompt": '{"chunks":1000,"intervalMs":50}'})
+    first = c.first_record(run_id, timeout=60) or {}
+    ready = first if first.get("phase") == "ready" else None
     time.sleep(2.0)
     before = c.channels().get("thirdParty")
+    tasks_before = c.running_tasks()
+    active_before = ((c.entry() or {}).get("usage") or {}).get("activeTasks")
+    records_before = c.caller("list").get("revocations") or []
     t0 = time.time()
     rev = c.caller("revoke", pkg=CLIENT_PKG)
     closed = c.wait_for(lambda: c.channels().get("thirdParty") == 0, timeout=10, step=0.1)
     server_ms = int((time.time() - t0) * 1000)
+    # take the client's final record NOW: polling running_tasks() below starts in-app scenarios, and each one clears logcat
     r = c.result(run_id, timeout=60) or {}
+    cancelled = c.wait_for(lambda: c.running_tasks() == 0, timeout=15, step=0.5)
+    cancel_ms = int((time.time() - t0) * 1000)
+    record = c.wait_for(lambda: new_revocations(c, records_before), timeout=15, step=0.5) or [{}]
+    e_after = c.entry() or {}
     after = c.scenario("tp-open", {"expect": "denied"}, timeout=60) or {}
-    still_running = c.running_tasks()
-    idle = c.wait_for(lambda: c.running_tasks() == 0, timeout=60, step=2)
+    # the user allows it again: a new channel opens and a prompt runs, so the "one prompt at a time" slot of the revoked task was freed
+    c.caller("allow", pkg=CLIENT_PKG)
+    again = c.scenario("tp-connect", {"prompt": "after the revoke", "promptTimeoutMs": 60000}, timeout=120) or {}
+    rec = record[-1]
     checks = {
         "channelWasOpen": ready is not None and before == 1,
+        "taskWasRunning": isinstance(tasks_before, int) and tasks_before >= 1 and (active_before or 0) >= 1,
         "revokeAccepted": rev.get("ok") is True and (rev.get("caller") or {}).get("state") == "denied",
         "serverClosedChannelAtOnce": bool(closed) and server_ms < 3000,
+        "tasksCancelled": bool(cancelled),
+        "cancelRecorded": rec.get("closedChannels") == 1 and len(rec.get("cancelRequested") or []) >= 1 and "error" not in rec,
+        "slotFreed": (e_after.get("usage") or {}).get("activeTasks") == 0,
         "sdkSawDisconnect": r.get("ok") is True and r.get("isConnected") is False,
         "promptEndedDisconnected": r.get("promptError") in ("DISCONNECTED", None),
         "afterRevokeDenied": bool(after.get("ok")),
-        "agentIdleAgain": bool(idle),
+        "reAllowedPromptRuns": again.get("ok") is True and again.get("stopReason") == "end_turn" and again.get("promptError") is None,
     }
-    # not a check (it is a known gap, reported to A): the task of a revoked app keeps running until it ends by itself
-    return verdict(checks, f"serverClosedMs={server_ms} clientClosedMs={r.get('closedAfterMs')} promptError={r.get('promptError')} "
-                           f"tasksRightAfterRevoke={still_running}", result=r, tasksRightAfterRevoke=still_running)
+    return verdict(checks, f"serverClosedMs={server_ms} tasksZeroAfterMs={cancel_ms if cancelled else None} clientClosedMs={r.get('closedAfterMs')} "
+                           f"promptError={r.get('promptError')} tasksBefore={tasks_before} record={rec.get('cancelRequested')} waitedMs={rec.get('waitedMs')} "
+                           f"again={again.get('stopReason')} firstRecord={first if ready is None else 'ready'}", result=r, record=rec, again=again, ready=ready,
+                   channelsBefore=before, tasksBefore=tasks_before, activeBefore=active_before)
+
+
+def case_revoke_after_detach(c):
+    """
+    The app closes its channel itself while its task runs (an app that exits does this): closing a channel does not cancel the task (F7).
+    Revoking later has no open channel to read the owner from; the tasks must be found through the uids the package was seen with.
+    """
+    c.hold_agent()
+    c.ensure_fake_model()
+    c.reset()
+    c.caller("allow", pkg=CLIENT_PKG)
+    d = c.scenario("tp-detach", {"prompt": '{"chunks":1000,"intervalMs":50}'}, timeout=90) or {}
+    time.sleep(1.0)
+    channels = c.channels().get("thirdParty")
+    tasks_before = c.running_tasks()
+    records_before = c.caller("list").get("revocations") or []
+    rev = c.caller("revoke", pkg=CLIENT_PKG)
+    cancelled = c.wait_for(lambda: c.running_tasks() == 0, timeout=15, step=0.5)
+    record = c.wait_for(lambda: new_revocations(c, records_before), timeout=15, step=0.5) or [{}]
+    rec = record[-1]
+    checks = {
+        "detached": d.get("ok") is True and d.get("sawOutput") is True,
+        "noChannelLeft": channels == 0,
+        "taskOutlivedItsChannel": isinstance(tasks_before, int) and tasks_before >= 1,
+        "revokeAccepted": rev.get("ok") is True and (rev.get("caller") or {}).get("state") == "denied",
+        "tasksCancelled": bool(cancelled),
+        "cancelRecorded": rec.get("closedChannels") == 0 and len(rec.get("cancelRequested") or []) >= 1 and "error" not in rec,
+    }
+    return verdict(checks, f"channels={channels} tasksBefore={tasks_before} record={rec.get('cancelRequested')} owners={rec.get('owners')} waitedMs={rec.get('waitedMs')}",
+                   detach=d, record=rec)
 
 
 def case_signature_changed(c):
@@ -626,7 +693,7 @@ def build_shared_uid_apks():
 CASES = [
     ("unauthorized-pending", case_unauthorized_pending), ("allow-usable", case_allow_usable), ("usable-no-scope", case_usable_no_scope),
     ("denied-cooldown", case_denied_cooldown), ("pending-timeout", case_pending_timeout), ("abandon", case_abandon),
-    ("revoke-closes", case_revoke_closes), ("spoofed-name", case_spoofed_name), ("list-shape", case_list_shape),
+    ("revoke-closes", case_revoke_closes), ("revoke-after-detach", case_revoke_after_detach), ("spoofed-name", case_spoofed_name), ("list-shape", case_list_shape),
     ("catalog-tools", case_catalog_tools),
     ("settings-actions", case_settings_actions), ("shared-uid", case_shared_uid), ("signature-changed", case_signature_changed),
 ]
