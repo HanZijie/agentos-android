@@ -210,6 +210,7 @@ class AgentProcess private constructor(val app: Context) {
             Log.i(TAG, "authorization requested by ${entry.packageName} (request ${entry.requestId?.take(8)})")
             val id = entry.requestId ?: return
             val at = entry.requestedAt ?: return
+            val cardMillis = minOf(callers.config.pendingTtlMillis, callers.config.cardTimeoutMillis)
             // 授权卡片 / 通知（D 的 ConsentBridge）：前台推给对话框，后台发带“拒绝”的通知，和工具确认排同一个队
             consentBridge.authorizationRequested(
                 ConsentWire.AuthRequest(
@@ -218,10 +219,11 @@ class AgentProcess private constructor(val app: Context) {
                     appLabel = entry.label,
                     signingDigest = entry.signingDigest,
                     signatureChanged = entry.signatureChanged,
-                    deadlineMillis = at + callers.config.pendingTtlMillis,
-                    timeoutMillis = callers.config.pendingTtlMillis,
+                    deadlineMillis = at + cardMillis,
+                    timeoutMillis = cardMillis,
                 ),
             )
+            startCallerTicker()
         }
 
         override fun onResolved(requestId: String, state: CallerState, how: CallerResolution) {
@@ -239,6 +241,22 @@ class AgentProcess private constructor(val app: Context) {
             val closed = acp.closeFor(packageName, signingDigest, "authorization revoked")
             Log.i(TAG, "authorization of $packageName revoked: closed $closed channel(s)")
             cancelTasksOf(packageName)
+        }
+    }
+
+    @Volatile private var callerTicker: Job? = null
+
+    /**
+     * 有待决的授权提示期间每秒让注册表结案一次：App 放弃了（不再重试 open）、用户一直没回答，都没有人再调用注册表，
+     * 卡片和通知要靠这个撤回。
+     */
+    private fun startCallerTicker() {
+        if (callerTicker?.isActive == true) return
+        callerTicker = scope.launch(CoroutineName("caller-ticker")) {
+            while (callers.hasPending()) {
+                delay(1_000)
+                callers.tick()
+            }
         }
     }
 

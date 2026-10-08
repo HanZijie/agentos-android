@@ -23,6 +23,15 @@ data class CallerConfig(
      * 超时没人决定按拒绝记（进入冷却）。
      */
     val pendingTtlMillis: Long = 100_000L,
+    /**
+     * 待决的 App 这么久没有再重试 open，就当它放弃了（用户在 App 里点了取消、App 进程死了）：撤回授权卡片。SDK 每秒重试一次。
+     * 放弃时已经等了接近 SDK 的 90 秒上限的，按“没人决定”记一次拒绝（冷却）；更早放弃的不算拒绝，什么也不记。
+     */
+    val abandonAfterMillis: Long = 5_000L,
+    /** 等了这么久还没人决定，之后放弃算“没人决定”（略小于 SDK 的 90 秒）。 */
+    val abandonCountsAsDenialAfterMillis: Long = 85_000L,
+    /** 授权卡片上显示的倒计时（与 SDK 等待的 90 秒一致；实际结案时间由上面的参数决定）。 */
+    val cardTimeoutMillis: Long = 90_000L,
     /** 同时待决的授权提示上限；再多的 App 直接 not_open（防止装一批 App 刷屏）。 */
     val maxPending: Int = 8,
     /** 记着的 App 总数上限（已允许 / 已拒绝）；满了只清最久没用的已拒绝项，仍满则不再接受新的。 */
@@ -48,6 +57,8 @@ data class CallerEntry(
     val deniedUntil: Long? = null,
     val requestId: String? = null,
     val requestedAt: Long? = null,
+    /** 只在 PENDING 时有意义（不进文件）：App 最近一次重试 open 的时间。 */
+    val lastSeenAt: Long? = null,
     val promptsTotal: Long = 0,
     /** 只在 PENDING 时有意义（不进文件）：这个包名以前被记录过，但签名和那时不同——授权卡片要写明。 */
     val signatureChanged: Boolean = false,
@@ -165,7 +176,7 @@ class CallerRegistry(
                     propose(packageName, signingDigest, label, now, events, signatureChanged = e != null)
                 }
                 e.state == CallerState.PENDING -> {
-                    if (e.label != label) entries[packageName] = e.copy(label = label)
+                    entries[packageName] = e.copy(label = label, lastSeenAt = now)
                     Admission.Pending(e.requestId!!)
                 }
                 e.state == CallerState.ALLOWED -> {
@@ -198,7 +209,7 @@ class CallerRegistry(
         val entry = CallerEntry(
             packageName = pkg, signingDigest = digest, label = label, state = CallerState.PENDING,
             firstSeenAt = previous?.firstSeenAt ?: now, lastUsedAt = previous?.lastUsedAt, promptsTotal = previous?.promptsTotal ?: 0,
-            requestId = id, requestedAt = now, signatureChanged = signatureChanged,
+            requestId = id, requestedAt = now, lastSeenAt = now, signatureChanged = signatureChanged,
         )
         entries[pkg] = entry
         events += { listener?.onPending(entry) }
@@ -214,18 +225,48 @@ class CallerRegistry(
         return true
     }
 
-    /** 过期的授权提示按拒绝记（算一次拒绝，进入冷却）。持锁调用。 */
+    /**
+     * 过期的授权提示结案。持锁调用。
+     * - 等满 [CallerConfig.pendingTtlMillis] 没人决定：按拒绝记（算一次拒绝，进入冷却）。
+     * - App 超过 [CallerConfig.abandonAfterMillis] 没再重试（放弃了）：撤回卡片。已经等了 [CallerConfig.abandonCountsAsDenialAfterMillis]
+     *   以上的算“没人决定”，同上记拒绝；更早放弃的不算拒绝，记录删掉（下次 open 重新提出）。
+     */
     private fun expirePending(now: Long, events: MutableList<() -> Unit>) {
         for (e in entries.values.toList()) {
             val at = e.requestedAt ?: continue
-            if (e.state != CallerState.PENDING || now - at < config.pendingTtlMillis) continue
-            entries[e.packageName] = e.copy(
-                state = CallerState.DENIED, decidedAt = now, deniedUntil = now + config.denyCooldownMillis, requestId = null, requestedAt = null,
-            )
-            persistQuietly()
-            events += resolvedEvent(e, CallerState.DENIED, CallerResolution.TIMED_OUT)
+            if (e.state != CallerState.PENDING) continue
+            val age = now - at
+            val abandoned = now - (e.lastSeenAt ?: at) > config.abandonAfterMillis
+            val timedOut = age >= config.pendingTtlMillis || (abandoned && age >= config.abandonCountsAsDenialAfterMillis)
+            when {
+                timedOut -> {
+                    entries[e.packageName] = e.copy(
+                        state = CallerState.DENIED, decidedAt = now, deniedUntil = now + config.denyCooldownMillis,
+                        requestId = null, requestedAt = null, lastSeenAt = null,
+                    )
+                    persistQuietly()
+                    events += resolvedEvent(e, CallerState.DENIED, CallerResolution.TIMED_OUT)
+                }
+                abandoned -> {
+                    entries.remove(e.packageName)
+                    events += resolvedEvent(e, CallerState.DENIED, CallerResolution.CANCELLED)
+                }
+            }
         }
     }
+
+    /**
+     * 让过期的授权提示结案（撤回卡片、通知）。准入、答复、查询时都会顺带做；没有人调用它们时（App 放弃了，不再重试）
+     * 要靠这个：`:agent` 在有待决提示期间每秒调一次。
+     */
+    fun tick() {
+        val events = ArrayList<() -> Unit>()
+        synchronized(lock) { expirePending(clock(), events) }
+        events.forEach { it() }
+    }
+
+    /** 现在有没有待决的授权提示（决定要不要继续 tick）。 */
+    fun hasPending(): Boolean = synchronized(lock) { entries.values.any { it.state == CallerState.PENDING } }
 
     private fun resolvedEvent(e: CallerEntry, state: CallerState, how: CallerResolution): () -> Unit {
         val id = e.requestId ?: return {}
