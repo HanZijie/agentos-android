@@ -31,6 +31,7 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.AcpConnection
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.OutboundGate
+import org.agentos.runtime.ports.ToolRef
 import org.agentos.runtime.testing.TestRuntime
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
@@ -120,6 +121,16 @@ class AcpPair(
         runCatching { clientProtocol.close() }
         scope.cancel()
     }
+}
+
+/** `session/new` 的 `_meta`：`{"org.agentos": {"toolScope": [{"plugin", "tool"}, ...]}}`（docs/third-party-acp.md 4.5）。 */
+fun toolScopeMeta(vararg refs: ToolRef): JsonObject = buildJsonObject {
+    put(
+        ProfileExtensions.META_KEY,
+        buildJsonObject {
+            put("toolScope", buildJsonArray { refs.forEach { r -> add(buildJsonObject { put("plugin", r.plugin); put("tool", r.tool) }) } })
+        },
+    )
 }
 
 fun List<Event>.updates(): List<SessionUpdate> = filterIsInstance<Event.SessionUpdateEvent>().map { it.update }

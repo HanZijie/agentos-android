@@ -31,6 +31,7 @@ import org.agentos.runtime.skills.SkillPrompt
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.FinishReason
 import org.agentos.runtime.ports.HostPort
+import org.agentos.runtime.ports.ToolScope
 import org.agentos.runtime.ports.TurnOutcome
 import org.agentos.runtime.ports.warn
 import org.agentos.runtime.store.SessionState
@@ -270,9 +271,10 @@ internal class Scheduler(
             val outcome: TurnOutcome = try {
                 // 工具目录和 Skill 目录在这里（任务开始时）取一次：目录之后变了，进行中的任务不受影响，下一个任务用新的
                 prepareTools()
-                val sessionConfig = AgentSessionConfig(model, systemPrompt(), broker.declarations(), config.maxToolRounds)
+                val scope = sessionToolScope(task)
+                val sessionConfig = AgentSessionConfig(model, systemPrompt(scope), broker.declarations(scope), config.maxToolRounds)
                 val coreSession = cores.acquire(task.sessionId, sessionConfig)
-                val runner = TaskRunner(task.sessionId, task.id, ownerKey, caller, coreSession, broker, store, config)
+                val runner = TaskRunner(task.sessionId, task.id, ownerKey, caller, scope, coreSession, broker, store, config)
                 entry.runner = runner
                 if (entry.fenced) runner.fence()
                 if (entry.cancelReason == null) cancelledBeforeStart(task)?.let { entry.cancelReason = it }
@@ -302,8 +304,22 @@ internal class Scheduler(
         }
     }
 
-    /** 基础系统提示 + Skill 目录（第三方文本，已转义并标明来源，见 [SkillPrompt]）。 */
-    private fun systemPrompt(): String {
+    /**
+     * 这个任务所在会话的工具范围（docs/third-party-acp.md 4.5）：会话创建时定下，之后不会变；没带 = [ToolScope.ALL]，对所有调用方一样。
+     * 调用方策略（4.4，默认放开）可以再收窄：会话是谁建的、这个任务是谁提的，两个身份各过一遍。会话读不到时按“没有任何工具”处理（宁可少给）。
+     */
+    private suspend fun sessionToolScope(task: TaskRecord): ToolScope {
+        val session = store.read { it.sessions.get(task.sessionId) } ?: return ToolScope.NONE
+        val creator = CallerIdentity(session.callerUid, session.callerKind)
+        return broker.scopeFor(CallerIdentity(task.callerUid, task.callerKind, task.callerLabel), broker.scopeFor(creator, session.scope))
+    }
+
+    /**
+     * 基础系统提示 + Skill 目录（第三方文本，已转义并标明来源，见 [SkillPrompt]）。
+     * 受限的 [scope] 里没有 `read_skill`，所以也不写 Skill 目录（提示里不能出现一个调不了的工具，也不让第三方 Skill 的文字进到一个被收窄的会话里）。
+     */
+    private fun systemPrompt(scope: ToolScope): String {
+        if (!scope.allowsBuiltinTools) return config.systemPrompt
         val limits = SkillPrompt.Limits(config.skillPromptMaxChars, config.skillPromptDescriptionChars)
         val rendered = SkillPrompt.render(host.skills.catalog.value.skills, limits)
         if (rendered.omitted.isNotEmpty()) host.log.warn(TAG, "skill list truncated in the system prompt: ${rendered.omitted.size} skills left out")

@@ -38,10 +38,11 @@ class ConsentCoordinatorTest {
         rememberable: Boolean = true,
         title: String? = "追加备忘",
         args: String = "{\"text\":\"hello\"}",
+        alwaysAllowOffered: Boolean = true,
     ) = ConsentRequest(
         requestId = id, sessionId = "s1", taskId = "t1", toolCallId = "c-$id", toolName = "append_note", toolTitle = title,
         risk = risk, caller = CallerIdentity(10123, CallerKind.APP, "com.example.app"), argumentsPreview = args,
-        rememberable = rememberable, timeoutMillis = timeout, source = source,
+        rememberable = rememberable, timeoutMillis = timeout, source = source, alwaysAllowOffered = alwaysAllowOffered,
     )
 
     private class RecordingSurface : ConsentSurface {
@@ -381,6 +382,46 @@ class ConsentCoordinatorTest {
             byId.getValue("w").options.map { it.choice },
         )
         assertTrue(ConsentChoice.ALWAYS_ALLOW !in byId.getValue("r").options.map { it.choice })
+        f.coordinator.close()
+    }
+
+    // ---- docs/third-party-acp.md 4.4: a request can have options taken away by the caller policy (the strict one does it for third-party apps) ----
+
+    @Test
+    fun `a request that offers neither remember nor always allow shows only allow once and decline`() = runTest {
+        val f = fixture()
+        f.ask(req("n", risk = ToolRisk.WRITE, rememberable = false, alwaysAllowOffered = false))
+        runCurrent()
+        assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.DENY), f.coordinator.pending.value.single().options.map { it.choice })
+        f.coordinator.close()
+    }
+
+    @Test
+    fun `a forged always allow or session answer to such a request is a decline and writes nothing`() = runTest {
+        val f = fixture()
+        for (forged in listOf(ConsentChoice.ALWAYS_ALLOW, ConsentChoice.ALLOW_FOR_SESSION)) {
+            val d = f.ask(req("forged-$forged", rememberable = false, alwaysAllowOffered = false))
+            runCurrent()
+            f.coordinator.respond("forged-$forged", forged)
+            assertEquals(ConsentDecision.Deny(ConsentDecision.DenyReason.USER), d.await(), "$forged")
+        }
+        assertTrue(f.writer.writes.isEmpty(), "the policy was not written")
+        val ok = f.ask(req("ok", rememberable = false, alwaysAllowOffered = false))
+        runCurrent()
+        f.coordinator.respond("ok", ConsentChoice.ALLOW_ONCE)
+        assertEquals(ConsentDecision.Allow(), ok.await())
+    }
+
+    @Test
+    fun `the choices do not depend on who is calling - a third-party app and AgentOS itself see the same options`() = runTest {
+        val f = fixture()
+        val desktop = CallerIdentity(2000, CallerKind.DESKTOP, "desktop")
+        val self = CallerIdentity(10001, CallerKind.SELF, "AgentOS")
+        val app = CallerIdentity(10123, CallerKind.APP, "com.example.app")
+        for ((id, caller) in listOf("app" to app, "self" to self, "desktop" to desktop)) f.ask(req(id, risk = ToolRisk.WRITE).copy(caller = caller))
+        runCurrent()
+        val all = listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALLOW_FOR_SESSION, ConsentChoice.ALWAYS_ALLOW, ConsentChoice.DENY)
+        for (v in f.coordinator.pending.value) assertEquals(all, v.options.map { it.choice }, v.requestId)
         f.coordinator.close()
     }
 

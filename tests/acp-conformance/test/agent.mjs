@@ -147,7 +147,8 @@ export function targets() {
  */
 export function capabilities(target) {
   const desktop = target !== "device";
-  return { tools: desktop, consent: desktop, jev: desktop };
+  // scope：session/new 的 toolScope（docs/third-party-acp.md 4.5）。手机上的 :agent 在设备脚本里单独验证（第三方 App 通道，整合人驱动）
+  return { tools: desktop, consent: desktop, jev: desktop, scope: desktop };
 }
 
 /** 设备模式下跳过的原因（报告里逐条列出）。 */
@@ -155,6 +156,7 @@ export const SKIP = {
   tools: "手机上 M1 没有工具：插件工具归 W14（Extension Host），MCP 工具归 W15；电脑上用 AcpStdioAgent 注册的 add / send_note",
   consent: "手机上 M1 没有风险策略与确认界面（W16）；电脑上的确认由 AcpStdioAgent 自动通过",
   jev: "--jev=first 只在电脑上的 AcpStdioAgent 里有；手机上的 :agent 没有配置 Jev（RuntimeConfig.jev 为空，接线还没有分配工作包）",
+  scope: "toolScope 在手机上的 :agent 里由第三方 App 通道的设备用例验证（需要 C 的 CallerRegistry 与真实第三方身份）；这里的客户端是电脑端 / AgentOS 自己",
 };
 
 /** 某个用例在这个目标上要不要跳过：返回 false（照常跑）或跳过原因。 */

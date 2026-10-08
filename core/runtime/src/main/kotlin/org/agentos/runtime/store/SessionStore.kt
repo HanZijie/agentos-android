@@ -9,15 +9,18 @@ import org.agentos.runtime.events.RuntimeJson
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.PiMessages
+import org.agentos.runtime.ports.ToolRef
+import org.agentos.runtime.ports.ToolScope
 
 /** 会话表与各会话的 Pi messages。只在 Store 的事务里使用。 */
 class SessionStore internal constructor(private val db: DbScope) {
 
-    fun create(id: String, caller: CallerIdentity, cwd: String?, now: Long): SessionRecord {
+    fun create(id: String, caller: CallerIdentity, cwd: String?, now: Long, toolScope: List<ToolRef>? = null): SessionRecord {
         db.exec(
-            "INSERT INTO sessions (id, owner_key, caller_kind, caller_uid, state, cwd, created_at, last_activity_at, ready_since) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (id, owner_key, caller_kind, caller_uid, state, cwd, created_at, last_activity_at, ready_since, tool_scope) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             id, caller.ownerKey, caller.kind, caller.uid, SessionState.CREATED.wire, cwd, now, now, now,
+            toolScope?.let { ToolScope.toJson(it).toString() },
         )
         return requireNotNull(get(id))
     }
@@ -107,6 +110,7 @@ class SessionStore internal constructor(private val db: DbScope) {
             latestAnswer = r.stringOrNull(12),
             recentTurns = RuntimeJson.decodeFromString(TURNS, r.string(13)),
         ),
+        toolScope = ToolScope.fromJson(r.stringOrNull(14)),
     )
 
     companion object {
@@ -116,6 +120,6 @@ class SessionStore internal constructor(private val db: DbScope) {
         private val TURNS = ListSerializer(PairSerializer(String.serializer(), String.serializer()))
 
         private const val SELECT = "SELECT id, owner_key, caller_kind, caller_uid, state, pause_reason, cwd, created_at, " +
-            "last_activity_at, last_sequence, first_query, first_answer, latest_answer, recent_turns FROM sessions"
+            "last_activity_at, last_sequence, first_query, first_answer, latest_answer, recent_turns, tool_scope FROM sessions"
     }
 }

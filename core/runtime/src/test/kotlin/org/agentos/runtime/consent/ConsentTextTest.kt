@@ -208,6 +208,31 @@ class ConsentTextTest {
     }
 
     @Test
+    fun `allowedChoices does not look at the caller, only at the request`() {
+        val source = ToolSource("p", "s", "t")
+        for (risk in ToolRisk.entries) for (rememberable in listOf(false, true)) for (alwaysOffered in listOf(false, true)) for (always in listOf(false, true)) for (src in listOf<ToolSource?>(null, source)) {
+            val results = CallerKind.entries.map { kind ->
+                ConsentText.allowedChoices(
+                    ConsentRequest("r", "s", "t", "c", "tool", null, risk, CallerIdentity(10001, kind, "x"), "{}", rememberable = rememberable, source = src, alwaysAllowOffered = alwaysOffered),
+                    always,
+                )
+            }
+            assertEquals(1, results.toSet().size, "$risk $rememberable $alwaysOffered $always $src")
+        }
+    }
+
+    @Test
+    fun `alwaysAllowOffered false takes always allow away and nothing else`() {
+        val source = ToolSource("p", "s", "t")
+        fun choices(offered: Boolean) = ConsentText.allowedChoices(
+            ConsentRequest("r", "s", "t", "c", "tool", null, ToolRisk.WRITE, CallerIdentity(10001, CallerKind.APP, "x"), "{}", rememberable = true, source = source, alwaysAllowOffered = offered),
+            alwaysAvailable = true,
+        )
+        assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALLOW_FOR_SESSION, ConsentChoice.ALWAYS_ALLOW, ConsentChoice.DENY), choices(true))
+        assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALLOW_FOR_SESSION, ConsentChoice.DENY), choices(false))
+    }
+
+    @Test
     fun `option labels are fixed text`() = runTest {
         val writable = object : ApprovalWriter {
             override suspend fun setAlways(source: ToolSource, risk: ToolRisk) = ApprovalWriteResult.Saved

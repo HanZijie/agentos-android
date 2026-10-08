@@ -9,6 +9,8 @@ import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.events.PendingEvent
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.RuntimeLog
+import org.agentos.runtime.ports.ToolRef
+import org.agentos.runtime.ports.ToolScope
 import org.agentos.runtime.ports.info
 import org.agentos.runtime.store.SessionRecord
 import org.agentos.runtime.store.SessionState
@@ -21,6 +23,8 @@ import org.agentos.runtime.store.StoreTx
  * - 候选只来自 Store（按 ownerKey 隔离），活跃窗口 30 分钟、最多 254 个，不足 20 个时用较早的会话补足（标为 stale）；
  * - 交给 Jev 的 brief 只含首轮问题、首轮回答、最近回答、最近两轮问答，按字符预算截断，`new_session` 永远在；
  * - Jev 只能从请求里的 choiceId 里选；选中已有会话时在事务里再校验归属和状态；
+ * - **toolScope 相同才是候选**（docs/third-party-acp.md 4.5）：会话的工具范围在创建时定下、不能改，所以这次请求带的 toolScope（没带就是“没有”）
+ *   与会话的不同时，那个会话不是候选。调用方不能借“选已有会话”拿到比这次请求更大（或不同）的工具范围；
  * - **任何失败都回退为新建会话**（未配置、网络、超时、非法响应、非法选择、会话已不可用），不阻塞用户提交。
  */
 class SessionRouter(
@@ -37,43 +41,44 @@ class SessionRouter(
         val fallbackReason: String? = null,
     )
 
-    suspend fun route(caller: CallerIdentity, query: String, cwd: String?): Result {
+    suspend fun route(caller: CallerIdentity, query: String, cwd: String?, toolScope: List<ToolRef>? = null): Result {
         val now = store.read { it.now }
-        val candidates = store.read { tx -> candidates(tx.sessions.listByOwner(caller.ownerKey), now) }
-        if (candidates.isEmpty()) return createNew(caller, cwd, "no_candidates", null)
-        if (jev == null) return createNew(caller, cwd, METHOD_FALLBACK, "jev_unconfigured")
+        val wanted = toolScope?.let { ToolScope.normalize(it) }
+        val candidates = store.read { tx -> candidates(tx.sessions.listByOwner(caller.ownerKey).filter { it.toolScope == wanted }, now) }
+        if (candidates.isEmpty()) return createNew(caller, cwd, "no_candidates", null, toolScope)
+        if (jev == null) return createNew(caller, cwd, METHOD_FALLBACK, "jev_unconfigured", toolScope)
 
         val request = buildRequest(query, candidates, now)
         val choice = try {
-            withTimeoutOrNull(config.timeoutMillis) { jev.choose(request) } ?: return createNew(caller, cwd, METHOD_FALLBACK, "jev_timeout")
+            withTimeoutOrNull(config.timeoutMillis) { jev.choose(request) } ?: return createNew(caller, cwd, METHOD_FALLBACK, "jev_timeout", toolScope)
         } catch (e: CancellationException) {
             throw e
         } catch (e: JevException) {
-            return createNew(caller, cwd, METHOD_FALLBACK, e.reason)
+            return createNew(caller, cwd, METHOD_FALLBACK, e.reason, toolScope)
         } catch (e: Exception) {
-            return createNew(caller, cwd, METHOD_FALLBACK, "jev_error")
+            return createNew(caller, cwd, METHOD_FALLBACK, "jev_error", toolScope)
         }
-        if (choice == JevProvider.NEW_SESSION) return createNew(caller, cwd, METHOD_JEV, null)
-        if (candidates.none { it.id == choice }) return createNew(caller, cwd, METHOD_FALLBACK, "jev_invalid_choice")
+        if (choice == JevProvider.NEW_SESSION) return createNew(caller, cwd, METHOD_JEV, null, toolScope)
+        if (candidates.none { it.id == choice }) return createNew(caller, cwd, METHOD_FALLBACK, "jev_invalid_choice", toolScope)
 
         // 提交前再校验：仍属于调用方、没有终态、不在等恢复决定
         val selected = store.write { tx ->
             val s = tx.sessions.get(choice)
-            if (s == null || s.ownerKey != caller.ownerKey || s.state.terminal || s.state == SessionState.SYSTEM || s.pauseReason != null) {
+            if (s == null || s.ownerKey != caller.ownerKey || s.state.terminal || s.state == SessionState.SYSTEM || s.pauseReason != null || s.toolScope != wanted) {
                 return@write null
             }
             tx.events.append(
                 PendingEvent(choice, null, EventTypes.SESSION_SELECTED, buildJsonObject { put("created", false); put("reason", METHOD_JEV) }),
             )
             s
-        } ?: return createNew(caller, cwd, METHOD_FALLBACK, "selected_session_unavailable")
+        } ?: return createNew(caller, cwd, METHOD_FALLBACK, "selected_session_unavailable", toolScope)
         log.info(TAG, "auto-select chose an existing session")
         return Result(selected, created = false, method = METHOD_JEV)
     }
 
-    private suspend fun createNew(caller: CallerIdentity, cwd: String?, method: String, reason: String?): Result {
+    private suspend fun createNew(caller: CallerIdentity, cwd: String?, method: String, reason: String?, toolScope: List<ToolRef>?): Result {
         val session = store.write { tx ->
-            val s = createSession(tx, caller, cwd, via = "auto_select")
+            val s = createSession(tx, caller, cwd, via = "auto_select", toolScope = toolScope)
             tx.events.append(
                 PendingEvent(
                     s.id, null, EventTypes.SESSION_SELECTED,
@@ -138,9 +143,9 @@ class SessionRouter(
         const val METHOD_JEV = "jev"
         const val METHOD_FALLBACK = "fallback_new_session"
 
-        /** 新建会话并写 session.created（session/new 与自动选会话共用）。 */
-        fun createSession(tx: StoreTx, caller: CallerIdentity, cwd: String?, via: String): SessionRecord {
-            val s = tx.sessions.create(Ids.session(tx.now), caller, cwd, tx.now)
+        /** 新建会话并写 session.created（session/new 与自动选会话共用）。[toolScope]：这个会话能用的工具，创建时定下（4.5），null = 没带。 */
+        fun createSession(tx: StoreTx, caller: CallerIdentity, cwd: String?, via: String, toolScope: List<ToolRef>? = null): SessionRecord {
+            val s = tx.sessions.create(Ids.session(tx.now), caller, cwd, tx.now, toolScope?.let { ToolScope.normalize(it) })
             tx.events.append(
                 PendingEvent(
                     s.id, null, EventTypes.SESSION_CREATED,
@@ -149,6 +154,7 @@ class SessionRouter(
                         put("callerKind", caller.kind.name.lowercase())
                         put("callerUid", caller.uid)
                         put("via", via)
+                        s.toolScope?.let { put("toolScope", ToolScope.toJson(it)) }
                     },
                 ),
             )

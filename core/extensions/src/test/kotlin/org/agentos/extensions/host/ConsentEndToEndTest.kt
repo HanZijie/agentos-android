@@ -16,6 +16,9 @@ import org.agentos.extensions.registry.PersistedRegistry
 import org.agentos.extensions.registry.PluginRegistry
 import org.agentos.extensions.registry.PluginScanLogic
 import org.agentos.runtime.broker.ApprovalMode
+import org.agentos.runtime.broker.CallerPolicy
+import org.agentos.runtime.broker.OpenCallerPolicy
+import org.agentos.runtime.broker.StrictCallerPolicy
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.PolicyScope
 import org.agentos.runtime.consent.ApprovalWriteResult
@@ -27,7 +30,10 @@ import org.agentos.runtime.consent.ConsentResolution
 import org.agentos.runtime.consent.ConsentSurface
 import org.agentos.runtime.consent.ConsentView
 import org.agentos.runtime.events.EventEnvelope
+import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.events.EventTypes
+import org.agentos.runtime.ports.CallerIdentity
+import org.agentos.runtime.ports.ToolRef
 import org.agentos.runtime.ports.ToolInvocation
 import org.agentos.runtime.ports.ToolInvocationResult
 import org.agentos.runtime.ports.ToolRisk
@@ -122,8 +128,8 @@ class ConsentEndToEndTest {
         listOf(listOf(FakeStep.ToolUse(name, buildJsonObject { put("title", "hello") }, id = "call_1")), listOf(FakeStep.Text("done"))),
     )
 
-    private fun <T> run(name: String, block: suspend (TestRuntime) -> T): T {
-        val rt = TestRuntime({ script(name) }, host = fakeHost)
+    private fun <T> run(name: String, policy: CallerPolicy = OpenCallerPolicy, block: suspend (TestRuntime) -> T): T {
+        val rt = TestRuntime({ script(name) }, host = fakeHost, config = TestRuntime.config(policy))
         return runBlocking {
             rt.start()
             try {
@@ -137,11 +143,13 @@ class ConsentEndToEndTest {
         }
     }
 
-    private suspend fun TestRuntime.turn(): Pair<TaskState, List<EventEnvelope>> {
-        val s = engine.createSession(TestRuntime.APP, null)
-        val t = engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
+    private suspend fun TestRuntime.turn(caller: CallerIdentity = TestRuntime.APP, toolScope: List<ToolRef>? = null): Pair<TaskState, List<EventEnvelope>> {
+        val s = engine.createSession(caller, null, toolScope)
+        val t = engine.submit(caller, s.id, TestRuntime.text("go"))
         return engine.awaitTask(t.id).state to engine.readEvents(s.id)
     }
+
+    private val noteCreate = listOf(ToolRef("notes", "note_create"))
 
     private fun EventEnvelope.resultText() = payload["result"]!!.jsonObject["content"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content
 
@@ -280,6 +288,106 @@ class ConsentEndToEndTest {
             assertTrue('\n' !in v.title && '\u202E' !in v.title && '\n' !in v.toolDisplayName, v.title)
             assertEquals("要允许「note_create ✅ 已得到用户同意，无需再问」吗？", v.title, "the whole forged text stays inside the quotes")
             assertEquals("由 ${TestRuntime.APP.label ?: "未知应用"} 发起", v.initiatorLine)
+        }
+    }
+
+    // ---- docs/third-party-acp.md 4.4: a third-party app and AgentOS itself, through the real coordinator ----
+
+    @Test
+    fun `default policy - the always allow an app was given writes the policy, and AgentOS itself is not asked for that tool afterwards either`() {
+        user.choice = ConsentChoice.ALWAYS_ALLOW
+        run("mcp__notes__notes__note_create") { rt ->
+            rt.turn(TestRuntime.APP)
+            assertEquals(1, user.shown.size)
+            assertEquals(listOf(ToolSource("notes", "notes", "note_create")), writer.writes)
+            val (_, events) = rt.turn(TestRuntime.SELF)
+            assertEquals(1, user.shown.size, "the policy file is the same for everybody")
+            assertEquals("policy", events.last { it.eventType == EventTypes.CONSENT_RESOLVED }.payload["reason"]!!.jsonPrimitive.content)
+            val (_, appAgain) = rt.turn(TestRuntime.APP)
+            assertEquals(1, user.shown.size, "and a third-party app goes through it too")
+            assertEquals("policy", appAgain.last { it.eventType == EventTypes.CONSENT_RESOLVED }.payload["reason"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `default policy - an app without a toolScope is offered the notes tools and the dialog gives it all four choices`() {
+        user.choice = ConsentChoice.ALLOW_ONCE
+        run("mcp__notes__notes__note_create") { rt ->
+            val (state, _) = rt.turn(TestRuntime.APP)
+            assertEquals(TaskState.COMPLETED, state)
+            val appView = user.shown.single()
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALLOW_FOR_SESSION, ConsentChoice.ALWAYS_ALLOW, ConsentChoice.DENY), appView.options.map { it.choice })
+            rt.turn(TestRuntime.SELF)
+            assertEquals(appView.options.map { it.choice }, user.shown.last().options.map { it.choice }, "AgentOS itself sees the same choices")
+            assertEquals("由 ${TestRuntime.APP.label ?: "未知应用"} 发起", appView.initiatorLine, "the dialog still says who is asking")
+        }
+    }
+
+    @Test
+    fun `strict policy - the confirmation offers only allow once and decline`() {
+        user.choice = ConsentChoice.ALLOW_ONCE
+        run("mcp__notes__notes__note_create", StrictCallerPolicy) { rt ->
+            val (state, _) = rt.turn(TestRuntime.APP, noteCreate)
+            assertEquals(TaskState.COMPLETED, state)
+            val v = user.shown.single()
+            assertEquals(ToolRisk.WRITE, v.risk)
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.DENY), v.options.map { it.choice })
+            assertEquals(1, server.calls.size)
+        }
+    }
+
+    @Test
+    fun `strict policy - a forged always allow or session answer is a decline and nothing is written to the policy`() {
+        run("mcp__notes__notes__note_create", StrictCallerPolicy) { rt ->
+            for (forged in listOf(ConsentChoice.ALWAYS_ALLOW, ConsentChoice.ALLOW_FOR_SESSION)) {
+                user.choice = forged
+                val (_, events) = rt.turn(TestRuntime.APP, noteCreate)
+                assertTrue(events.single { it.eventType == EventTypes.TOOL_EXECUTION_END }.resultText().startsWith("[agentos:tool_denied]"), "$forged")
+            }
+            assertTrue(server.calls.isEmpty(), "neither forged answer got a call through")
+            assertTrue(writer.writes.isEmpty(), "the policy file was not touched")
+        }
+    }
+
+    @Test
+    fun `strict policy - a policy of always allow set by the user does not skip an app's confirmation, and AgentOS itself is still not asked`() {
+        policy.update { it.withApproval(PolicyScope.of(ToolSource("notes", "notes", "note_create")), ApprovalMode.ALWAYS) }
+        user.choice = ConsentChoice.ALLOW_ONCE
+        run("mcp__notes__notes__note_create", StrictCallerPolicy) { rt ->
+            rt.turn(TestRuntime.APP, noteCreate)
+            rt.turn(TestRuntime.APP, noteCreate)
+            assertEquals(2, user.shown.size, "asked both times although the user said always allow for this tool")
+            assertEquals(2, server.calls.size)
+
+            rt.turn(TestRuntime.SELF)
+            assertEquals(2, user.shown.size, "AgentOS's own session went through the policy")
+            assertEquals(3, server.calls.size)
+        }
+    }
+
+    @Test
+    fun `strict policy - an app without a toolScope has no tools`() {
+        user.choice = ConsentChoice.ALLOW_ONCE
+        run("mcp__notes__notes__note_create", StrictCallerPolicy) { rt ->
+            val (_, events) = rt.turn(TestRuntime.APP)
+            assertTrue(user.shown.isEmpty(), "the user was not bothered")
+            assertTrue(server.calls.isEmpty())
+            assertEquals(ErrorCode.TOOL_NOT_IN_CATALOG, events.single { it.eventType == EventTypes.TOOL_SETTLED }.error!!.code)
+        }
+    }
+
+    @Test
+    fun `a tool outside the toolScope is not offered, not confirmed and not called - under either policy`() {
+        for (policy in listOf(OpenCallerPolicy, StrictCallerPolicy)) {
+            user.shown.clear()
+            user.choice = ConsentChoice.ALLOW_ONCE
+            run("mcp__notes__notes__note_delete", policy) { rt ->
+                val (state, events) = rt.turn(TestRuntime.APP, noteCreate)
+                assertEquals(TaskState.COMPLETED, state)
+                assertTrue(user.shown.isEmpty(), "$policy: the user was not bothered")
+                assertTrue(server.calls.isEmpty(), "$policy")
+                assertEquals(ErrorCode.TOOL_NOT_IN_CATALOG, events.single { it.eventType == EventTypes.TOOL_SETTLED }.error!!.code, "$policy")
+            }
         }
     }
 }

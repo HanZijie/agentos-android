@@ -52,7 +52,7 @@ class AcpAgentSideTest {
     private fun test(jev: JevProvider? = null, block: suspend CoroutineScope.(AcpPair) -> Unit) = runBlocking {
         val rt = TestRuntime(
             FakeScripts.directives(),
-            config = RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), jev = jev),
+            config = RuntimeConfig(scheduler = SchedulerConfig(tickMillis = 20), jev = jev, quota = TestRuntime.UNLIMITED_QUOTA),
         )
         rt.host.tools.registerSimple("add") { args ->
             ToolResult.text(((args["a"] as JsonPrimitive).content.toInt() + (args["b"] as JsonPrimitive).content.toInt()).toString())

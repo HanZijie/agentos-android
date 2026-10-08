@@ -50,7 +50,7 @@ class SchedulerPrepareAndSkillsTest {
     }
 
     private fun runtime(tools: FakeToolPort = FakeToolPort(), config: SchedulerConfig = SchedulerConfig(tickMillis = 20), scripts: (org.agentos.runtime.testing.FakeTurnContext) -> FakeTurnScript = { FakeTurnScript(listOf(listOf(FakeStep.Text("ok")))) }) =
-        TestRuntime(scripts, host = FakeHostPort(tools = tools), config = RuntimeConfig(scheduler = config))
+        TestRuntime(scripts, host = FakeHostPort(tools = tools), config = RuntimeConfig(scheduler = config, quota = TestRuntime.UNLIMITED_QUOTA))
 
     private suspend fun TestRuntime.oneTask(sessionId: String? = null): String {
         val s = sessionId ?: engine.createSession(TestRuntime.APP, null).id

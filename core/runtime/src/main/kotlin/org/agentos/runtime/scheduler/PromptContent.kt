@@ -46,6 +46,19 @@ object PromptContent {
         return TurnInput(text.toString(), images)
     }
 
+    /**
+     * 这一轮输入里的文字字数（text 块的文字 + 嵌入文本资源的内容），配额（`CallerQuota`，docs/third-party-acp.md 4.6）和 ACP 层的上限共用。
+     * 图片和链接不算。
+     */
+    fun textChars(blocks: JsonArray): Int = blocks.sumOf { el ->
+        val b = el as? JsonObject ?: return@sumOf 0
+        when (b.str("type")) {
+            "text" -> b.str("text")?.length ?: 0
+            "resource" -> ((b["resource"] as? JsonObject)?.str("text"))?.length ?: 0
+            else -> 0
+        }
+    }
+
     /** 给会话选择和诊断用的纯文字（只取 text 块）。 */
     fun plainText(blocks: JsonArray, limit: Int = 8_000): String =
         blocks.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }
