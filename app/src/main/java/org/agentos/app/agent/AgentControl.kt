@@ -22,7 +22,7 @@ class AgentControlService : Service() {
 }
 
 /**
- * IAgentControl v4（字段说明见 IAgentControl.aidl；v3 的电脑端接入由 A lane 追加）。每个方法都校验调用方 UID 等于本 App（服务不导出之外的
+ * IAgentControl v5（字段说明见 IAgentControl.aidl；v3 的电脑端接入由 A lane 追加，v4 的 Jev 由 D 追加）。每个方法都校验调用方 UID 等于本 App（服务不导出之外的
  * 第二道检查：root 和 system 也能绑定不导出的服务）。
  *
  * BYOK 方法只让 `agentos.byok.*` 的 IllegalArgumentException / IllegalStateException 回到调用方；其他异常换成
@@ -118,6 +118,25 @@ class AgentControl(private val process: AgentProcess) : IAgentControl.Stub() {
         jev { process.jev.clear() }
     }
 
+    // ------------------------------------------------------------------ v5：第三方 App 接入 ACP（docs/third-party-acp.md 4.3）
+    //
+    // 第一个提交只有接口（D 和备忘录据此动手）：CallerRegistry 接上之前，列表为空，其余方法报 registry_unavailable。
+
+    override fun listAcpCallers(): String {
+        enforceSelf()
+        return "[]"
+    }
+
+    override fun setAcpCaller(packageName: String?, state: String?): String {
+        enforceSelf()
+        throw IllegalStateException("agentos.acp.registry_unavailable: the caller registry is not wired yet")
+    }
+
+    override fun answerAuthorization(requestId: String?, allow: Boolean): Boolean {
+        enforceSelf()
+        return false
+    }
+
     /** Jev 方法只让 `agentos.jev.*` 的异常回到调用方；其他异常换成只带类型名的 `agentos.jev.internal`（消息里不会有 key）。 */
     private inline fun <T> jev(block: () -> T): T = try {
         block()
@@ -162,6 +181,6 @@ class AgentControl(private val process: AgentProcess) : IAgentControl.Stub() {
 
     companion object {
         private const val TAG = "AgentControl"
-        const val VERSION = 4
+        const val VERSION = 5
     }
 }

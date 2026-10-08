@@ -230,8 +230,23 @@ object AcpServiceContract {
     /** `IAcpService.open` 拒绝时，SecurityException 的 message 形如 `agentos.acp.<code>: <说明>`。 */
     const val REASON_PREFIX = "agentos.acp."
 
-    /** 这个版本还不接受第三方 App（M1–M3；M4 起由授权流程决定）。 */
+    /** 这个调用方不被接受，而且不会因为用户授权而改变：共享 UID、查不到包、AgentOS 版本太旧（docs/third-party-acp.md 4.1）。 */
     const val REASON_NOT_OPEN = "agentos.acp.not_open"
+
+    /**
+     * 这个 App（包名 + 签名摘要）还没有被用户允许：AgentOS 已经记下请求、正在请用户决定。**立刻**返回，不阻塞 open；
+     * 调用方每秒重试一次 open，最多 90 秒（SDK 的 [AgentOs.connect] 已经这样做）。没人决定按拒绝记。
+     */
+    const val REASON_AUTHORIZATION_PENDING = "agentos.acp.authorization_pending"
+
+    /** 用户拒绝了这个 App；拒绝后 10 分钟内的 open 直接返回它、不再弹提示。用户可以在 AgentOS 设置里改成允许。 */
+    const val REASON_DENIED = "agentos.acp.denied"
+
+    /**
+     * 把 AgentOS 待决的授权提示 / 工具确认带到前台的 Activity 的 action（D 的极小入口 Activity，导出、不收参数，
+     * 没有待决时直接结束）。只有前台的 App 能这样启动别的 App 的 Activity。SDK：[AgentOs.bringApprovalToFront]。
+     */
+    const val ACTION_SHOW_APPROVAL = "org.agentos.intent.action.SHOW_APPROVAL"
 
     fun message(reason: String, detail: String) = "$reason: $detail"
 

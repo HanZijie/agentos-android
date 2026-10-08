@@ -3,7 +3,7 @@
 package org.agentos.internal;
 
 interface IAgentControl {
-    /** 本接口的版本；v1 = 前四个方法，v2 = 加上 BYOK 的四个方法，v3 = 加上电脑端接入的四个方法。 */
+    /** 本接口的版本；v1 = 前四个方法，v2 = 加上 BYOK 的四个方法，v3 = 加上电脑端接入的四个方法，v4 = Jev，v5 = 第三方 App 接入 ACP 的三个方法。 */
     int getVersion();
 
     /**
@@ -149,4 +149,39 @@ interface IAgentControl {
 
     /** 清除 Jev 的 endpoint 和 key：立即作废（在途的 Jev 请求被中止，路由回退新建会话），并删除 Keystore 主密钥。 */
     void clearJevSource();
+
+    // ---------------------------------------------------------------- v5：第三方 App 接入 ACP（docs/third-party-acp.md 4.1、4.3）
+    //
+    // 后装的 App 经 IAcpService.open 接入，要先被用户允许。C 的 CallerRegistry（:agent，files/acp/callers.json）记着每个 App 的状态；
+    // 这三个方法给设置页（“已授权的应用”）和授权提示（D）用。错误：IllegalArgumentException("agentos.acp.<code>: …")
+    // （not_found：没有这个包的记录；bad_state：state 不是 allowed / denied / removed），IllegalStateException("agentos.acp.registry_unavailable: …")
+    // （callers.json 损坏且没有可用副本，fail closed）。说明里不回显调用方传入的值。
+
+    /**
+     * 所有记着的第三方 App，JSON 数组，按 lastUsedAt 降序（没用过的在后，再按 label）。每项的键固定、顺序固定、不省略（空值为 null）：
+     *   {"packageName"（包名）, "label"（App 名；查不到时是包名）, "signingDigest"（签名摘要：SHA-256 小写十六进制，64 位；多个签名者时
+     *      排序后拼接再 SHA-256，和插件的 signingDigest 同一种）,
+     *    "state":"pending"|"allowed"|"denied"（pending = 已提出请求、等用户决定；denied 在 deniedUntil 之前是冷却中，之后 open 又会弹提示）,
+     *    "requestId"（pending 时授权提示的 ID，answerAuthorization 用；否则 null）,
+     *    "firstSeenAt", "decidedAt"（用户决定的时间，pending 时为 null）, "lastUsedAt"（最近一次 prompt 完成；没用过为 null）,
+     *    "deniedUntil"（冷却结束时间，只有 denied 且还在冷却中才有，否则 null）, "requestedAt"（pending 时请求的时间，否则 null），
+     *    "usage":{"promptsTotal", "promptsLastHour", "activeChannels", "activeTasks"}}
+     * 时间都是毫秒时间戳（System.currentTimeMillis）。签名变了的 App：旧记录作废，当作新请求，列表里只有现在的签名。
+     */
+    String listAcpCallers();
+
+    /**
+     * 设置一个第三方 App 的状态，返回更新后的这一项（形状同 listAcpCallers 的一项；removed 返回 null）。state：
+     *   "allowed"：允许（可用于 pending / denied 的改动；清除冷却）；
+     *   "denied"：拒绝（进入 10 分钟冷却；撤销授权也用它）；
+     *   "removed"：删除记录（下次 open 重新询问）。
+     * 变成 denied / removed 时，这个 App 现有的通道立即关闭、进行中的任务取消。packageName 的记录有多个签名时（旧签名作废后不会有）按现在的签名。
+     */
+    String setAcpCaller(String packageName, String state);
+
+    /**
+     * 回答一条授权提示（requestId 来自 listAcpCallers 的 pending 项，或 D 的卡片）。allow=true 等同 setAcpCaller(包, "allowed")，
+     * allow=false 等同 "denied"。返回回答是否被采纳（已被别处决定、已超时、不存在返回 false）。
+     */
+    boolean answerAuthorization(String requestId, boolean allow);
 }
