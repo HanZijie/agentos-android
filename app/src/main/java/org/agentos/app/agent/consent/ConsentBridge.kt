@@ -10,6 +10,7 @@ import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.os.RemoteCallbackList
 import android.util.Log
+import org.agentos.app.ui.consent.AuthorizationLabels
 import org.agentos.app.ui.consent.ConsentActivity
 import org.agentos.internal.IConsentListener
 import org.agentos.internal.IConsentService
@@ -32,12 +33,12 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * 回调由协调器在单独的协程里按顺序调用（不阻塞任务），这里不做耗时操作。
  */
-class ConsentBridge(private val context: Context, private val log: (String) -> Unit = { Log.w(TAG, it) }) : ConsentSurface {
+class ConsentBridge(private val context: Context, private val log: (String) -> Unit = { Log.w(TAG, it) }) : ConsentSurface, AuthorizationSurface {
     @Volatile private var coordinator: ConsentCoordinator? = null
     /** 监听者所在的主进程死了（被杀、崩溃）时，还没答复的请求转成通知：用户不会因为界面没了就收不到确认。 */
     private val listeners = object : RemoteCallbackList<IConsentListener>() {
         override fun onCallbackDied(callback: IConsentListener?) {
-            if (!hasListener()) pending().forEach { notify(it) }
+            if (!hasListener()) notifyAllPending()
         }
     }
     private val notified = ConcurrentHashMap<String, Int>()
@@ -49,6 +50,41 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
 
     /** 给 [ConsentCoordinator.pending] 的当前值用（登记监听者、点通知时）。 */
     private fun pending(): List<ConsentView> = coordinator?.pending?.value.orEmpty()
+
+    // ---------------------------------------------------------------- 第三方 App 授权提示（AuthorizationSurface）
+
+    /** 待决的授权提示（事实在 CallerRegistry；这里只为登记监听者时给快照、界面走后给通知用）。到达先后。 */
+    private val authPending = java.util.LinkedHashMap<String, ConsentWire.AuthRequest>()
+
+    private fun authList(): List<ConsentWire.AuthRequest> = synchronized(authPending) { authPending.values.toList() }
+
+    /**
+     * 通知上“拒绝”的出口：由 CallerRegistry 的接线者（C）设成 `{ requestId, allow -> registry.answer(...) }`。没接线时拒绝也不会生效
+     * （请求照常超时按拒绝），通知上的按钮仍会撤回。通知上**不给“允许”**：授权是一个持久的信任决定，要在对话框里看清包名和签名。
+     */
+    @Volatile var authorizationAnswer: ((requestId: String, allow: Boolean) -> Boolean)? = null
+
+    override fun authorizationRequested(request: ConsentWire.AuthRequest) {
+        synchronized(authPending) { authPending[request.requestId] = request }
+        if (hasListener()) broadcast { it.onRequested(ConsentWire.encodeAuthString(request)) } else notifyAuth(request)
+    }
+
+    override fun authorizationResolved(requestId: String, resolution: ConsentResolution) {
+        synchronized(authPending) { authPending.remove(requestId) }
+        broadcast { it.onResolved(requestId, ConsentWire.encodeResolution(resolution)) }
+        cancelNotification(requestId)
+    }
+
+    /** 通知上的“拒绝”（运行在 `:agent` 的 [ConsentActionReceiver]）。 */
+    fun denyAuthorizationFromNotification(requestId: String) {
+        runCatching { authorizationAnswer?.invoke(requestId, false) }.onFailure { log("authorization deny failed: ${it.javaClass.simpleName}") }
+        cancelNotification(requestId)
+    }
+
+    private fun notifyAllPending() {
+        pending().forEach { notify(it) }
+        authList().forEach { notifyAuth(it) }
+    }
 
     // ---------------------------------------------------------------- ConsentSurface
 
@@ -74,7 +110,7 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
             listeners.register(listener)
             // 界面接手：之前发的通知全部撤回，当前全部待确认以快照交给它
             notified.keys.toList().forEach { cancelNotification(it) }
-            runCatching { listener.onSnapshot(ConsentWire.encodeViews(pending())) }
+            runCatching { listener.onSnapshot(ConsentWire.encodePending(pending(), authList())) }
         }
 
         override fun unregisterListener(listener: IConsentListener?) {
@@ -82,7 +118,7 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
             if (listener == null) return
             listeners.unregister(listener)
             // 界面走了：还没答复的转成通知
-            if (!hasListener()) pending().forEach { notify(it) }
+            if (!hasListener()) notifyAllPending()
         }
 
         override fun respond(requestId: String?, choice: String?): Boolean {
@@ -150,6 +186,44 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
             nm().notify(TAG, id, b.build())
         } catch (e: Exception) {
             log("notification failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun notifyAuth(req: ConsentWire.AuthRequest) {
+        val id = notified.computeIfAbsent(req.requestId) { NEXT_ID + (nextSeq.getAndIncrement() and 0xffff) }
+        try {
+            ensureChannels()
+            val label = runCatching {
+                context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(req.packageName, 0)).toString()
+            }.getOrNull()
+            val open = PendingIntent.getActivity(
+                context, id, ConsentActivity.intent(context, req.requestId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val deny = Intent(context, ConsentActionReceiver::class.java)
+                .putExtra(ConsentActionReceiver.EXTRA_REQUEST, req.requestId)
+                .putExtra(ConsentActionReceiver.EXTRA_AUTH_DENY, true)
+                .setPackage(context.packageName)
+            val denyPi = PendingIntent.getBroadcast(context, id * 4 + 3, deny, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val text = AuthorizationLabels.notificationText(req)
+            val big = listOfNotNull(text, AuthorizationLabels.signatureChangedLine(req), AuthorizationLabels.EXPLANATION).joinToString("\n")
+            val b = Notification.Builder(context, CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(AuthorizationLabels.title(req, label))
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(big))
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setContentIntent(open)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setShowWhen(true)
+                .setWhen(req.arrivalMillis)
+                .setTimeoutAfter((req.deadlineMillis - System.currentTimeMillis()).coerceAtLeast(1_000))
+            // 只有“拒绝”；允许要点开通知，在对话框里看清包名和签名
+            b.addAction(Notification.Action.Builder(null as Icon?, AuthorizationLabels.DENY, denyPi).build())
+            nm().notify(TAG, id, b.build())
+        } catch (e: Exception) {
+            log("authorization notification failed: ${e.javaClass.simpleName}")
         }
     }
 
