@@ -57,12 +57,14 @@ python3 tools/package-module.py --check build/module/agentos-<ver>.zip   # 只�
 
 ## 示例 App
 
-`plugins/samples/` 下有闹钟、日历、备忘录三个示例 App，各自带一个 MCP 服务（Binder，不开 HTTP 端口），用来演示和验收“AgentOS 通过 MCP 完整操作一个 App”。备忘录还引入了 `:sdk:acp-android`，带一个“让 AgentOS 安排”按钮，是“App 调用 Agent”的参考实现。工具清单、数据与构建见 [sample-apps.md](sample-apps.md) 和各 App 目录下的 README。
+`plugins/samples/` 下有闹钟、日历、备忘录、待办、短信五个示例 App（后两个见 [next-apps-plan.md](next-apps-plan.md)），各自带一个 MCP 服务（Binder，不开 HTTP 端口），用来演示和验收“AgentOS 通过 MCP 完整操作一个 App”。备忘录还引入了 `:sdk:acp-android`，带一个“让 AgentOS 安排”按钮，是“App 调用 Agent”的参考实现。工具清单、数据与构建见 [sample-apps.md](sample-apps.md) 和各 App 目录下的 README。
 
 ```bash
-./gradlew :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug
+./gradlew :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug \
+          :plugins:samples:todo:assembleDebug :plugins:samples:sms:assembleDebug
 ./gradlew :plugins:samples:calendar:testDebugUnitTest
 python3 tests/device/acp-channel/sample_apps_e2e.py --serial <序列号>          # 脚本模式；--live 用真实模型
+python3 tools/package-samples.py --allow-unsigned --out dist-samples      # 示例 APK 的发布检查（无证书干跑；带证书时去掉 --allow-unsigned），见 next-apps-plan.md 7.4
 ```
 
 写操作的确认走真实界面：前台是 AgentOS 里的对话框，后台是通知；release 和 debug 用同一套。debug 构建额外带自动应答的调试接收器，供上面的脚本无人值守地跑，release 包里没有。验收结果见 [m1-acceptance.md](m1-acceptance.md) 三之三、三之四。
