@@ -8,7 +8,9 @@
 
 Agent 运行时是 AgentOS App 里的一个独立进程 `:agent`：外层是 Kotlin 宿主层，负责 ACP、身份、存储、调度和恢复；Agent 循环用上游的 **Pi Agent core**（`@earendil-works/pi-agent-core`），跑在进程内嵌的 QuickJS 里。root 只运行模块脚本：安装 App、开机拉起运行时、在它有任务时被杀后重新拉起、崩溃循环时进入 safe mode。AgentOS 自己的代码不以 root 运行，模型和插件也接触不到 root。设备已经 root，其他 root 应用仍可能读取 AgentOS 的数据，所以安全等级固定为 `best_effort`，并在设置页如实告知。
 
-本仓库接替原型 [agenriod](https://github.com/HanZijie/agenroid)。原型把 Agent 做进了系统镜像，本仓库改为 Magisk / KernelSU 模块。**当前处于基础阶段**：W1 的 Gradle 工程骨架已就绪，S1、S2、S3、S8 四项验证已有结论（真机部分待测）；运行时、ACP Agent 端和界面还没开工，App 还不能对话。
+本仓库接替原型 [agenriod](https://github.com/HanZijie/agenroid)。原型把 Agent 做进了系统镜像，本仓库改为 Magisk / KernelSU 模块。
+
+![AgentOS 开发进度：基础与 M1 已完成，M2 至 M5 进行中，M6 未开始](docs/assets/progress.svg)
 
 ![AgentOS 架构图](docs/assets/architecture.svg)
 

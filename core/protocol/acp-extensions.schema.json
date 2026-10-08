@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentos.org/schemas/acp-extensions/v1.json",
   "title": "AgentOS ACP Profile v1 — extensions",
-  "description": "AgentOS 在 ACP v1 之上的扩展数据（core/protocol/acp-profile-v1.md、acp-mapping.md 第 5 节）。所有扩展数据都放在标准对象的 `_meta` 里，键名固定为 \"org.agentos\"；不在标准对象根上加字段，不改变标准方法的含义。扩展在 initialize 时协商：服务端在响应里声明支持的扩展，客户端在请求里声明要用的；没协商就使用扩展的请求返回 -32602（agentosCode = invalid_params），不静默降级。状态：sessionAutoSelect v1 在 W4 冻结；持久化提交与增量恢复在 W10 追加（名字已保留，见 reservedExtensions）。实现：core/runtime/.../acp/ProfileExtensions.kt。",
+  "description": "AgentOS 在 ACP v1 之上的扩展数据（core/protocol/acp-profile-v1.md、acp-mapping.md 第 5 节）。所有扩展数据都放在标准对象的 `_meta` 里，键名固定为 \"org.agentos\"；不在标准对象根上加字段，不改变标准方法的含义。扩展在 initialize 时协商：服务端在响应里声明支持的扩展，客户端在请求里声明要用的；没协商就使用扩展的请求返回 -32602（agentosCode = invalid_params），不静默降级（例外：toolScope 只声明、不要求协商，因为它只会让会话的工具更少）。状态：sessionAutoSelect v1 在 W4 冻结；toolScope v1 在 W24/W25 追加；持久化提交与增量恢复在 W10 追加（名字已保留，见 reservedExtensions）。实现：core/runtime/.../acp/ProfileExtensions.kt。",
   "$comment": "只追加：已冻结的字段不改名、不改类型；新增字段必须是可选的。",
 
   "$defs": {
     "extensionName": {
-      "description": "扩展名。v1 只有 sessionAutoSelect。",
+      "description": "扩展名。v1 有 sessionAutoSelect 和 toolScope。",
       "type": "string",
-      "enum": ["sessionAutoSelect"]
+      "enum": ["sessionAutoSelect", "toolScope"]
     },
 
     "initializeRequestMeta": {
@@ -51,6 +51,12 @@
                   "type": "object",
                   "required": ["version"],
                   "properties": { "version": { "const": 1 } }
+                },
+                "toolScope": {
+                  "description": "session/new 的 _meta.org.agentos.toolScope 可用。只声明让客户端探测，不要求在 initialize 里协商（它只会让会话的工具更少）。",
+                  "type": "object",
+                  "required": ["version"],
+                  "properties": { "version": { "const": 1 } }
                 }
               },
               "additionalProperties": {
@@ -79,6 +85,19 @@
                   "description": "用来选会话的问题，通常就是接下来要发的 prompt 文字。",
                   "type": "string",
                   "minLength": 1
+                }
+              }
+            },
+            "toolScope": {
+              "description": "toolScope：这个会话能用的工具（docs/third-party-acp.md 4.5）。只能缩小：实际可用 = toolScope ∩ 当前目录；不存在的项静默忽略。所有调用方都可以不带：没有它 = 全部工具；带了就缩小到它；空数组 = 没有任何工具（调用方自己要求的）。默认的 CallerPolicy 不强制第三方带它；可选的 StrictCallerPolicy（默认关）让第三方没有它就没有任何工具。随会话持久化，创建后不能改（session/load 也不能）。形状非法 → -32602 invalid_params，不创建会话。",
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "required": ["plugin", "tool"],
+                "properties": {
+                  "plugin": { "description": "plugin.json 的 name。", "type": "string", "minLength": 1, "maxLength": 128 },
+                  "tool": { "description": "插件自己报告的原始工具名（不是 mcp__… 的最终名字）。", "type": "string", "minLength": 1, "maxLength": 128 }
                 }
               }
             }

@@ -264,8 +264,10 @@ interface ConsentPort {
 /**
  * @property argumentsPreview 给用户看的参数摘要：宿主层已脱敏并截断（不超过 2,000 字符）。
  * @property argumentsTruncated [argumentsPreview] 是不是被截断过（完整参数更长）。
- * @property rememberable 是否提供“本会话内不再询问”（高风险工具为 false）。
+ * @property rememberable 是否提供“本会话内不再询问”（高风险工具为 false；`CallerPolicy` 可以对某类调用方拿掉它）。
  * @property source 工具来自哪个插件的哪个服务器（确认框显示“来自插件 X”用）；不属于任何插件的工具为 null。
+ * @property alwaysAllowOffered 是否可以提供“始终允许这个工具”。默认 true，由其他条件（写级、有来源插件、写回通道可用）进一步决定；
+ *   `CallerPolicy` 可以对某类调用方设为 false（只能拿掉，不能加上）。
  */
 data class ConsentRequest(
     val requestId: String,
@@ -281,6 +283,7 @@ data class ConsentRequest(
     val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
     val source: ToolSource? = null,
     val argumentsTruncated: Boolean = false,
+    val alwaysAllowOffered: Boolean = true,
 ) {
     companion object {
         /** architecture F5：60 秒无响应视为拒绝。 */

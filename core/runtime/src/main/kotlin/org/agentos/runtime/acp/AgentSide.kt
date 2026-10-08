@@ -59,6 +59,7 @@ import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.events.RuntimeJson
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.OutboundGate
+import org.agentos.runtime.ports.ToolRef
 import org.agentos.runtime.router.SessionRouter
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -141,16 +142,22 @@ internal class AcpAgentSupport(
             throw rpcError(ErrorCode.UNSUPPORTED.info("mcpServers are not supported; tools come from AgentOS plugins"))
         }
         val cwd = sessionParameters.cwd.takeIf { it.isNotBlank() }
+        // 工具范围：先于任何会话操作校验，形状不对不创建会话（docs/third-party-acp.md 4.5）
+        val toolScope: List<ToolRef>? = when (val parsed = ProfileExtensions.toolScope(sessionParameters._meta)) {
+            ProfileExtensions.ToolScopeParse.Absent -> null
+            is ProfileExtensions.ToolScopeParse.Scope -> parsed.refs
+            is ProfileExtensions.ToolScopeParse.Invalid -> throw rpcError(ErrorCode.INVALID_PARAMS.info(parsed.reason))
+        }
         val query = ProfileExtensions.autoSelectQuery(sessionParameters._meta)
         if (query != null) {
             if (ProfileExtensions.SESSION_AUTO_SELECT !in extensions) {
                 throw rpcError(ErrorCode.INVALID_PARAMS.info("the ${ProfileExtensions.SESSION_AUTO_SELECT} extension was not negotiated in initialize"))
             }
             if (query.isEmpty()) throw rpcError(ErrorCode.INVALID_PARAMS.info("autoSelect.query must be a non-empty string"))
-            val result = guarded { engine.autoSelect(caller, query, cwd) }
+            val result = guarded { engine.autoSelect(caller, query, cwd, toolScope) }
             return AcpSession(result.session.id, engine, caller, gate, config, result)
         }
-        val session = guarded { engine.createSession(caller, cwd) }
+        val session = guarded { engine.createSession(caller, cwd, toolScope) }
         return AcpSession(session.id, engine, caller, gate, config, null)
     }
 
@@ -316,6 +323,8 @@ internal class AcpSession(
                 else -> throw rpcError(ErrorCode.UNSUPPORTED.info("unsupported content block"))
             }
         }
+        // 第三方 App 先按自己的文字上限判（invalid_params / too_large，docs/third-party-acp.md 4.6），再看协议的总上限
+        engine.quota.checkSize(caller, chars)?.let { throw rpcError(it.toError(), sessionId = id) }
         if (chars > config.maxPromptChars) throw rpcError(ErrorCode.PAYLOAD_TOO_LARGE.info("prompt exceeds ${config.maxPromptChars} characters"))
         return ACPJson.encodeToJsonElement(ListSerializer(ContentBlock.serializer()), content) as JsonArray
     }

@@ -86,38 +86,58 @@
 - scope 属于会话，随会话持久化（恢复后不丢）；`session/load` 不能改。
 - 解析写在 `ProfileExtensions`，和 `autoSelect` 一样的 `_meta` 约定；`initialize` 的 `org.agentos.extensions` 里加一项 `toolScope`，让客户端能探测。
 - 非法形状（不是数组、元素缺字段、超过 32 项、字符串超过 128 字符）→ `INVALID_PARAMS`。
+- `toolScope` 只在 `initialize` 里**声明**，不需要协商：它只会让会话的工具更少，不改变标准方法的含义。
+- 受限范围的会话里**没有 `read_skill`，系统提示里也不写 Skill 目录**（`read_skill` 没有来源插件，按（插件，工具）匹配点不到它；也避免第三方 Skill 的文字进到被收窄的会话）。不带范围时照旧有。
+- 自动选会话（`autoSelect`）只会选到范围与这次请求**相同**的会话（顺序、重复不算），否则新建；不然调用方能借“选已有会话”拿到不同的工具范围。
+- 存储里的范围值损坏时读成“没有工具”，不是“不限”（fail closed）。会话存储的 schema 升到 v2（`sessions.tool_scope`），v1 自动迁移，旧会话照常用。
+- **对确认规则的影响**：默认的 `OpenCallerPolicy` 下，第三方会话和 AgentOS 自己的会话用同一套确认；`StrictCallerPolicy`（`RuntimeConfig.callerPolicy`）打开时，第三方没有范围就没有工具，且每次都确认（读也确认）、不提供“本次对话内不再询问”和“始终允许”。严格版本写好、测过、默认关。
 
 ### 4.6 配额（A，`core/runtime` 里一个纯类 `CallerQuota`，带时钟，可测）
 
-对 `APP`：同时一个 prompt（第二个返回 `rate_limited`，原因 `busy`）；文字超限返回 `invalid_params`（原因 `too_large`）；超过每小时上限返回 `rate_limited`（原因 `hourly`）。数值走配置。用量计数由 C 的 `CallerRegistry` 读取（每次 prompt 完成回调一次）。
+对 `APP`（`core/runtime` 的 `quota/CallerQuota`，纯类，带时钟）：
 
-### 4.7 SDK（C，`sdk:acp-android`，草案；C 定稿前先报告和这里的差异）
+| 情形 | 线上错误 | SDK 的 `AgentOsError` |
+|---|---|---|
+| 同时已有一个进行中的 prompt | `quota_exceeded`（-32048），`details.reason=busy` | `BUSY` |
+| 每小时超过 30 次 | `quota_exceeded`（-32048），`details.reason=hourly`，带 `retryAfterSeconds`、`limit` | `RATE_LIMITED` |
+| 单次文字超过 16,000 字符 | `invalid_params`（-32602），`details.reason=too_large`；先于协议自己的 200,000 字符 `payload_too_large` 检查 | `TOO_LARGE` |
+
+- 每小时是**滑动窗口**，计数在内存里，`:agent` 重启清零；数值在 `CallerQuotaConfig` / `RuntimeConfig.quota`。
+- “同时一个”从放行算到**任务结束**，不是连接断开（断开不取消任务）：否则重连就能绕过。
+- 用量计数由 C 的 `CallerRegistry` 通过 `engine.quota` 的监听器读取（每个放行过的 prompt 结束时回调一次）。撤销授权时不要清计数，只在卸载时清。
+- 没有为 `rate_limited` 新增错误码：`errors.md` 里已有的 `quota_exceeded` 本来就写着“并发、频率或用量上限”。
+
+### 4.7 SDK（C，`sdk:acp-android`，包名 `org.agentos.acp`；以代码为准：`AgentOs.kt`、`AgentOsTypes.kt`）
 
 ```kotlin
 object AgentOs {
+    const val AUTHORIZATION_TIMEOUT_MILLIS = 90_000L
     fun isInstalled(context: Context): Boolean
-    suspend fun connect(context: Context, onWaiting: (Waiting) -> Unit = {}): AgentOsConnection   // 失败抛 AgentOsException(reason)
+    suspend fun connect(context: Context, onWaiting: (Waiting) -> Unit = {}): AgentOsConnection   // 失败抛 AgentOsException(error)
     fun bringApprovalToFront(context: Context)
 }
 class AgentOsConnection : AutoCloseable {
-    suspend fun newSession(toolScope: List<ToolRef>): AgentOsSession
+    val isConnected: Boolean
+    suspend fun newSession(toolScope: List<ToolRef>? = null): AgentOsSession   // null = 不发范围（整个目录）；emptyList() = 零个工具
 }
-class AgentOsSession {
-    fun prompt(text: String): Flow<AgentOsEvent>
-    suspend fun cancel()
-}
+class AgentOsSession { fun prompt(text: String): Flow<AgentOsEvent>; suspend fun cancel() }   // flow 是冷的，取消收集等于 cancel
 data class ToolRef(val plugin: String, val tool: String)
+data class Waiting(val elapsedMillis: Long, val timeoutMillis: Long)
 sealed interface AgentOsEvent {
     data class Text(val chunk: String) : AgentOsEvent
-    data class ToolCall(val id: String, val tool: String, val status: ToolStatus, val resultJson: String?) : AgentOsEvent  // status: PENDING_APPROVAL / RUNNING / COMPLETED / DENIED / FAILED
+    data class ToolCall(val id: String, val tool: String, val status: ToolStatus, val resultJson: String?,
+                        val argumentsJson: String? = null, val ref: ToolRef? = null) : AgentOsEvent
     data class Done(val stopReason: String) : AgentOsEvent
 }
+enum class ToolStatus { PENDING_APPROVAL, RUNNING, COMPLETED, DENIED, FAILED }
 enum class AgentOsError { NOT_INSTALLED, AUTHORIZATION_PENDING_TIMEOUT, DENIED, NO_MODEL, BUSY, RATE_LIMITED, TOO_LARGE, DISCONNECTED, FAILED }
 ```
 
-- 底层是 `acp:0.30.1` 的客户端 + `BinderAcpTransport.connect`，对上层屏蔽 ACP 细节；不引入新依赖版本（`gradle/libs.versions.toml` 锁定）。
-- 把 `model_not_configured`（-32051）映射成 `NO_MODEL`，让上层能提示“AgentOS 还没有配置模型”。
-- `ToolCall` 事件来自 `session/update` 的 `tool_call` / `tool_call_update`；`resultJson` 是工具结果文字（不是 ACP 的包装）。
+- 底层是 `acp:0.30.1` 的客户端 + `BinderAcpTransport.connect`，对上层屏蔽 ACP 类型；不引入新依赖版本。库清单带 `<queries>`（AgentOS 包名和 ACP action），合并进依赖它的 App。
+- `connect` 在收到 `authorization_pending` 时每秒重试 `open`，最多 90 秒，期间回调 `onWaiting`；没人决定按拒绝记（进入 10 分钟冷却）。
+- `ToolStatus`：`PENDING_APPROVAL` = ACP `tool_call` 的 pending（还没派发，AgentOS 在等用户确认；**默认策略下用户设了“始终允许”的工具不会经过这个状态**，直接 `RUNNING`），`RUNNING` = in_progress，`COMPLETED` / `FAILED` 按结果，`DENIED` = failed 且结果文字以 `[agentos:tool_denied]` 开头。
+- `ToolCall.ref` 能对应上本次 toolScope 的某一项时不为 null，这时 `tool` 就是原始工具名；否则 `tool` 是 AgentOS 给模型的最终名字（调用方不该知道后缀规则，SDK 在本地按 toolScope 反推）。
+- `model_not_configured`（-32051）映射成 `NO_MODEL`；`resultJson` 是工具结果文字，不是 ACP 的包装，是第三方内容，不可信。
 - 没有 key、不联网、不读 AgentOS 的任何私有数据。
 
 ## 5. 备忘录的功能规格（notes SubAgent）

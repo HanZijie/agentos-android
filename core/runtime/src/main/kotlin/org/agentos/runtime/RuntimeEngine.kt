@@ -1,6 +1,7 @@
 package org.agentos.runtime
 
 import com.agentclientprotocol.transport.Transport
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,8 +20,10 @@ import kotlinx.serialization.json.put
 import org.agentos.runtime.acp.AcpConfig
 import org.agentos.runtime.acp.AcpServer
 import org.agentos.runtime.broker.BrokerConfig
+import org.agentos.runtime.broker.CallerPolicy
 import org.agentos.runtime.broker.CapabilityBroker
 import org.agentos.runtime.broker.DefaultCapabilityBroker
+import org.agentos.runtime.broker.OpenCallerPolicy
 import org.agentos.runtime.errors.AgentOsException
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.events.EventEnvelope
@@ -31,6 +34,14 @@ import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.HostPort
 import org.agentos.runtime.ports.OutboundGate
+import org.agentos.runtime.quota.Admission
+import org.agentos.runtime.quota.CallerQuota
+import org.agentos.runtime.quota.CallerQuotaConfig
+import org.agentos.runtime.quota.PromptOutcome
+import org.agentos.runtime.quota.QuotaReason
+import org.agentos.runtime.scheduler.PromptContent
+import org.agentos.runtime.store.TaskState
+import org.agentos.runtime.ports.ToolRef
 import org.agentos.runtime.router.JevProvider
 import org.agentos.runtime.router.RouterConfig
 import org.agentos.runtime.router.SessionRouter
@@ -52,6 +63,13 @@ data class RuntimeConfig(
     /** 自动选会话用的 Jev；null 时自动选会话一律新建会话。 */
     val jev: JevProvider? = null,
     val acp: AcpConfig = AcpConfig(),
+    /** 第三方 App 的配额（docs/third-party-acp.md 4.6）：只对 `CallerKind.APP` 生效。 */
+    val quota: CallerQuotaConfig = CallerQuotaConfig(),
+    /**
+     * 范围和确认里取决于“谁在调用”的规则（docs/third-party-acp.md 4.4）。**默认 [OpenCallerPolicy]**：所有调用方一视同仁；
+     * 换成 [StrictCallerPolicy]（或 `CallerPolicy.named("strict")`）就是第三方 App 没有 toolScope 没工具、每次确认、没有“始终允许”。
+     */
+    val callerPolicy: CallerPolicy = OpenCallerPolicy,
     val version: String = "0.1.0",
 )
 
@@ -78,7 +96,13 @@ class RuntimeEngine internal constructor(
     private lateinit var cores: CoreSessions
     private lateinit var scheduler: Scheduler
     private lateinit var router: SessionRouter
-    val broker: CapabilityBroker = DefaultCapabilityBroker(host, config.broker)
+    val broker: CapabilityBroker = DefaultCapabilityBroker(host, config.broker, config.callerPolicy)
+
+    /**
+     * 第三方 App 的配额与用量（docs/third-party-acp.md 4.6）。`:agent` 接线时用 [CallerQuota.addListener] 订阅“一次 prompt 结束”
+     * （每次一回调，给 CallerRegistry 记用量），用 [CallerQuota.usage] 读当前数字。
+     */
+    val quota: CallerQuota = CallerQuota(config.quota, host.clock)
 
     /** start() 已被调用（只能调用一次）。 */
     private val startCalled = AtomicBoolean(false)
@@ -154,16 +178,19 @@ class RuntimeEngine internal constructor(
 
     // ------------------------------------------------------------------ 会话操作（ACP 层使用）
 
-    /** 新建会话（ACP session/new）。恢复期间收到的，等恢复结束再建；等待期间计入 runState。 */
-    suspend fun createSession(caller: CallerIdentity, cwd: String?): SessionRecord = intake {
+    /**
+     * 新建会话（ACP session/new）。恢复期间收到的，等恢复结束再建；等待期间计入 runState。
+     * [toolScope]：这个会话能用的工具（docs/third-party-acp.md 4.5），随会话存下、之后不能改；null = 没带（第三方 App 的会话那就没有任何工具）。
+     */
+    suspend fun createSession(caller: CallerIdentity, cwd: String?, toolScope: List<ToolRef>? = null): SessionRecord = intake {
         awaitReady()
-        store.write { tx -> SessionRouter.createSession(tx, caller, cwd, via = "session/new") }
+        store.write { tx -> SessionRouter.createSession(tx, caller, cwd, via = "session/new", toolScope = toolScope) }
     }
 
-    /** 自动选会话扩展：在调用方自己的会话里选一个或新建（session-selection.md）。 */
-    suspend fun autoSelect(caller: CallerIdentity, query: String, cwd: String?): SessionRouter.Result = intake {
+    /** 自动选会话扩展：在调用方自己的会话里选一个或新建（session-selection.md）。只会选到 toolScope 与 [toolScope] 相同的会话。 */
+    suspend fun autoSelect(caller: CallerIdentity, query: String, cwd: String?, toolScope: List<ToolRef>? = null): SessionRouter.Result = intake {
         awaitReady()
-        router.route(caller, query, cwd)
+        router.route(caller, query, cwd, toolScope)
     }
 
     /** 调用方能访问的会话；不存在或不属于调用方时抛 session_not_found。 */
@@ -190,7 +217,68 @@ class RuntimeEngine internal constructor(
     ): Pair<Long, TaskRecord> = intake {
         val s = session(caller, sessionId)
         if (content.isEmpty()) throw AgentOsException(ErrorCode.INVALID_PARAMS, "prompt is empty")
-        s.lastSequence to scheduler.submit(sessionId, caller, content, clientRequestId)
+        // 第三方 App 的配额（4.6）：文字上限、同时一个、每小时上限。被拒绝的不计数；其他调用方原样通过
+        val admitted = admitPrompt(caller, content)
+        val task = try {
+            scheduler.submit(sessionId, caller, content, clientRequestId)
+        } catch (e: Throwable) {
+            quota.cancelAdmission(admitted)
+            throw e
+        }
+        if (admitted.counted) releaseWhenSettled(task.id, admitted)
+        s.lastSequence to task
+    }
+
+    /** 已经放行、任务还没结束的第三方 prompt：taskId → 放行记录。任务结束（不是连接断开：断开不取消任务）时释放名额并回调用量。 */
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, Admission.Admitted>()
+
+    private suspend fun admitPrompt(caller: CallerIdentity, content: JsonArray): Admission.Admitted {
+        val chars = PromptContent.textChars(content)
+        var decision = quota.admit(caller, chars)
+        // “同时一个”：客户端看到上一轮结束再发下一轮时，释放名额的协程可能还没跑到。拒绝之前先按 Store 里任务的状态核对一次，
+        // 已经结束的立刻释放，再试一次——这样一个看到上一轮结束的客户端不会被误判为忙
+        if (decision is Admission.Rejected && decision.reason == QuotaReason.BUSY && reapSettled(caller)) decision = quota.admit(caller, chars)
+        return when (decision) {
+            is Admission.Rejected -> throw AgentOsException(decision.toError())
+            is Admission.Admitted -> decision
+        }
+    }
+
+    private fun releaseWhenSettled(taskId: String, admitted: Admission.Admitted) {
+        inFlight[taskId] = admitted
+        scope.launch {
+            val outcome = try {
+                outcomeOf(scheduler.awaitSettled(taskId).state)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                PromptOutcome.UNKNOWN
+            }
+            inFlight.remove(taskId)
+            quota.release(admitted, outcome)
+        }
+    }
+
+    /** 这个调用方在途的 prompt 里，任务其实已经结束的：释放。返回是否释放了至少一个。 */
+    private suspend fun reapSettled(caller: CallerIdentity): Boolean {
+        var freed = false
+        for ((taskId, admitted) in inFlight.entries.toList()) {
+            if (admitted.caller.ownerKey != caller.ownerKey) continue
+            val state = store.read { it.tasks.get(taskId)?.state }
+            if (state != null && state != TaskState.QUEUED && state != TaskState.RUNNING && state != TaskState.CANCELLING) {
+                inFlight.remove(taskId)
+                quota.release(admitted, outcomeOf(state))
+                freed = true
+            }
+        }
+        return freed
+    }
+
+    private fun outcomeOf(state: TaskState): PromptOutcome = when (state) {
+        TaskState.COMPLETED -> PromptOutcome.COMPLETED
+        TaskState.CANCELLED -> PromptOutcome.CANCELLED
+        TaskState.FAILED -> PromptOutcome.FAILED
+        else -> PromptOutcome.UNKNOWN
     }
 
     /** 等任务结束（终态，或结果未知）。 */

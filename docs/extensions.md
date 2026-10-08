@@ -271,7 +271,7 @@ Extension Host 汇总所有已启用服务器的 `tools/list`，经 `IExtensionC
 
 ### 5.4 审批与风险
 
-三层叠加，最终以 AgentOS 的风险策略和确认为准：
+三层叠加，最终以 AgentOS 的风险策略和确认为准。**调用方不同，规则默认相同**：第三方 App 经 ACP 发起的调用和 AgentOS 自己的界面、电脑端用同一套确认（`OpenCallerPolicy`），所以用户为某个工具设了“始终允许”之后，被授权的第三方 App 也能不经确认地触发它，读类工具的结果也会回到调用它的 App；风险和以后的权限管控设计见 [third-party-acp.md](third-party-acp.md) 第 9 节。`StrictCallerPolicy`（默认关）会让第三方每次都确认、且不提供“始终允许”。
 
 1. **默认等级**：MCP 工具默认按“写”处理，每次调用都要确认。
 2. **服务端注解只能调高等级**：`destructiveHint=true` 升为“高风险”；`readOnlyHint=true` 不会降低等级，因为注解是服务端自报的，不可信。
