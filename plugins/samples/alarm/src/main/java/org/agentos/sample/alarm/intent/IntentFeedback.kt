@@ -37,7 +37,7 @@ object IntentFeedback {
     fun message(texts: Texts, clock: ClockStyle, outcome: IntentOutcome): String? = when (outcome) {
         is IntentOutcome.AlarmSet -> if (outcome.skipUi) setMessage(texts, clock, outcome) else null
         IntentOutcome.OpenEditor -> null
-        is IntentOutcome.NeedsChoice -> texts.get(R.string.intent_choose, outcome.matches)
+        is IntentOutcome.NeedsChoice -> texts.plural(R.plurals.intent_choose, outcome.matches, outcome.matches)
         is IntentOutcome.Dismissed -> dismissedMessage(texts, outcome)
         IntentOutcome.NothingToDismiss -> texts.get(R.string.intent_nothing_to_dismiss)
         is IntentOutcome.Snoozed -> texts.get(R.string.intent_snoozed, outcome.minutes)

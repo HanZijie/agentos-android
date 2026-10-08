@@ -80,6 +80,7 @@ class IntentFeedbackTest {
     fun choiceNothingAndSnoozeMessages() {
         assertEquals("有 2 个闹钟符合，请在列表里选择", zh(IntentOutcome.NeedsChoice(2)))
         assertEquals("2 alarms match; pick one in the list", en(IntentOutcome.NeedsChoice(2)))
+        assertEquals("1 alarm matches; pick it in the list", en(IntentOutcome.NeedsChoice(1)))
         assertEquals(UiAction.SHOW_LIST, IntentFeedback.uiAction(IntentOutcome.NeedsChoice(2)))
         assertEquals("没有找到可关闭的闹钟", zh(IntentOutcome.NothingToDismiss))
         assertEquals("No alarm found to dismiss", en(IntentOutcome.NothingToDismiss))

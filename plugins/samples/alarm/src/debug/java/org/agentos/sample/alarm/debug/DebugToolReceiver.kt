@@ -52,9 +52,9 @@ import org.agentos.sample.alarm.reliability.DeviceInfo
  *
  * ## 假装厂商（检查页的厂商指引、截图用）
  * ```
- * adb shell am broadcast -n org.agentos.sample.alarm/.debug.DebugToolReceiver --es cmd manufacturer --es value xiaomi   # 空 value = 取消
+ * adb shell am broadcast -n org.agentos.sample.alarm/.debug.DebugToolReceiver --es cmd manufacturer --es value xiaomi
  * ```
- * 只改“保证准时响铃”检查页判断厂商时用的字符串（`DeviceInfo.manufacturerOverride`），重启进程即失效。返回 `{"manufacturer":"xiaomi"}`。
+ * 只改“保证准时响铃”检查页判断厂商时用的字符串（`DeviceInfo.manufacturerOverride`），`am force-stop` 杀掉进程即恢复（adb 传不了空参数；想在进程里改回去就传 `--es value Google`）。返回 `{"manufacturer":"xiaomi"}`。
  *
  * ## 调工具（进程内，与 MCP 注册的是同一批工具；结果写 logcat）
  * ```
