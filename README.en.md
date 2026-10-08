@@ -15,7 +15,7 @@ Many apps share one Agent runtime instead of each embedding a full Agent.</p>
   <a href="#status-and-boundaries"><img alt="Status: prototype" src="https://img.shields.io/badge/status-prototype-f97316?style=flat-square"></a>
   <a href="#quick-start"><img alt="Android 15+" src="https://img.shields.io/badge/Android-15%2B-3ddc84?style=flat-square&logo=android&logoColor=white"></a>
   <a href="#architecture-and-design"><img alt="Protocols: ACP · MCP" src="https://img.shields.io/badge/protocol-ACP%20%C2%B7%20MCP-8b5cf6?style=flat-square"></a>
-  <a href="https://github.com/HanZijie/agentos-android/actions/workflows/portable-tests.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/HanZijie/agentos-android/portable-tests.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="#quick-start"><img alt="Deploy: root module" src="https://img.shields.io/badge/deploy-root%20module-475569?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/HanZijie/agentos-android?style=flat-square&color=blue"></a>
 </p>
 

@@ -15,7 +15,7 @@
   <a href="#当前状态与边界"><img alt="状态：原型" src="https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E5%8E%9F%E5%9E%8B-f97316?style=flat-square"></a>
   <a href="#快速开始"><img alt="Android 15+" src="https://img.shields.io/badge/Android-15%2B-3ddc84?style=flat-square&logo=android&logoColor=white"></a>
   <a href="#架构与设计"><img alt="协议：ACP · MCP" src="https://img.shields.io/badge/%E5%8D%8F%E8%AE%AE-ACP%20%C2%B7%20MCP-8b5cf6?style=flat-square"></a>
-  <a href="https://github.com/HanZijie/agentos-android/actions/workflows/portable-tests.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/HanZijie/agentos-android/portable-tests.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="#快速开始"><img alt="部署：root 模块" src="https://img.shields.io/badge/%E9%83%A8%E7%BD%B2-root%20%E6%A8%A1%E5%9D%97-475569?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/HanZijie/agentos-android?style=flat-square&color=blue"></a>
 </p>
 
