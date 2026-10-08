@@ -273,10 +273,10 @@ class AgentProcess private constructor(val app: Context) {
 
     /**
      * 每个放行过的 prompt 结束时恰好一次（A 的 CallerQuota）：把用量记到注册表。回调在结束任务的线程上，
-     * 这里只做内存里的计数 + 一次小文件写。调用方身份的 label 是包名（AcpAccessPolicy）。
+     * 这里只做内存里的计数 + 一次小文件写。按 packageName 记（AcpAccessPolicy 填的真实包名），从不按 label（显示名，第三方自己起的）。
      */
     private val usageListener = org.agentos.runtime.quota.CallerUsageListener { u ->
-        if (u.caller.kind == CallerKind.APP) u.caller.label?.let { callers.recordPromptOf(it) }
+        if (u.caller.kind == CallerKind.APP) u.caller.packageName?.let { callers.recordPromptOf(it) }
     }
 
     init {

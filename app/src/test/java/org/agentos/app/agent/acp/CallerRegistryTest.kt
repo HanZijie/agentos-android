@@ -5,6 +5,7 @@ import org.agentos.extensions.registry.AtomicTextFile
 import org.agentos.runtime.ports.CallerKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -250,7 +251,7 @@ class CallerRegistryTest {
     private val notesApp = ResolvedCaller(notes, digestA, "Notes")
 
     @Test
-    fun `agentos itself is SELF, everyone else is APP with the app label`() {
+    fun `agentos itself is SELF, everyone else is APP carrying its real package and its display name`() {
         val reg = Rig().registry()
         val self = AcpAccessPolicy.decide(myUid, myUid, resolver(), reg) as AcpDecision.Open
         assertEquals(CallerKind.SELF, self.caller.kind)
@@ -262,12 +263,50 @@ class CallerRegistryTest {
         reg.decide(reg.pending().single().requestId, true)
         val open = AcpAccessPolicy.decide(10200, myUid, resolver(10200 to notesApp), reg) as AcpDecision.Open
         assertEquals(CallerKind.APP, open.caller.kind) // never SELF: SELF can see every session
-        // label is the package name: the consent dialog resolves it to "by Notes (org.agentos.sample.notes)"; app labels can collide
-        assertEquals(notes, open.caller.label)
+        // identity = the package resolved at admission (checked together with the signing digest); label = display name only
+        assertEquals(notes, open.caller.packageName)
+        assertEquals("Notes", open.caller.label)
         assertEquals("Notes", open.app!!.label)
         assertEquals(10200, open.caller.uid)
         assertEquals("uid:10200", open.caller.ownerKey)
         assertEquals(notes, open.app!!.packageName)
+    }
+
+    @Test
+    fun `an app whose label is another apps package or AgentOS still carries its own package`() {
+        val reg = Rig().registry()
+        val victim = "org.agentos.sample.victim"
+        val lookalikes = mapOf(
+            10201 to ResolvedCaller("com.evil.one", digestA, victim),          // label = another app's package name
+            10202 to ResolvedCaller("com.evil.two", digestB, "AgentOS"),       // label = the host's own name
+            10203 to ResolvedCaller("com.evil.three", digestA, "org.agentos.app"), // label = the host's package name
+        )
+        val r = CallerResolver { uid -> lookalikes[uid] }
+        for ((uid, app) in lookalikes) {
+            assertTrue(AcpAccessPolicy.decide(uid, myUid, r, reg) is AcpDecision.Reject) // asked first, under its own package
+            reg.decide(reg.entry(app.packageName)!!.requestId!!, true)
+            val open = AcpAccessPolicy.decide(uid, myUid, r, reg) as AcpDecision.Open
+            assertEquals(CallerKind.APP, open.caller.kind)
+            assertEquals(app.packageName, open.caller.packageName) // the identity is the resolved package ...
+            assertEquals(app.label, open.caller.label)             // ... and the label is only what the app calls itself
+            assertNotEquals(victim, open.caller.packageName)
+        }
+        // nothing is recorded under the claimed names
+        assertNull(reg.entry(victim))
+        assertNull(reg.entry("AgentOS"))
+        assertNull(reg.entry("org.agentos.app"))
+        assertEquals(setOf("com.evil.one", "com.evil.two", "com.evil.three"), reg.entries().map { it.packageName }.toSet())
+    }
+
+    @Test
+    fun `usage is counted under the package, a label that names another app moves nothing there`() {
+        val r = Rig(); val reg = r.registry()
+        val victim = "org.agentos.sample.victim"
+        reg.admit(victim, digestA, "Victim"); reg.decide("req-1", true)
+        reg.admit("com.evil.one", digestB, victim); reg.decide("req-2", true)
+        reg.recordPromptOf("com.evil.one")
+        assertEquals(1L, reg.entry("com.evil.one")!!.promptsTotal)
+        assertEquals(0L, reg.entry(victim)!!.promptsTotal)
     }
 
     @Test

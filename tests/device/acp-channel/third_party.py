@@ -17,7 +17,7 @@
   revoke-closes          已连上并有进行中的 prompt 时撤销：通道在几百毫秒内关闭，SDK 的流以 DISCONNECTED 结束；之后 open 是 denied
   signature-changed      换签名（apksigner 重签 client）后 open 又是 pending，且标了 signatureChanged；旧签名的通道被撤销；旧授权不继承
   shared-uid             共享 UID（一个 UID 对应两个包）一律 not_open，什么也不记；卸掉其中一个后同一个 App 按普通第三方走授权
-  spoofed-name           clientInfo 里冒充别的 App 的包名没有用：注册表里只有真实的包名
+  spoofed-name           clientInfo 里冒充别的 App 的包名没有用：注册表里只有真实的包名；工具确认卡的发起者一行和 callerPackage 是真实包名
   list-shape             listAcpCallers / AcpCallerDebugReceiver list 每项的键固定
   settings-actions       setAcpCaller 的 allowed / denied / removed、answerAuthorization 与 list 一致
 
@@ -49,6 +49,7 @@ APP_PKG = acp.APP_PKG
 CLIENT_PKG = acp.CLIENT_PKG
 CLIENT_ACTIVITY = acp.CLIENT_ACTIVITY
 CALLER_RECEIVER = APP_PKG + "/.agent.AcpCallerDebugReceiver"
+CONSENT_RECEIVER = APP_PKG + "/.agent.ConsentDebugReceiver"
 DESKTOP_RECEIVER = APP_PKG + "/.agent.DesktopGatewayDebugReceiver"
 INAPP_ACTIVITY = acp.INAPP_ACTIVITY
 
@@ -88,6 +89,16 @@ class Ctx:
         rows = r.get("callers") or []
         return rows[0] if rows else None
 
+    def consent(self, op, **extras):
+        """ConsentDebugReceiver (debug build, in :agent): mode / pending / respond."""
+        parts = ["am", "broadcast", "-n", CONSENT_RECEIVER, "--es", "op", op] + [x for k, v in extras.items() for x in ("--es", k, str(v))]
+        out = self.adb.sh(" ".join(shlex.quote(p) for p in parts), timeout=60, check=False)
+        m = re.search(r'data="(.*)"\s*$', out, re.S)
+        try:
+            return json.loads(m.group(1)) if m else {"ok": False, "raw": out[-200:]}
+        except ValueError:
+            return {"ok": False, "error": "bad json", "raw": m.group(1)[:300]}
+
     def reset(self, cooldown_ms=None, ttl_ms=None):
         self.caller("clear")
         extras = {}
@@ -102,7 +113,7 @@ class Ctx:
         self.adb.run("logcat", "-c", check=False)
         payload = json.dumps(args or {}, separators=(",", ":"))
         self.adb.sh(f"am start -W -n {activity} --es scenario {name} --es run {run_id} --es args '{payload}'", timeout=60)
-        return acp.collect_result(self.adb, run_id, timeout, want_phase)
+        return acp.collect_result(self.adb, run_id, timeout, want_phase, not_phase=None if want_phase else "ready")
 
     def start_scenario(self, name, args=None):
         """不等结果：返回 run_id，之后用 [result] 取。"""
@@ -113,7 +124,8 @@ class Ctx:
         return run_id
 
     def result(self, run_id, timeout=150, want_phase=None):
-        return acp.collect_result(self.adb, run_id, timeout, want_phase)
+        # without a wanted phase: the FINAL result. tp-hold logs a "ready" record first; taking it as the result raced with the final one
+        return acp.collect_result(self.adb, run_id, timeout, want_phase, not_phase=None if want_phase else "ready")
 
     def wait_for(self, pred, timeout=20, step=0.3):
         t0 = time.time()
@@ -446,7 +458,47 @@ def case_spoofed_name(c):
         "claimedNameNotRecorded": "org.agentos.sample.notes" not in pkgs,
         "notesNotGranted": (c.entry("org.agentos.sample.notes") or None) is None,
     }
-    return verdict(checks, f"packages={pkgs} claimed={r.get('claimed')}", spoof=r)
+    # the confirmation card for a tool call by this app names the REAL package (the one resolved from the uid), never what the app said
+    card = consent_card_of_third_party(c, "org.agentos.sample.notes")
+    if card is not None:
+        view = card.get("view") or {}
+        checks.update({
+            "cardSeen": bool(view),
+            "cardCallerIsApp": view.get("callerKind") == "APP",
+            "cardCallerPackageIsReal": view.get("callerPackage") == CLIENT_PKG,
+            "initiatorLineNamesRealPackage": CLIENT_PKG in (view.get("initiatorLine") or ""),
+            "cardHasNoClaimedName": "org.agentos.sample.notes" not in json.dumps(view),
+        })
+    note = "" if card is not None else " (card checks skipped: the test plugin APK is not built)"
+    return verdict(checks, f"packages={pkgs} claimed={r.get('claimed')} initiator={((card or {}).get('view') or {}).get('initiatorLine')!r}{note}",
+                   spoof=r, card=card)
+
+
+def consent_card_of_third_party(c, claimed):
+    """
+    The third-party client calls a tool that needs confirmation; read the pending card from the debug consent coordinator, deny it.
+    Returns {"view": <card json>, "answered": ...}; None when the test plugin APK is not built.
+    """
+    if not os.path.exists(PLUGIN_APK):
+        return None
+    c.hold_agent()
+    c.ensure_fake_model()
+    acp.install(c.adb, PLUGIN_APK)
+    plugins = ext(c, "list").get("plugins") or []
+    pid = next((p["id"] for p in plugins if p.get("packageName") == PLUGIN_PKG), None)
+    if pid is None:
+        return {"view": None, "error": "the test plugin was not discovered"}
+    ext(c, "enable", id=pid)
+    ext(c, "wait_catalog", name=ECHO, timeoutMs=20000)
+    ext(c, "approval_by_source", plugin="mcptest", server="test", tool="echo", mode="")  # default rule: echo asks
+    c.consent("mode", mode="off")  # nobody auto-answers: the card stays pending for us to read
+    script = json.dumps({"chunks": 2, "intervalMs": 0, "tool": ECHO, "toolInput": {"text": "who-is-asking"}}, separators=(",", ":"))
+    run_id = c.start_scenario("tp-connect", {"prompt": script, "promptTimeoutMs": 90000})
+    view = c.wait_for(lambda: next((v for v in c.consent("pending").get("pending") or [] if v.get("callerKind") == "APP"), None), timeout=40)
+    answered = c.consent("respond", id=view["requestId"], choice="DENY") if view else None
+    c.result(run_id, timeout=120)
+    ext(c, "disable", id=pid)
+    return {"view": view, "answered": answered, "claimed": claimed}
 
 
 def case_list_shape(c):
