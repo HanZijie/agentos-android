@@ -107,12 +107,48 @@ internal object ConsentText {
 
     fun title(displayName: String) = "要允许「$displayName」吗？"
 
+    /** 第三方包名在界面上最多显示这么多字符（Android 的包名实际远短于此）。 */
+    const val PACKAGE_MAX_CHARS = 128
+
+    /** 发起者一行里“名字 + 包名”两段加起来的字符预算；超出时先砍名字，包名只受它自己的上限限制。 */
+    private const val INITIATOR_BUDGET_CHARS = 160
+
+    /**
+     * 第三方 App（[CallerKind.APP]）的包名，清理过（和别的第三方文字同一套：控制字符、不可见格式字符、双向控制符、空白、「」『』），单行，最多
+     * [PACKAGE_MAX_CHARS]；没有、或清理后为空、或调用方不是第三方 App 时为 null。**从来不用 label 代替包名。**
+     */
+    fun packageOf(caller: CallerIdentity): String? =
+        if (caller.kind != CallerKind.APP) null else singleLine(caller.packageName, PACKAGE_MAX_CHARS).takeIf { it.isNotEmpty() }
+
+    /**
+     * 发起者一行。
+     * - 第三方 App 且知道包名：`由 <名字> 发起（<包名>）`。名字是 App 自己起的、可以随便写，所以**包名一定在**：名字先被截断（预算
+     *   [INITIATOR_BUDGET_CHARS] 减去包名的长度；包名最长 [PACKAGE_MAX_CHARS]，所以名字总还剩二十几个字符），名字为空或和包名相同时只写 `由 <包名> 发起`。名字里的括号换成半角，这样括号只可能是
+     *   这一行自己写的那一对，名字不能在行里再造一个“包名”。
+     * - 第三方 App 不知道包名（旧任务、没解析到）：`由 <名字> 发起`，和以前一字不差；名字也没有就是 `由 未知应用 发起`。
+     * - 其他调用方：固定文案，包名不参与。
+     */
     fun initiatorLine(caller: CallerIdentity, max: Int): String = when (caller.kind) {
-        CallerKind.APP -> "由 ${singleLine(caller.label, max).ifEmpty { "未知应用" }} 发起"
+        CallerKind.APP -> {
+            val pkg = packageOf(caller)
+            if (pkg == null) {
+                "由 ${singleLine(caller.label, max).ifEmpty { "未知应用" }} 发起"
+            } else {
+                val shownPackage = halfWidthParens(pkg)
+                // room >= 160 - 128 - 3 = 29 whatever the package is, so the label can always be cut to something
+                val room = minOf(max, INITIATOR_BUDGET_CHARS - shownPackage.codePointCount(0, shownPackage.length) - APP_LINE_OVERHEAD_CHARS)
+                val label = halfWidthParens(singleLine(caller.label, room))
+                if (label.isEmpty() || label == shownPackage) "由 $shownPackage 发起" else "由 $label 发起（$shownPackage）"
+            }
+        }
         CallerKind.DESKTOP -> "由电脑端发起"
         CallerKind.SELF -> "由 AgentOS 自己发起"
         CallerKind.SYSTEM -> "由 AgentOS 运行时发起"
     }
+
+    private const val APP_LINE_OVERHEAD_CHARS = 3
+
+    private fun halfWidthParens(s: String) = s.replace('（', '(').replace('）', ')')
 
     fun sourceLine(plugin: String, server: String, max: Int): String =
         "来自插件「${singleLine(plugin, max)}」 · 服务器「${singleLine(server, max)}」"

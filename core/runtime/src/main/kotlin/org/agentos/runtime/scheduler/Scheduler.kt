@@ -28,7 +28,9 @@ import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.events.PendingEvent
 import org.agentos.runtime.ports.AgentSessionConfig
 import org.agentos.runtime.skills.SkillPrompt
+import org.agentos.runtime.consent.ConsentText
 import org.agentos.runtime.ports.CallerIdentity
+import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.FinishReason
 import org.agentos.runtime.ports.HostPort
 import org.agentos.runtime.ports.ToolScope
@@ -134,7 +136,15 @@ internal class Scheduler(
                     sessionId, t.id, EventTypes.TASK_QUEUED,
                     buildJsonObject {
                         put("input", input)
-                        put("caller", buildJsonObject { put("uid", caller.uid); put("kind", caller.kind.name.lowercase()) })
+                        put(
+                            "caller",
+                            buildJsonObject {
+                                put("uid", caller.uid)
+                                put("kind", caller.kind.name.lowercase())
+                                // audit: who the third-party app really is (the label is only what it calls itself); cleaned like on the dialog
+                                if (caller.kind == CallerKind.APP) ConsentText.packageOf(caller)?.let { put("package", it) }
+                            },
+                        )
                         put("position", t.position)
                     },
                 ),
@@ -264,7 +274,7 @@ internal class Scheduler(
     }
 
     private fun launchRunner(task: TaskRecord, ownerKey: String, model: org.agentos.runtime.ports.ModelSpec) {
-        val caller = CallerIdentity(task.callerUid, task.callerKind, task.callerLabel)
+        val caller = CallerIdentity(task.callerUid, task.callerKind, task.callerLabel, task.callerPackage)
         val entry = Running(task.id, ownerKey, task.executionDeadline)
         running[task.sessionId] = entry
         val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
@@ -311,7 +321,7 @@ internal class Scheduler(
     private suspend fun sessionToolScope(task: TaskRecord): ToolScope {
         val session = store.read { it.sessions.get(task.sessionId) } ?: return ToolScope.NONE
         val creator = CallerIdentity(session.callerUid, session.callerKind)
-        return broker.scopeFor(CallerIdentity(task.callerUid, task.callerKind, task.callerLabel), broker.scopeFor(creator, session.scope))
+        return broker.scopeFor(CallerIdentity(task.callerUid, task.callerKind, task.callerLabel, task.callerPackage), broker.scopeFor(creator, session.scope))
     }
 
     /**

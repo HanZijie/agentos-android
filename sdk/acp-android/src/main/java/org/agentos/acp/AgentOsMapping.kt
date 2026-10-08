@@ -89,7 +89,14 @@ internal object AgentOsMapping {
     const val MAX_SCOPE_ITEMS = 32
     const val MAX_SCOPE_STRING_CHARS = 128
 
-    /** `session/new` 的 `_meta`：`{"org.agentos": {"toolScope": [{"plugin","tool"}, …]}}`。形状不合法是调用方的编程错误。 */
+    /**
+     * `session/new` 的 `_meta`：`{"org.agentos": {"toolScope": [{"plugin","tool"}, …]}}`。
+     * [scope] 为 null = 调用方没有给范围：不发 `_meta`，会话能用目录里全部已启用插件的全部工具；空列表 = 调用方要求零个工具（发空数组）。
+     * 形状不合法是调用方的编程错误。
+     */
+    fun sessionMeta(scope: List<ToolRef>?): JsonObject? = scope?.let { scopeMeta(it) }
+
+    /** 带范围的 `_meta`（[sessionMeta] 的非空情形）。 */
     fun scopeMeta(scope: List<ToolRef>): JsonObject {
         require(scope.size <= MAX_SCOPE_ITEMS) { "toolScope has at most $MAX_SCOPE_ITEMS items" }
         for (r in scope) {
@@ -111,7 +118,7 @@ internal object AgentOsMapping {
      * 一轮 prompt 里的事件映射。同一个工具调用的几次更新共用一份记录（工具名、对应的 toolScope 项、参数、最近的状态），
      * 所以 `tool_call_update` 这种只带变化字段的补丁也能给出完整的 [AgentOsEvent.ToolCall]。
      */
-    class PromptMapper(private val scope: List<ToolRef>) {
+    class PromptMapper(private val scope: List<ToolRef>?) {
         private class Known(val tool: String, val ref: ToolRef?, val args: String?, var status: ToolStatus)
 
         private val calls = HashMap<String, Known>()
@@ -120,7 +127,7 @@ internal object AgentOsMapping {
             is SessionUpdate.AgentMessageChunk -> (update.content as? ContentBlock.Text)?.text?.takeIf { it.isNotEmpty() }?.let { AgentOsEvent.Text(it) }
             is SessionUpdate.ToolCall -> {
                 val id = update.toolCallId.value
-                val ref = refFor(update.title, scope)
+                val ref = refFor(update.title, scope.orEmpty())
                 val result = text(update.content)
                 val known = Known(ref?.tool ?: update.title, ref, update.rawInput?.toString(), status(update.status, result) ?: ToolStatus.PENDING_APPROVAL)
                 calls[id] = known

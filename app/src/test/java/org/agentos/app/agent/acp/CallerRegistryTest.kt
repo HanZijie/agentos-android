@@ -262,10 +262,49 @@ class CallerRegistryTest {
         reg.decide(reg.pending().single().requestId, true)
         val open = AcpAccessPolicy.decide(10200, myUid, resolver(10200 to notesApp), reg) as AcpDecision.Open
         assertEquals(CallerKind.APP, open.caller.kind) // never SELF: SELF can see every session
-        assertEquals("Notes", open.caller.label)
+        // label is the package name: the consent dialog resolves it to "by Notes (org.agentos.sample.notes)"; app labels can collide
+        assertEquals(notes, open.caller.label)
+        assertEquals("Notes", open.app!!.label)
         assertEquals(10200, open.caller.uid)
         assertEquals("uid:10200", open.caller.ownerKey)
         assertEquals(notes, open.app!!.packageName)
+    }
+
+    @Test
+    fun `an app that stops retrying has its card withdrawn, without a cooldown unless it waited almost the whole time`() {
+        val r = Rig(); val reg = r.registry()
+        reg.admit(notes, digestA, "Notes")
+        r.now += 3_000; reg.admit(notes, digestA, "Notes") // still retrying every second
+        r.now += 4_000; reg.tick()
+        assertEquals(CallerState.PENDING, reg.entry(notes)!!.state) // 4 s since the last retry is within the limit
+        r.now += 2_000; reg.tick() // 6 s without a retry: the app gave up after 9 s
+        assertNull(reg.entry(notes))
+        assertEquals(Triple("req-1", CallerState.DENIED, CallerResolution.CANCELLED), r.events.resolved.single())
+        assertFalse(reg.hasPending())
+        // no cooldown: asking again shows a new card at once
+        assertTrue(reg.admit(notes, digestA, "Notes") is Admission.Pending)
+        assertEquals(2, r.events.pending.size)
+
+        // an app that waited nearly the whole 90 s and then went away counts as "nobody decided"
+        val r2 = Rig(); val reg2 = r2.registry()
+        reg2.admit(notes, digestA, "Notes")
+        repeat(87) { r2.now += 1_000; reg2.admit(notes, digestA, "Notes") }
+        r2.now += 6_000; reg2.tick()
+        assertEquals(CallerState.DENIED, reg2.entry(notes)!!.state)
+        assertEquals(Triple("req-1", CallerState.DENIED, CallerResolution.TIMED_OUT), r2.events.resolved.single())
+        assertTrue(reg2.admit(notes, digestA, "Notes") is Admission.Denied)
+    }
+
+    @Test
+    fun `tick resolves an expired card nobody asked about`() {
+        val r = Rig(); val reg = r.registry()
+        reg.admit(notes, digestA, "Notes")
+        repeat(98) { r.now += 1_000; reg.admit(notes, digestA, "Notes") } // retried until 98 s, then nobody calls admit any more
+        r.now += 2_000 // 100 s: the ttl
+        assertTrue(reg.hasPending())
+        reg.tick()
+        assertFalse(reg.hasPending())
+        assertEquals(CallerResolution.TIMED_OUT, r.events.resolved.single().third)
     }
 
     @Test

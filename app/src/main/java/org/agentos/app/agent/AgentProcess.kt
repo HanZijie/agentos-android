@@ -42,6 +42,7 @@ import org.agentos.app.agent.acp.PackageCallerResolver
 import org.agentos.app.agent.acp.PackageLookup
 import org.agentos.extensions.registry.FileBackedTextFile
 import org.agentos.runtime.AgentRuntime
+import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.AgentRuntimes
 import org.agentos.runtime.RuntimeConfig
 import org.agentos.runtime.RuntimeEngine
@@ -188,28 +189,36 @@ class AgentProcess private constructor(val app: Context) {
     /** IAcpService.open 的准入：AgentOS 自己 SELF，其他 UID 按 [AcpAccessPolicy] 查授权记录，不阻塞。 */
     fun admitAcp(callerUid: Int): AcpDecision = AcpAccessPolicy.decide(callerUid, Process.myUid(), callerResolver, callers)
 
-    /** IAgentControl.listAcpCallers：每项带这个 App 现在开着的通道数。 */
+    /** IAgentControl.listAcpCallers：每项带这个 App 现在开着的通道数和进行中的 prompt 数。 */
     fun listCallersJson(): JSONArray {
         val arr = JSONArray()
-        for (e in callers.entries()) arr.put(JSONObject(callers.toJson(e, acp.channelsOf(e.packageName), activeTasksOf(e.packageName)).toString()))
+        for (e in callers.entries()) arr.put(callerJson(e))
         return arr
     }
 
+    private fun callerJson(e: CallerEntry): JSONObject {
+        val usage = quotaUsageOf(e.packageName)
+        return JSONObject(
+            callers.toJson(e, activeChannels = acp.channelsOf(e.packageName), activeTasks = usage?.activePrompts ?: 0, promptsLastHour = usage?.promptsInWindow).toString(),
+        )
+    }
+
+    /** A 的配额统计（按 uid，在内存里，:agent 重启清零）。第三方 App 的身份是 APP + uid；没开过通道的 App 没有统计。 */
+    private fun quotaUsageOf(packageName: String): org.agentos.runtime.quota.CallerUsage? =
+        acp.callersOf(packageName).firstOrNull()?.let { engine.quota.usage(it) }
+
     /** IAgentControl.setAcpCaller。denied / removed 时 [CallerListener.onRevoked] 已经关了它的通道。 */
-    fun setCaller(packageName: String?, state: String?): JSONObject? =
-        callers.set(packageName, state)?.let { JSONObject(callers.toJson(it, acp.channelsOf(it.packageName), activeTasksOf(it.packageName)).toString()) }
+    fun setCaller(packageName: String?, state: String?): JSONObject? = callers.set(packageName, state)?.let { callerJson(it) }
 
     /** IAgentControl.answerAuthorization。 */
     fun answerAuthorization(requestId: String?, allow: Boolean): Boolean = callers.decide(requestId, allow)
-
-    /** 这个 App 进行中的任务数（等 A 给出按调用方统计的接口之前为 0）。 */
-    private fun activeTasksOf(@Suppress("UNUSED_PARAMETER") packageName: String): Int = 0
 
     private val callerListener = object : CallerListener {
         override fun onPending(entry: CallerEntry) {
             Log.i(TAG, "authorization requested by ${entry.packageName} (request ${entry.requestId?.take(8)})")
             val id = entry.requestId ?: return
             val at = entry.requestedAt ?: return
+            val cardMillis = minOf(callers.config.pendingTtlMillis, callers.config.cardTimeoutMillis)
             // 授权卡片 / 通知（D 的 ConsentBridge）：前台推给对话框，后台发带“拒绝”的通知，和工具确认排同一个队
             consentBridge.authorizationRequested(
                 ConsentWire.AuthRequest(
@@ -218,10 +227,11 @@ class AgentProcess private constructor(val app: Context) {
                     appLabel = entry.label,
                     signingDigest = entry.signingDigest,
                     signatureChanged = entry.signatureChanged,
-                    deadlineMillis = at + callers.config.pendingTtlMillis,
-                    timeoutMillis = callers.config.pendingTtlMillis,
+                    deadlineMillis = at + cardMillis,
+                    timeoutMillis = cardMillis,
                 ),
             )
+            startCallerTicker()
         }
 
         override fun onResolved(requestId: String, state: CallerState, how: CallerResolution) {
@@ -242,10 +252,35 @@ class AgentProcess private constructor(val app: Context) {
         }
     }
 
+    @Volatile private var callerTicker: Job? = null
+
+    /**
+     * 有待决的授权提示期间每秒让注册表结案一次：App 放弃了（不再重试 open）、用户一直没回答，都没有人再调用注册表，
+     * 卡片和通知要靠这个撤回。
+     */
+    private fun startCallerTicker() {
+        if (callerTicker?.isActive == true) return
+        callerTicker = scope.launch(CoroutineName("caller-ticker")) {
+            while (callers.hasPending()) {
+                delay(1_000)
+                callers.tick()
+            }
+        }
+    }
+
     /** 撤销时取消这个 App 进行中的任务。需要运行时按调用方取消的接口（见报告），接上之前只关通道。 */
     private fun cancelTasksOf(@Suppress("UNUSED_PARAMETER") packageName: String) = Unit
 
+    /**
+     * 每个放行过的 prompt 结束时恰好一次（A 的 CallerQuota）：把用量记到注册表。回调在结束任务的线程上，
+     * 这里只做内存里的计数 + 一次小文件写。调用方身份的 label 是包名（AcpAccessPolicy）。
+     */
+    private val usageListener = org.agentos.runtime.quota.CallerUsageListener { u ->
+        if (u.caller.kind == CallerKind.APP) u.caller.label?.let { callers.recordPromptOf(it) }
+    }
+
     init {
+        engine.quota.addListener(usageListener)
         callers.setListener(callerListener)
         // 通知上的“拒绝”（ConsentActionReceiver）经这里到注册表；通知上不给“允许”：授权是持久的信任决定，要在对话框里看清包名和签名
         consentBridge.authorizationAnswer = { requestId, allow -> callers.decide(requestId, allow) }
