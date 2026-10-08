@@ -946,8 +946,9 @@ def sms_steps(ctx):
                   [Call("sms", "sms_send", {"to": SMS_SHORT_NUMBER, "text": mark + " hi"}, ok=False, error_has="short")], verify=sms_unchanged))
     S.append(Step("sms.err.missing_text", "sms", "sms_send without text: error, nothing sent",
                   [Call("sms", "sms_send", {"to": SMS_SENDER}, ok=False, error_has="text")], verify=sms_unchanged))
+    # the agent core validates the required parameters against the tool's schema before the app sees the call ("to: must have required properties to")
     S.append(Step("sms.err.missing_to", "sms", "sms_send without a recipient: error, nothing sent",
-                  [Call("sms", "sms_send", {"text": mark + " hi"}, ok=False, error_has="recipient")], verify=sms_unchanged))
+                  [Call("sms", "sms_send", {"text": mark + " hi"}, ok=False, error_has="recipient|required propert")], verify=sms_unchanged))
     S.append(Step("sms.err.too_long", "sms", "sms_send with a text of 501 characters: refused, nothing sent",
                   [Call("sms", "sms_send", {"to": SMS_SENDER, "text": "a" * 501}, ok=False, error_has="500|too long")], verify=sms_unchanged))
 

@@ -1,35 +1,42 @@
 #!/usr/bin/env python3
 """
-Sample-apps acceptance (A12): can AgentOS operate the alarm, calendar and notes apps completely through MCP? Repeatable, with evidence.
+Sample-apps acceptance (A12): can AgentOS operate the alarm, calendar, notes, todo and sms apps completely through MCP? Repeatable, with evidence.
 
-adb only, no taps. Needs the AgentOS **debug** build and the three sample apps' **debug** builds on the device, `adb` and `node` (acp-bridge)
+adb only, no taps. Needs the AgentOS **debug** build and the five sample apps' **debug** builds on the device, `adb` and `node` (acp-bridge)
 on the computer. The state of each app is read through the app's own debug `dump` receiver (a real phone has no sqlite3), see sample_apps_lib.py.
 
-**It resets the three sample apps before and after the run** (`--es cmd reset`: every alarm, note and calendar event in them is removed and the
-alarms are cancelled in the system): run it on a test phone. `--no-reset` keeps what is there and only removes what this run created
-(marker `e2e-<run id>`).
+**It resets the sample apps before and after the run** (`--es cmd reset`: every alarm, note, calendar event and todo in them is removed and the
+alarms are cancelled in the system; the sms app only loses its own outbox and drafts, never the system SMS store): run it on a test phone.
+`--no-reset` keeps what is there and only removes what this run created (marker `e2e-<run id>`; the sms outbox rows cannot be removed one by one).
+
+**The sms app runs on emulators only** (serial `emulator-NNNN`): it reads and sends real text messages. The incoming messages are made with
+`adb emu sms send`, the send goes to a second emulator when `adb devices` lists one (`--sms-peer 5616|none|auto`). On a real phone the sms app is left out
+of everything (not installed, enabled, reset or driven) and the report says "skipped"; `--sms-on-device` allows it (sends only to the number given).
 
     ./gradlew :app:assembleDebug :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug \\
-              :tests:device:acp-channel:client:assembleDebug
-    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL                # scripted, deterministic (fake model)
+              :plugins:samples:todo:assembleDebug :plugins:samples:sms:assembleDebug :tests:device:acp-channel:client:assembleDebug
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial emulator-5604                  # scripted, deterministic (fake model), all five apps
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial 38290DLJH0007B                 # a real phone: four apps, sms skipped
     set -a; . ../.secrets/minimax.env; set +a
-    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live         # natural language, real MiniMax-M3
-    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live --tunnel  # phone without internet (see live_tunnel.py)
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial emulator-5604 --live           # natural language, real MiniMax-M3
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial emulator-5604 --live --tunnel  # phone without internet (see live_tunnel.py)
 
 Flow (every part writes its checks into the result JSON, `results/raw/sample-apps-*.json`; exit code 0 when all checks pass):
   1. install (unless --no-install), start each sample app once, grant AgentOS what it needs, battery-optimisation exemption for AgentOS while it
-     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入").
+     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入"); the sms app also gets READ_SMS / SEND_SMS (`pm grant`).
   2. desktop access on from the foreground UI (inapp `desktop-access`: it runs `ensureTestModel` and puts the loopback fake model endpoint on
      the phone), THEN the model: the fake endpoint (scripted) or, with --live, the real MiniMax preset minimax-cn / MiniMax-M3 (key through stdin,
      removed afterwards). `setup.model` reads DesktopGatewayDebugReceiver `status` and checks the model source before anything is asked.
-  3. reset of the three apps; `ExtensionDebugReceiver list`: the three plugins are discovered and off by default (--allow-enabled skips the "off" check).
-  4. `enable` each, `catalog`: all documented tools are offered under their final names (`mcp__alarm__alarm__alarm_create`...), risk level as
-     RiskPolicy gives it for third-party MCP tools: WRITE, and HIGH for `*_delete` (destructiveHint).
+  3. reset of the apps; `ExtensionDebugReceiver list`: the plugins are discovered and off by default (--allow-enabled skips the "off" check).
+  4. `enable` each, `catalog`: all 44 documented tools are offered under their final names (`mcp__alarm__alarm__alarm_create`...), risk level as
+     RiskPolicy gives it for third-party MCP tools: WRITE (also the read tools, `sms_thread_list` included: readOnlyHint never lowers it), and HIGH for
+     `*_delete` and `sms_send` (destructiveHint).
   5. pair, `ConsentDebugReceiver mode=allow`, ACP session through acp-bridge.
   6. scripted: one fake-model script per step (deterministic CRUD of each app, failure paths: missing parameter, unknown id, declined
      confirmation in a new session, plugin switched off); after each step the app's dump is compared with what the step must have done (alarms:
-     also that they are really registered with AlarmManager). live: three natural-language prompts; the verdict is the app state, not a fixed
-     tool sequence (the model may look first), the sequence and the times are recorded.
+     also that they are really registered with AlarmManager). live: natural-language prompts (alarm, calendar, notes, todo, sms and the cross-app scenario
+     of docs/next-apps-plan.md section 9); the verdict is the app state, not a fixed tool sequence (the model may look first), the sequence and the times
+     are recorded. The live sms cases never send: the single-app one is declined by the driver, the cross-app one is refused by the app (short number).
   7. reset (or the marker cleanup), consent mode off, plugins off, desktop access off, exemption restored, live model removed.
 
 AGENTOS_EXT_RECEIVER and AGENTOS_CONSENT_RECEIVER override the component names of the AgentOS debug receivers; LIVE_MODEL the live model id.
