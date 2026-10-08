@@ -207,19 +207,22 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 | `session/request_permission` | M3a | 见下方“权限规则” |
 | 客户端的文件系统、终端能力 | 不启用 | Android 上没有对应的工作目录语义 |
 
-**第三方 App 的开放时间**：M1 起 ACP 服务已经导出，但只接受 AgentOS App 自己和已配对的电脑端；第三方 App 的通道在 M4（授权、限额、会话隔离就绪后）才放开，之前一律返回“未开放”。
+**第三方 App 的开放时间**：M1 起 ACP 服务已经导出，但只接受 AgentOS App 自己和已配对的电脑端；第三方 App 的通道**已按最小切片提前放开**（2026-10-08，授权、限额、会话隔离、SDK 就绪，见 [third-party-acp.md](third-party-acp.md)）；完整的 W24 / W25 出口条件仍在 M4。
 
 **会话隔离**：会话归属于创建它的调用方 UID。第三方 App 只能列出、加载、续写、被自动选中自己的会话。AgentOS App 作为用户的控制中心，可以查看所有会话，用于管理和审计。
 
 **权限规则**：
 - 需要确认的工具调用，一律由 AgentOS 的确认界面向用户询问，调用方 App 不能替用户同意。
+- **谁来决定“这个调用方能用什么、要不要确认”只有一个入口**：`core/runtime` 的 `CallerPolicy`（`scopeFor`、`requiresConsent`），只能收紧、不能放宽，由 Broker 强制。默认是 `OpenCallerPolicy`：第三方 App 和 AgentOS 自己、电脑端一视同仁（用户 2026-10-08 的决定，见 [third-party-acp.md](third-party-acp.md)）；`StrictCallerPolicy` 写好、测过、默认关，以后的权限管控机制从这里接入（third-party-acp.md 第 9 节只是设计讨论）。
+- 会话可以带 `toolScope`（`session/new` 的 `_meta`），只能缩小可用工具；调用方自己选择，AgentOS 不强制。
 - 如果调用方在 `initialize` 时声明支持权限请求，运行时也会向它发 `session/request_permission`，但它的回答只能追加拒绝，不能代替 AgentOS 的确认。
 - 这与 Profile 中“客户端的授权结果仍受服务端权限策略约束”一致。
 
 **第三方 App 的授权与限额**：
 - 首次调用时，AgentOS 弹窗询问“是否允许 X 使用 AgentOS”，结果可以在设置页撤销；
 - 同一个 App 被拒绝后，短时间内不再弹窗，防止骚扰；
-- 每个 App 有并发、频率和用量上限，用量在设置页可见。第三方 App 消耗的是用户自己的模型额度。
+- 每个 App 有并发、频率和用量上限（`CallerQuota`：同时一个 prompt、单次 16,000 字符、每小时 30 次的滑动窗口，数值可配，计数在内存里），用量在设置页可见。第三方 App 消耗的是用户自己的模型额度；
+- 授权记在（包名，签名摘要）上，存 `files/acp/callers.json`；签名变了视为新 App；共享 UID 一律拒绝；撤销立即关闭它的通道并取消进行中的任务。
 
 ### 5.4 App 内部接口
 
