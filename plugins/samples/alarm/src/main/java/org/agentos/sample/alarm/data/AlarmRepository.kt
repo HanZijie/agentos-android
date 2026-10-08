@@ -81,6 +81,25 @@ class AlarmRepository(
         saved
     }
 
+    /**
+     * 给系统标准 Intent（ACTION_SET_ALARM）用：时刻、标签、重复日都相同的闹钟已存在时复用它，不重复建。
+     * 已存在且开着：原样返回（[Reuse.EXISTING]）；已存在但关着：重新打开（[Reuse.REENABLED]，官方文档：该 action 总是启用闹钟）；
+     * 没有：新建（[Reuse.CREATED]）。判重只看时刻 + 标签 + 重复日，不比较振动、贪睡长度等其他字段（复用时保持原样）。
+     */
+    fun createOrReuse(draft: AlarmDraft): CreateResult = synchronized(lock) {
+        checkTime(draft.hour, draft.minute)
+        val label = checkLabel(draft.label)
+        val same = rows.values.filter {
+            it.hour == draft.hour && it.minute == draft.minute && it.label == label && it.days == draft.days
+        }
+        val enabled = same.firstOrNull { it.enabled }
+        when {
+            enabled != null -> CreateResult(enabled, Reuse.EXISTING)
+            same.isNotEmpty() -> CreateResult(setEnabled(same.first().id, true), Reuse.REENABLED)
+            else -> CreateResult(create(draft), Reuse.CREATED)
+        }
+    }
+
     fun update(id: String, patch: AlarmPatch): Alarm = synchronized(lock) {
         val current = require(id)
         val hour = patch.hour ?: current.hour
@@ -154,10 +173,14 @@ class AlarmRepository(
         current
     }
 
-    /** 贪睡：[Alarm.snoozeMinutes] 分钟后再响（只响一次的闹钟也会重新打开，等贪睡到点）。 */
-    fun snooze(id: String): Alarm = synchronized(lock) {
+    /**
+     * 贪睡：[minutes]（默认用该闹钟自己的 [Alarm.snoozeMinutes]）分钟后再响（只响一次的闹钟也会重新打开，等贪睡到点）。
+     * [minutes] 只对这一次生效，不改闹钟自己的贪睡时长（与 ACTION_SNOOZE_ALARM 的官方语义一致）。
+     */
+    fun snooze(id: String, minutes: Int? = null): Alarm = synchronized(lock) {
         val current = require(id)
-        val until = time.now().toInstant().toEpochMilli() + current.snoozeMinutes * 60_000L
+        minutes?.let { checkSnooze(it) }
+        val until = time.now().toInstant().toEpochMilli() + (minutes ?: current.snoozeMinutes) * 60_000L
         commit(current.copy(snoozedUntil = until, enabled = true))
     }
 
@@ -232,6 +255,11 @@ class AlarmRepository(
         const val MISSED_GRACE_MILLIS = 60_000L
     }
 }
+
+/** [AlarmRepository.createOrReuse] 的结果：新建、复用了开着的同款、还是把关着的同款重新打开。 */
+enum class Reuse { CREATED, EXISTING, REENABLED }
+
+data class CreateResult(val alarm: Alarm, val status: Reuse)
 
 /** 一周里的“重复日”摘要用：工作日 / 周末 / 每天。 */
 val WEEKDAYS: Set<DayOfWeek> = setOf(
