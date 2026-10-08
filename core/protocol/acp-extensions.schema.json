@@ -89,7 +89,7 @@
               }
             },
             "toolScope": {
-              "description": "toolScope：这个会话能用的工具（docs/third-party-acp.md 4.5）。只能缩小：实际可用 = toolScope ∩ 当前目录；不存在的项静默忽略。第三方 App 没有它或为空 = 没有任何工具；AgentOS 自己和电脑端没有它 = 全部工具，带了也生效。随会话持久化，创建后不能改（session/load 也不能）。形状非法 → -32602 invalid_params，不创建会话。",
+              "description": "toolScope：这个会话能用的工具（docs/third-party-acp.md 4.5）。只能缩小：实际可用 = toolScope ∩ 当前目录；不存在的项静默忽略。所有调用方都可以不带：没有它 = 全部工具；带了就缩小到它；空数组 = 没有任何工具（调用方自己要求的）。默认的 CallerPolicy 不强制第三方带它；可选的 StrictCallerPolicy（默认关）让第三方没有它就没有任何工具。随会话持久化，创建后不能改（session/load 也不能）。形状非法 → -32602 invalid_params，不创建会话。",
               "type": "array",
               "maxItems": 32,
               "items": {

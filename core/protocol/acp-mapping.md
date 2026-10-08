@@ -60,11 +60,12 @@
 
 - **toolScope 扩展**（docs/third-party-acp.md 4.5）：请求带 `_meta."org.agentos".toolScope = [{"plugin": "alarm", "tool": "alarm_create"}, …]`，指定**这个会话**能用哪几个工具。`plugin` 是 `plugin.json` 的 `name`，`tool` 是插件自己报告的原始工具名（不是最终的 `mcp__…` 名字）。
   - **只能缩小**：实际可用 = toolScope ∩ 当前目录（用户策略禁用、插件未启用的照样没有）。写了不存在的项**静默忽略**，不报错（调用方不能借此探测用户装了什么）。
-  - 第三方 App（`CallerKind.APP`）没带 toolScope 或为空数组 = **没有任何工具**，只能聊天（也没有 `read_skill`，系统提示里没有 Skill 目录）。AgentOS 自己和电脑端：没带 = 全部工具（不变），带了也生效。
+  - **toolScope 对所有调用方都是可选的**（用户 2026-10-08 的决定）：没带 = 目录里全部已启用插件的全部工具，AgentOS 自己、电脑端、第三方 App 都一样；带了就缩小到它（只能缩小）；空数组 = 没有任何工具（调用方自己要求的）。受限的 scope 里没有 `read_skill`，系统提示里也没有 Skill 目录；没带时两者都有。
+  - 这条规则由 `CallerPolicy`（`core/runtime`，`RuntimeConfig.callerPolicy`）决定：默认 `OpenCallerPolicy` 就是上面这样。可选的 `StrictCallerPolicy`（**默认关**）让第三方 App 没带 toolScope（或为空）= 没有任何工具。策略只能加严，Broker 强制范围取交集。
   - 范围外的工具：不在交给模型的工具列表里，模型按名字硬调也在 `authorize` / `execute` 被拒绝，错误码 `tool_not_in_catalog`，文字与工具真不存在时一字不差。
   - **随会话持久化**（`sessions.tool_scope`，store schema v2），重启后不丢；会话创建后**没有任何办法改它**。`session/load` 现在没有启用（`loadSession: false`），将来启用时也只能恢复，不能改；自动选会话只会选到 toolScope 与这次请求相同的会话（session-selection.md 第 1 节）。
   - 形状非法 → -32602（`invalid_params`），不创建会话：不是数组、元素不是对象、缺 `plugin` / `tool` 或不是非空字符串、超过 **32** 项（按客户端发来的数，重复的也算）、字符串超过 **128** 字符。元素里多出来的键忽略；重复的项合并。
-  - 不要求在 `initialize` 里协商：它只会让会话能用的工具**更少**，不改变任何标准方法的含义；没有它的第三方会话本来就没有工具。（与 `sessionAutoSelect` 不同，那个会改变 `session/new` 返回的会话。）
+  - 不要求在 `initialize` 里协商：它只会让会话能用的工具**更少**，不改变任何标准方法的含义。（与 `sessionAutoSelect` 不同，那个会改变 `session/new` 返回的会话。）
 
 选择这种形式而不是单独的 `_agentos/…` 方法，是因为 SDK 的 Agent 只在 `session/new`（和 load / resume / fork）里把会话登记到连接上；单独的方法返回的会话 ID 无法接着发 `session/prompt`。选择结果放在随后的通知里，是因为 SDK 0.30.1 不在 `session/new` 的响应里带 `_meta`。
 
@@ -125,7 +126,7 @@
 
 **第三方 App 的配额**（docs/third-party-acp.md 4.6，session-scheduling.md 第 5.1 节）只对 `CallerKind.APP`：一次 prompt 的文字超过 16,000 字符 → -32602 `invalid_params`（`data.details.reason = too_large`，先于上面 200,000 字符的 `payload_too_large` 判断）；已有一个 prompt 在进行 → -32048 `quota_exceeded`（`details.reason = busy`）；一小时内超过 30 次 → -32048 `quota_exceeded`（`details.reason = hourly`，`details.retryAfterSeconds`）。数值在 `CallerQuotaConfig`。AgentOS 自己、电脑端不受影响。
 
-**确认语义**（第三方 App，docs/third-party-acp.md 4.4）：`session/prompt` 里模型发起的每个工具调用都在手机上确认，包括读级工具；用户策略里的“始终允许”和本会话的“不再询问”都不生效，确认框只给“允许一次”和“拒绝”。这是 AgentOS 一侧的行为，客户端在 ACP 上看到的只是 `tool_call` / `tool_call_update` 因用户拒绝而 `failed`。
+**确认语义**（docs/third-party-acp.md 4.4）：确认由 AgentOS 在手机上完成，客户端看到的只是 `tool_call` / `tool_call_update` 因用户拒绝而 `failed`。**默认（`OpenCallerPolicy`）所有调用方用同一套规则**：读级直接执行；写级默认每次确认，用户为这个工具设了“始终允许”、或本会话里选过“不再询问”就不再确认；高风险每次确认，只有“允许一次 / 拒绝”；确认框上写明“由「X」发起”。可选的 `StrictCallerPolicy`（**默认关**，`RuntimeConfig.callerPolicy` 选择）对第三方 App 更严：每次调用都确认（读级也确认），“始终允许”和“本会话内不再询问”都不生效，确认框只给“允许一次”和“拒绝”。AgentOS 自己和电脑端在两种策略下都不受影响。
 
 ## 8. `session/cancel`
 
