@@ -98,13 +98,13 @@ class AgentUpdateAndErrorsTest {
         assertEquals("连不上模型服务", network.title)
         assertEquals("检查网络后再试（已自动重试，共尝试 7 次）", network.hint)
         assertTrue(network.retryable)
-        assertEquals("Check your network and try again (Retried automatically; 7 attempts in total)", AgentErrors.fromRpc(en, -32051, "model_network: connect", "model_network", true, attempts = 7).hint)
+        assertEquals("Check your network and try again (Retried automatically. Attempts in total: 7)", AgentErrors.fromRpc(en, -32051, "model_network: connect", "model_network", true, attempts = 7).hint)
         assertEquals("检查网络后再试", AgentErrors.fromRpc(zh, -32051, "x", "model_network", true, attempts = 1).hint)
         val limited429 = AgentErrors.fromRpc(zh, -32051, "429", "model_rate_limited", true, retryAfterSeconds = 90, attempts = 3)
         assertEquals("约 90 秒后再发（已自动重试，共尝试 3 次）", limited429.hint)
-        assertEquals("Try again in about 90 seconds (Retried automatically; 3 attempts in total)", AgentErrors.fromRpc(en, -32051, "429", "model_rate_limited", true, retryAfterSeconds = 90, attempts = 3).hint)
+        assertEquals("Try again in about 90 seconds (Retried automatically. Attempts in total: 3)", AgentErrors.fromRpc(en, -32051, "429", "model_rate_limited", true, retryAfterSeconds = 90, attempts = 3).hint)
         // a hint-less error gets just the attempts note
-        assertEquals("Retried automatically; 4 attempts in total", AgentErrors.fromRpc(en, -32051, "x", "tool_failed", true, attempts = 4).hint)
+        assertEquals("Retried automatically. Attempts in total: 4", AgentErrors.fromRpc(en, -32051, "x", "tool_failed", true, attempts = 4).hint)
     }
 
     @Test
