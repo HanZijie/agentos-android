@@ -123,6 +123,16 @@ paused     --用户放弃结果未知的任务----------------> queued | created
 - 请求取消后 `cancelGraceMillis` 内 Agent core 没有停下，**不能假装已取消**：这次执行标记为 `unknown`，会话暂停，写 `task.recovery_required { reason: cancel_grace_exceeded }`，之后这次执行迟到的任何结果一律丢弃。
 - 取消不等于撤销副作用。已经发出的工具调用，结果照实记录（`tool.settled`），发出后被取消的列在 `task.cancelled.unknownToolCalls` 里。
 
+### 6.1 按调用方取消（`RuntimeEngine.cancelOwner`，撤销第三方 App 的授权）
+
+关闭通道不取消任务（F7），所以撤销一个 App 时，它正在跑的任务会继续占着“同时一个 prompt”的名额、继续花用户的模型额度。`cancelOwner(caller, by, waitMillis)` 取消 `caller.ownerKey` 名下所有会话里没结束的任务（排队、运行、取消中），返回被请求取消的任务 ID：
+
+- 对每个有未结束任务的会话走第 6 节同一条路径（排队的立即取消，运行中的请 Agent core abort，等确认的工具调用撤回确认），`task.cancel_requested.by` 记 `by`（撤销授权用 `revoked`）；
+- **只动这个 `ownerKey` 的会话**：别的 App、AgentOS 自己、电脑端不受影响；按会话的归属算，包名和显示名不参与；
+- 幂等：没有未结束的任务时返回空列表；已经在取消中的任务不重复取消，也不在返回值里；
+- 返回前最多等 `waitMillis`（默认 `AcpConfig.cancelWaitMillis`，传 0 不等）让任务停下，然后释放它们占的配额名额（5.1）并回调用量（`cancelled`）；任务在等待期内没停下（例如一个不可打断的工具调用）时名额继续占着，直到任务真的结束。
+
+
 ## 7. 断开、超时与重启
 
 **断开连接**（F7）：客户端断开不改变会话和任务，不取消任务；任务照常跑完，结果留在 Store 里，调用方回来后按 W10 的方式取回。

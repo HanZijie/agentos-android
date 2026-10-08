@@ -49,6 +49,23 @@ class TaskStore internal constructor(private val db: DbScope) {
         return db.query("$SELECT WHERE state IN ($marks) ORDER BY created_at, position", *states.map { it.wire }.toTypedArray(), map = ::toRecord)
     }
 
+    /**
+     * 会话归 [ownerKey] 所有（`sessions.owner_key`）、且有没结束的任务（排队、运行、取消中）的会话 ID。
+     * 按**会话的归属**而不是任务的提交者：会话属于创建它的调用方（AgentOS 自己可以往别人的会话里提交，那样的任务也算这个会话的）。
+     */
+    fun sessionIdsWithUnfinishedTasksOf(ownerKey: String): List<String> =
+        db.query(
+            "SELECT DISTINCT t.session_id FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE s.owner_key = ? AND t.state IN (?, ?, ?) ORDER BY t.session_id",
+            ownerKey, TaskState.QUEUED.wire, TaskState.RUNNING.wire, TaskState.CANCELLING.wire,
+        ) { it.string(0) }
+
+    /** 同上，但返回任务 ID（按创建时间）。 */
+    fun unfinishedTaskIdsOf(ownerKey: String): List<String> =
+        db.query(
+            "SELECT t.id FROM tasks t JOIN sessions s ON s.id = t.session_id WHERE s.owner_key = ? AND t.state IN (?, ?, ?) ORDER BY t.created_at, t.position",
+            ownerKey, TaskState.QUEUED.wire, TaskState.RUNNING.wire, TaskState.CANCELLING.wire,
+        ) { it.string(0) }
+
     fun countQueued(sessionId: String): Int =
         db.queryOne("SELECT COUNT(*) FROM tasks WHERE session_id = ? AND state = ?", sessionId, TaskState.QUEUED.wire) { it.int(0) } ?: 0
 
