@@ -167,7 +167,8 @@ class ConsentTextTest {
     fun `a long app label and a forged one are cleaned`() = runTest {
         val v = viewOf(request("r", label = "系统设置\n已验证的官方应用${rlo}"))
         assertEquals("由 系统设置 已验证的官方应用 发起", v.initiatorLine)
-        assertEquals("系统设置\n已验证的官方应用".replace('\n', ' '), v.caller.packageName)
+        // the name an app gave itself is never the package: this app has none known, so the card has none to show (and none to be fooled by)
+        assertEquals(null, v.caller.packageName)
     }
 
     @Test

@@ -118,7 +118,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 
 | eventType | payload | error | 产生者 |
 |---|---|---|---|
-| `task.queued` | `{ input, caller: { uid, kind }, position }`；`input` 是 ACP 的 ContentBlock 数组（按第 5 节截断） | — | W2 |
+| `task.queued` | `{ input, caller: { uid, kind, package? }, position }`；`input` 是 ACP 的 ContentBlock 数组（按第 5 节截断） | — | W2 |
 | `task.started` | `{ attempt }`：第几次执行，从 1 开始 | — | W2 |
 | `task.completed` | `{ stopReason, usage? }`；`stopReason`：`end_turn` / `max_tokens` / `max_turn_requests` / `refusal` | — | W2 |
 | `task.cancel_requested` | `{ by, phase }`；`by`：`client` / `timeout` / `system` / `user_stop`；`phase`：`queued` / `model` / `tool` | — | W2、W4 |
@@ -134,7 +134,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 |---|---|---|---|
 | `tool.dispatched` | `{ toolCallId, name, provider, risk }`：**在调用 `ToolPort.invoke` 之前提交**，用来判断“结果未知” | — | W2 broker |
 | `tool.settled` | `{ toolCallId, outcome, isError }`；`outcome`：`completed` / `not_dispatched` / `unknown` / `cancelled` / `rejected` | `outcome` 不是 `completed` 时有 | W2 broker |
-| `consent.requested` | `{ requestId, toolCallId, toolName, risk, callerUid }` | — | W16 |
+| `consent.requested` | `{ requestId, toolCallId, toolName, risk, callerUid, callerPackage? }` | — | W16 |
 | `consent.resolved` | `{ requestId, decision, reason, remember }`；`decision`：`allow` / `deny`；`reason`：`user` / `timeout` / `unavailable` / `remembered` / `policy` / `client` | `reason=client` 也用于任务被取消时撤回确认（不等超时）。默认（`OpenCallerPolicy`）所有 `callerKind` 用同一套规则，第三方 App 的调用也可以是 `remembered` / `policy`。**只有启用可选的 `StrictCallerPolicy`（默认关）时**，`callerKind = app` 的调用 `reason` 永远不会是 `remembered` 或 `policy`，`remember` 永远是 `false` | W16 |
 | `hook.dispatched` | `{ hookEvent, matched }` | — | W22 |
 | `hook.decided` | `{ hookEvent, decision, reason?, inputUpdated, contextAdded }` | — | W22 |
@@ -142,11 +142,13 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 
 `rejected`：Broker 在派发前拒绝（例如工具名不在目录里），没有副作用。
 
+**调用方的包名（审计）**：第三方 App（`callerKind = app`）的 `task.queued.caller.package` 和 `consent.requested.callerPackage` 是宿主层按 UID 解析出的真实包名（已清理：去控制字符和不可见格式字符、折叠空白、单行、最多 128 字符），只增不改，没有包名（解析不到、或 v3 之前排队的任务）时省略。App 自己起的显示名（label）**不**写进这些事件：显示名谁都能随便写，不能用来区分 App。AgentOS 自己、电脑端、运行时的事件没有这两个字段。
+
 ### 4.4 系统流（`sessionId = "_system"`）
 
 | eventType | payload | error | 产生者 |
 |---|---|---|---|
-| `runtime.started` | `{ version, schemaVersion }`；`schemaVersion` 现为 **2**（v2 给 `sessions` 表加 `tool_scope` 列） | — | W2 |
+| `runtime.started` | `{ version, schemaVersion }`；`schemaVersion` 现为 **3**（v2 给 `sessions` 表加 `tool_scope` 列，v3 给 `tasks` 表加 `caller_package` 列） | — | W2 |
 | `runtime.recovered` | `{ requeued, recoveryRequired, interrupted, userStopped, cancelled, expired }`：启动恢复流程（F8）的结果——重新排队的任务数、等恢复决定的任务数（按过渡期限放弃之后剩下的）、这次启动围栏掉的执行数、上一个进程是否被用户主动停止、因此取消的排队任务数、按过渡期限放弃的任务数 | — | W2 recovery |
 | `agent_core.failed` | `{ runningTasks }`：泵故障（S8），按运行时崩溃处理 | 有 | W2 |
 | `agent_core.restarted` | `{}`：新的 Agent core 实例已启动；各会话在下次用到时按 Store 里的 messages 重建 | — | W2 |

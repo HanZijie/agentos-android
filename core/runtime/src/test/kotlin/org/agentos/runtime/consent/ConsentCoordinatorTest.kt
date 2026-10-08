@@ -39,9 +39,10 @@ class ConsentCoordinatorTest {
         title: String? = "追加备忘",
         args: String = "{\"text\":\"hello\"}",
         alwaysAllowOffered: Boolean = true,
+        packageName: String? = null,
     ) = ConsentRequest(
         requestId = id, sessionId = "s1", taskId = "t1", toolCallId = "c-$id", toolName = "append_note", toolTitle = title,
-        risk = risk, caller = CallerIdentity(10123, CallerKind.APP, "com.example.app"), argumentsPreview = args,
+        risk = risk, caller = CallerIdentity(10123, CallerKind.APP, "com.example.app", packageName), argumentsPreview = args,
         rememberable = rememberable, timeoutMillis = timeout, source = source, alwaysAllowOffered = alwaysAllowOffered,
     )
 
@@ -604,7 +605,7 @@ class ConsentCoordinatorTest {
     @Test
     fun `views carry the cleaned display model`() = runTest {
         val f = fixture()
-        f.ask(req("r1", title = "追加备忘"))
+        f.ask(req("r1", title = "追加备忘", packageName = "com.example.app"))
         runCurrent()
         val v = f.coordinator.pending.value.single()
         assertEquals("要允许「追加备忘」吗？", v.title)

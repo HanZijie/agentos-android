@@ -246,7 +246,8 @@ class ConsentCoordinator(
             taskId = request.taskId,
             title = ConsentText.title(display),
             initiatorLine = ConsentText.initiatorLine(caller, config.maxDisplayNameChars),
-            caller = ConsentCaller(caller.kind, caller.uid, if (caller.kind == org.agentos.runtime.ports.CallerKind.APP) caller.label?.let { ConsentText.singleLine(it, 128) } else null),
+            // packageName is the PACKAGE (resolved from the uid by the host), never the label the app gave itself; only for third-party apps
+            caller = ConsentCaller(caller.kind, caller.uid, ConsentText.packageOf(caller)),
             sourceLine = source?.let { ConsentText.sourceLine(it.plugin, it.server, config.maxSourceChars) },
             source = source,
             toolDisplayName = display,

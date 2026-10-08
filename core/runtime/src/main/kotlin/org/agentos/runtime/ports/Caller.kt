@@ -5,12 +5,17 @@ package org.agentos.runtime.ports
  *
  * @property uid Binder 调用方 UID；电脑端为 adbd 转发时的对端 UID（通常是 shell 2000），仅作记录。
  * @property kind 调用方类别，决定会话空间和授权规则（architecture 5.3）。
- * @property label 给人看的名字（包名或“电脑端”），由宿主层根据 UID 解析，不来自客户端。
+ * @property label 给人看的名字（App 名或“电脑端”），由宿主层根据 UID 解析，不来自客户端。**只是显示用**：任何 App 都可以把自己叫成系统 App 的名字，
+ *   所以确认界面不能只靠它认人。
+ * @property packageName **第三方 App（[CallerKind.APP]）的包名**，由宿主层根据 UID 解析（恰好一个包才放行），不来自客户端；其他调用方为 null
+ *   （[CallerKind.SELF]、[CallerKind.DESKTOP]、[CallerKind.SYSTEM] 没有包名这个概念，设了也不会被存、不会显示）。确认界面把它和 [label] 一起写明。
+ *   不参与 [ownerKey]：会话仍按 UID 隔离。
  */
 data class CallerIdentity(
     val uid: Int,
     val kind: CallerKind,
     val label: String? = null,
+    val packageName: String? = null,
 ) {
     /**
      * 会话归属键：会话属于创建它的调用方。第三方 App 与自带界面按 UID 区分；电脑端作为一个独立的调用方，
