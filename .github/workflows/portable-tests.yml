@@ -4,6 +4,7 @@
 # - tests/acp-conformance：官方 TypeScript ACP 客户端的一致性测试：经 stdio（W4 起），经电脑上的网关 + tools/acp-bridge，
 #   以及网关的配对与安全用例（W9 起）。手机上的用例（AGENTOS_ACP_DEVICE）需要设备，CI 里自动跳过
 # 后两项在对应工程出现之前自动跳过。
+# - tools/check-i18n.py：中英文资源对齐与字面量门禁（docs/next-apps-plan.md 7.2 R9），秒级
 name: portable-tests
 
 on:
@@ -24,6 +25,23 @@ env:
   NODE_VERSION: "22"
 
 jobs:
+  i18n:
+    name: 中英文资源与字面量门禁（tools/check-i18n.py，不需要 Android SDK）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 脚本自己的单元测试
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
+
+      - name: check-i18n
+        run: python3 tools/check-i18n.py
+
   gradle:
     name: Gradle 单元测试与 Lint
     runs-on: ubuntu-latest
