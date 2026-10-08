@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -291,6 +292,30 @@ class RuntimeEngine internal constructor(
     suspend fun cancel(caller: CallerIdentity, sessionId: String): List<String> {
         session(caller, sessionId)
         return scheduler.cancel(sessionId, by = "client")
+    }
+
+    /**
+     * 取消 [caller] 名下（`ownerKey` 相同）所有会话里没结束的任务，并返回被请求取消的任务 ID。撤销第三方 App 的授权时用：关通道不会取消任务（F7），
+     * 不取消的话任务继续占着这个 App 的“同时一个 prompt”名额、继续花用户的模型额度。
+     *
+     * - 走调度器的取消路径，和 `session/cancel` 一样：排队的立即取消，运行中的请 Agent core abort，等确认的工具调用撤回确认；
+     *   `task.cancel_requested` 事件里记下 [by]（例如 `"revoked"`）；
+     * - **只动 [caller].ownerKey 名下的会话**：别的 App、AgentOS 自己（SELF）、电脑端不受影响；
+     * - 幂等：没有未结束的任务时返回空列表，什么也不做；已经在取消中的任务不重复取消（也不在返回值里），但会等它；
+     * - 返回之前最多等 [waitMillis]（默认 [AcpConfig.cancelWaitMillis]）让这些任务停下，然后释放它们占的配额名额
+     *   （[CallerQuota] 的“同时一个”）并回调用量；所以返回后这个 App 立即可以再提交（如果它还有授权）。传 0 就不等。
+     *   任务在等待期内没停下时名额继续占着，直到任务真的结束（它还在花额度）。
+     */
+    suspend fun cancelOwner(caller: CallerIdentity, by: String, waitMillis: Long = config.acp.cancelWaitMillis): List<String> {
+        awaitReady()
+        val requested = scheduler.cancelOwner(caller.ownerKey, by)
+        if (waitMillis > 0) {
+            val pending = scheduler.unfinishedTasksOf(caller.ownerKey)
+            withTimeoutOrNull(waitMillis) { pending.forEach { scheduler.awaitSettled(it) } }
+        }
+        // 任务已经结束的，名额现在就释放，不等后台协程跑到
+        reapSettled(caller)
+        return requested
     }
 
     /** 放弃一个结果未知的任务（W10 会加上重试）。 */

@@ -226,6 +226,19 @@ internal class Scheduler(
         return cancelledQueued + listOfNotNull(requestedRunning)
     }
 
+    /**
+     * 取消 [ownerKey] 名下所有会话里没结束的任务（撤销第三方 App 的授权用）：对每个有未结束任务的会话走和 [cancel] 完全相同的路径
+     * （排队的立即取消，运行中的请 Agent core abort；等确认的工具调用撤回确认；事件 `task.cancel_requested { by }` 里记下 [by]）。
+     * 返回被请求取消的任务 ID；没有未结束的任务时返回空列表（幂等）。只动 [ownerKey] 名下的会话，别的调用方、AgentOS 自己、电脑端不受影响。
+     */
+    suspend fun cancelOwner(ownerKey: String, by: String): List<String> {
+        val sessionIds = store.read { it.tasks.sessionIdsWithUnfinishedTasksOf(ownerKey) }
+        return sessionIds.flatMap { cancel(it, by) }
+    }
+
+    /** [ownerKey] 名下还没结束的任务 ID（排队、运行、取消中）。 */
+    suspend fun unfinishedTasksOf(ownerKey: String): List<String> = store.read { it.tasks.unfinishedTaskIdsOf(ownerKey) }
+
     private fun phase(by: String, phase: String): JsonObject = buildJsonObject {
         put("by", by)
         put("phase", phase)
