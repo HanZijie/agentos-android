@@ -82,6 +82,13 @@ class PackageCallerResolver(private val context: Context) : CallerResolver, Pack
         }
     }
 
+    /** The uid this package has on the device now, null when it is not installed (revocation: where its tasks would be owned). */
+    fun uidOf(packageName: String): Int? = try {
+        context.packageManager.getPackageUid(packageName, PackageManager.PackageInfoFlags.of(0))
+    } catch (e: PackageManager.NameNotFoundException) {
+        null
+    }
+
     companion object {
         const val MAX_LABEL_CHARS = 64
 

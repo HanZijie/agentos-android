@@ -21,6 +21,7 @@ import org.agentos.channel.IAcpService
 import org.agentos.channel.IChannel
 import org.agentos.app.agent.acp.AcpDecision
 import org.agentos.app.agent.acp.ResolvedCaller
+import org.agentos.app.agent.acp.RevocationOwners
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.OutboundGate
@@ -74,6 +75,7 @@ class AcpConnections(private val process: AgentProcess) {
 
     private val nextId = AtomicInteger()
     private val conns = ConcurrentHashMap<Int, Conn>()
+    private val uidsSeen = ConcurrentHashMap<String, MutableSet<Int>>()
     private val opened = AtomicLong()
     private val closed = AtomicLong()
     private val rejected = AtomicLong()
@@ -94,12 +96,14 @@ class AcpConnections(private val process: AgentProcess) {
         val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + CoroutineName(name))
         val transport = BinderAcpTransport.accept(client, uid, scope, ChannelConfig.DEFAULT, name)
         conns[id] = Conn(id, uid, transport, SystemClock.elapsedRealtime(), caller, app)
+        // remember which uids a package opened channels with: a task outlives its channel (F7), and revoking must still find it
+        if (caller.kind == CallerKind.APP && app != null) uidsSeen.getOrPut(app.packageName) { ConcurrentHashMap.newKeySet() }.add(uid)
         opened.incrementAndGet()
         transport.onClose {
             onClosed(id, transport.channel.closeCauseOrNull?.toString() ?: "unknown")
             scope.cancel()
         }
-        // 调用方身份由 AcpAccessPolicy 按 UID 定：AgentOS 自己 SELF，已被用户允许的第三方 APP（label = App 名）。
+        // 调用方身份由 AcpAccessPolicy 按 UID 定：AgentOS 自己 SELF，已被用户允许的第三方 APP（packageName = 按 UID 解析出的包名）。
         // 绝不能把第三方建成 SELF：SELF 能看到所有会话
         process.runtime.serveAcp(transport, caller, OutboundGate { transport.awaitWritable(OutboundGate.BINDER_HIGH_WATER_CHARS) })
         Log.i(TAG, "opened $name kind=${caller.kind}")
@@ -124,7 +128,14 @@ class AcpConnections(private val process: AgentProcess) {
         return victims.size
     }
 
-    /** 这个 App 开着的通道里的调用方身份（取消任务用）。 */
+    /**
+     * 撤销时要替哪些归属键取消任务：开着的通道的 UID（**关通道之前**取）+ 这个包名见过的 UID + 它现在安装的 UID，见 [RevocationOwners]。
+     * 通道关了任务还在跑（F7）是常态，所以不能只看开着的通道。
+     */
+    fun ownersOf(packageName: String, installedUid: Int?): List<CallerIdentity> =
+        RevocationOwners.of(packageName, callersOf(packageName), uidsSeen[packageName].orEmpty().toSet(), installedUid, Process.myUid())
+
+    /** 这个 App 开着的通道里的调用方身份。 */
     fun callersOf(packageName: String): List<CallerIdentity> = conns.values.filter { it.app?.packageName == packageName }.map { it.caller }.distinct()
 
     private fun onClosed(id: Int, cause: String) {

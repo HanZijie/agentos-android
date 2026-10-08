@@ -29,6 +29,7 @@ import org.json.JSONObject
  * - `tp-connect`：[AgentOs.connect]（带重试），把每次 Waiting 回调记下来；成功后可选发一轮 prompt（args.prompt）。
  * - `tp-hold`：连上后保持连接，直到通道关闭（撤销时 AgentOS 关它）或超时，返回关闭的原因和耗时。运行时会先发一个 `tp-hold-ready` 阶段，
  *   主机端据此在连接已建好之后撤销。
+ * - `tp-detach`：发一个长 prompt，看到第一段输出后自己关通道（不取消任务）；返回时任务还在 AgentOS 里跑、通道已经没有了。
  * - `tp-spoof`：用别的 App 的包名、名字去“冒充”：open 不带任何名字，initialize 的 clientInfo 里写别人的包名；AgentOS 只看 UID。
  */
 class ThirdPartyScenarios(private val ctx: Context, private val scope: CoroutineScope, private val runId: String, private val status: (String) -> Unit) {
@@ -37,6 +38,7 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
         "tp-open" -> open(args)
         "tp-connect" -> connect(args)
         "tp-hold" -> hold(args)
+        "tp-detach" -> detach(args)
         "tp-spoof" -> spoof(args)
         "tp-info" -> info()
         else -> null
@@ -160,6 +162,32 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
         } finally {
             connection.close()
         }
+    }
+
+    // ------------------------------------------------------------------ tp-detach
+
+    /**
+     * 发一个会一直跑的 prompt，看到第一段输出后**自己**把通道关掉（App 退出、崩溃都是这样），不取消任务（F7：关通道不取消任务）。
+     * 返回时通道已经没有了、任务还在 AgentOS 里跑：撤销时只看“开着的通道”就找不到它的任务。
+     */
+    private suspend fun detach(args: JSONObject): JSONObject {
+        val connection = try {
+            AgentOs.connect(ctx)
+        } catch (e: AgentOsException) {
+            return JSONObject().put("ok", false).put("error", e.error.name)
+        }
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val job = scope.launch {
+            try {
+                connection.newSession(emptyList()).prompt(args.optString("prompt", "detach")).collect { started.complete(Unit) }
+            } catch (e: AgentOsException) {
+                started.complete(Unit)
+            }
+        }
+        val sawOutput = kotlinx.coroutines.withTimeoutOrNull(args.optLong("startTimeoutMs", 30_000)) { started.await(); true } ?: false
+        connection.close()
+        job.cancel()
+        return JSONObject().put("ok", sawOutput).put("sawOutput", sawOutput).put("isConnected", connection.isConnected)
     }
 
     // ------------------------------------------------------------------ tp-spoof

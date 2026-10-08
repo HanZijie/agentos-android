@@ -42,6 +42,7 @@ import org.agentos.app.agent.acp.PackageCallerResolver
 import org.agentos.app.agent.acp.PackageLookup
 import org.agentos.extensions.registry.FileBackedTextFile
 import org.agentos.runtime.AgentRuntime
+import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.AgentRuntimes
 import org.agentos.runtime.RuntimeConfig
@@ -203,9 +204,20 @@ class AgentProcess private constructor(val app: Context) {
         )
     }
 
-    /** A 的配额统计（按 uid，在内存里，:agent 重启清零）。第三方 App 的身份是 APP + uid；没开过通道的 App 没有统计。 */
-    private fun quotaUsageOf(packageName: String): org.agentos.runtime.quota.CallerUsage? =
-        acp.callersOf(packageName).firstOrNull()?.let { engine.quota.usage(it) }
+    /**
+     * A 的配额统计（按 uid，在内存里，:agent 重启清零）。第三方 App 的身份是 APP + uid；通道关了任务还可能在跑，所以按
+     * [AcpConnections.ownersOf]（开着的通道 + 见过的 UID）求和，不只看开着的通道。没见过这个 App 时为 null（用注册表自己的计数）。
+     */
+    private fun quotaUsageOf(packageName: String): org.agentos.runtime.quota.CallerUsage? {
+        val usages = acp.ownersOf(packageName, null).map { engine.quota.usage(it) }
+        if (usages.isEmpty()) return null
+        return org.agentos.runtime.quota.CallerUsage(
+            activePrompts = usages.sumOf { it.activePrompts },
+            promptsInWindow = usages.sumOf { it.promptsInWindow },
+            promptsTotal = usages.sumOf { it.promptsTotal },
+            lastPromptAtMillis = usages.mapNotNull { it.lastPromptAtMillis }.maxOrNull(),
+        )
+    }
 
     /** IAgentControl.setAcpCaller。denied / removed 时 [CallerListener.onRevoked] 已经关了它的通道。 */
     fun setCaller(packageName: String?, state: String?): JSONObject? = callers.set(packageName, state)?.let { callerJson(it) }
@@ -245,10 +257,12 @@ class AgentProcess private constructor(val app: Context) {
         }
 
         override fun onRevoked(packageName: String, signingDigest: String) {
-            // 立即关它现有的通道；进行中的任务的取消见 cancelTasksOf
+            // 先记下它的归属键（通道关了就查不到开着的通道了），再关通道，最后取消任务。回调可能在 Binder 线程上（setAcpCaller、open），
+            // 取消要等任务停下（最多 cancelWaitMillis），所以放进协程
+            val owners = acp.ownersOf(packageName, callerResolver.uidOf(packageName))
             val closed = acp.closeFor(packageName, signingDigest, "authorization revoked")
-            Log.i(TAG, "authorization of $packageName revoked: closed $closed channel(s)")
-            cancelTasksOf(packageName)
+            Log.i(TAG, "authorization of $packageName revoked: closed $closed channel(s), cancelling tasks of ${owners.size} owner(s)")
+            cancelTasksOf(packageName, closed, owners)
         }
     }
 
@@ -268,8 +282,47 @@ class AgentProcess private constructor(val app: Context) {
         }
     }
 
-    /** 撤销时取消这个 App 进行中的任务。需要运行时按调用方取消的接口（见报告），接上之前只关通道。 */
-    private fun cancelTasksOf(@Suppress("UNUSED_PARAMETER") packageName: String) = Unit
+    /**
+     * 撤销（denied / removed / 签名变了）时取消这个 App 名下没结束的任务：`RuntimeEngine.cancelOwner(caller, "revoked")`，
+     * 走调度器的取消路径，返回前最多等 `cancelWaitMillis` 让任务停下并释放这个 App 的“同时一个 prompt”名额。
+     * 幂等，只动这个 App 的 UID 名下的会话（[org.agentos.app.agent.acp.RevocationOwners] 保证不会是 AgentOS 自己的 UID）。
+     * 在 [scope] 里跑：调用方可能是 Binder 线程，不能被这个等待卡住。
+     */
+    private fun cancelTasksOf(packageName: String, closedChannels: Int, owners: List<CallerIdentity>) {
+        val record = JSONObject().put("packageName", packageName).put("closedChannels", closedChannels)
+            .put("owners", JSONArray(owners.map { it.ownerKey })).put("at", System.currentTimeMillis())
+        if (owners.isEmpty()) {
+            record.put("cancelRequested", JSONArray()).put("waitedMs", 0)
+            recordRevocation(record)
+            return
+        }
+        scope.launch(CoroutineName("revoke-cancel")) {
+            val t0 = SystemClock.elapsedRealtime()
+            val requested = JSONArray()
+            for (owner in owners) {
+                try {
+                    engine.cancelOwner(owner, "revoked").forEach { requested.put(it) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // the channel is already closed and the grant is gone; a failed cancel leaves the task to end by itself, which is logged
+                    Log.w(TAG, "cancelling the tasks of ${owner.ownerKey} ($packageName) failed: ${e.message}")
+                    record.put("error", e.message ?: e.javaClass.simpleName)
+                }
+            }
+            record.put("cancelRequested", requested).put("waitedMs", SystemClock.elapsedRealtime() - t0)
+            Log.i(TAG, "revoked $packageName: cancel requested for ${requested.length()} task(s), settled in ${SystemClock.elapsedRealtime() - t0} ms")
+            recordRevocation(record)
+        }
+    }
+
+    /** 最近几次撤销的记录（包名、关了几条通道、请求取消了哪些任务、等了多久）：只在内存里，调试入口读它。 */
+    val revocations = ConcurrentLinkedDeque<JSONObject>()
+
+    private fun recordRevocation(record: JSONObject) {
+        revocations.addLast(record)
+        while (revocations.size > 20) revocations.pollFirst()
+    }
 
     /**
      * 每个放行过的 prompt 结束时恰好一次（A 的 CallerQuota）：把用量记到注册表。回调在结束任务的线程上，
