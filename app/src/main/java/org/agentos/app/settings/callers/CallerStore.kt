@@ -15,10 +15,6 @@ interface CallerStore {
     fun set(packageName: String, state: String)
 
     companion object {
-        /** IAgentControl v5 合入前：没有真实现，页面显示“运行时版本过旧”。 */
-        fun default(context: Context): CallerStore = object : CallerStore {
-            override fun list(): String? = throw IllegalStateException("IAgentControl v5 not available")
-            override fun set(packageName: String, state: String) = throw IllegalStateException("IAgentControl v5 not available")
-        }
+        fun default(context: Context): CallerStore = ControlCallerStore(context)
     }
 }

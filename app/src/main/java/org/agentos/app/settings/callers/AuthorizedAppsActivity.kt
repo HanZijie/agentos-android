@@ -74,10 +74,10 @@ class AuthorizedAppsActivity : Activity() {
         addView(Ui.text(context, 17f, R.color.ui_text, bold = true).apply { text = c.displayName })
         addView(Ui.paragraph(context, "包名：${AuthorizationLabels.safePackage(c.packageName)}"))
         addView(Ui.paragraph(context, AuthorizationLabels.digestLine(c.signingDigest)))
-        addView(Ui.paragraph(context, AcpCallers.stateText(c, now), if (c.state == AcpCallers.State.DENIED) R.color.ui_error else R.color.ui_text_secondary))
+        addView(Ui.paragraph(context, AcpCallers.stateText(c, now), if (c.state == AcpCallers.State.ALLOWED) R.color.ui_text_secondary else R.color.ui_error))
         addView(Ui.paragraph(context, AcpCallers.lastUsedText(c, now)))
         addView(Ui.paragraph(context, AcpCallers.usageText(c)))
-        val actions = AcpCallers.actions(c).map { a -> (AcpCallers.actionLabel(a) as CharSequence) to { confirm(c, a) } }
+        val actions = AcpCallers.actions(c).map { a -> (AcpCallers.actionLabel(a, c) as CharSequence) to { confirm(c, a) } }
         addView(Ui.buttons(context, *actions.toTypedArray()))
     }
 

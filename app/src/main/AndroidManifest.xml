@@ -154,7 +154,13 @@
             android:exported="true"
             android:excludeFromRecents="true"
             android:noHistory="true"
-            android:theme="@style/Theme.AgentOS.Transparent" />
+            android:theme="@style/Theme.AgentOS.Transparent">
+            <!-- SDK（AgentOs.bringApprovalToFront）用这个 action + setPackage 启动；只有 action，没有 data / 别的 category 要求 -->
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.SHOW_APPROVAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".settings.JevSourceActivity"
             android:exported="false"

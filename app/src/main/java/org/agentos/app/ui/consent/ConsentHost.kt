@@ -43,7 +43,7 @@ object ConsentHost {
     private var shownFor: String? = null
 
     /** 授权提示的回答出口（C 的 IAgentControl.answerAuthorization）；测试里可以换成假的。 */
-    @Volatile var authorizationAnswerer: AuthorizationAnswerer = AuthorizationAnswerer.Unwired
+    @Volatile var authorizationAnswerer: AuthorizationAnswerer = AuthorizationAnswerer.Control
 
     /** 登记监听者后收到过 `:agent` 的快照：之前队列是空的不代表没有待决，之后才是。 */
     var snapshotReady = false

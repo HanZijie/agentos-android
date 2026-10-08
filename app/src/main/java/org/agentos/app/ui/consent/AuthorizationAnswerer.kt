@@ -14,9 +14,12 @@ interface QueueEmptyAware {
 fun interface AuthorizationAnswerer {
     fun answer(context: Context, requestId: String, allow: Boolean)
 
-    object Unwired : AuthorizationAnswerer {
+    /** 真实现：绑 `:agent` 的 IAgentControl，调 `answerAuthorization(requestId, allow)`（v5）。 */
+    object Control : AuthorizationAnswerer {
         override fun answer(context: Context, requestId: String, allow: Boolean) {
-            android.util.Log.w("AgentOS.ConsentHost", "no authorization answerer wired")
+            kotlinx.coroutines.runBlocking {
+                org.agentos.app.settings.AgentControlClient(context).use { it.answerAuthorization(requestId, allow) }
+            }
         }
     }
 }

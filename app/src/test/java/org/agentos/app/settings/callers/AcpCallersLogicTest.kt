@@ -14,7 +14,7 @@ class AcpCallersLogicTest {
 
     private fun item(pkg: String = "org.example.notes", label: String? = "备忘录", state: String = "allowed", extra: String = "") =
         """{"packageName":"$pkg","label":${label?.let { "\"$it\"" } ?: "null"},"signingDigest":"$digest","state":"$state",
-        "lastUsedAt":${now - 5 * 60_000},"promptCount":12,"promptsLastHour":3,"deniedUntil":null$extra}"""
+        "lastUsedAt":${now - 5 * 60_000},"usage":{"promptsTotal":12,"promptsLastHour":3,"activeChannels":0,"activeTasks":0},"deniedUntil":null$extra}"""
 
     @Test
     fun parsesAllowedAndDeniedAndSkipsUnknown() {
@@ -73,7 +73,14 @@ class AcpCallersLogicTest {
         val denied = AcpCallers.parse(json(item(state = "denied")))[0]
         assertEquals(listOf(AcpCallers.Action.REVOKE), AcpCallers.actions(allowed))
         assertEquals(listOf(AcpCallers.Action.ALLOW, AcpCallers.Action.REMOVE), AcpCallers.actions(denied))
-        assertEquals("removed", AcpCallers.wireState(AcpCallers.Action.REVOKE))
+        val pending = AcpCallers.parse(json(item(state = "pending", extra = ""","requestId":"r1"""")))[0]
+        assertEquals(AcpCallers.State.PENDING, pending.state)
+        assertEquals("r1", pending.requestId)
+        assertEquals(listOf(AcpCallers.Action.ALLOW, AcpCallers.Action.DENY), AcpCallers.actions(pending))
+        assertEquals("denied", AcpCallers.wireState(AcpCallers.Action.DENY))
+        assertEquals("允许", AcpCallers.actionLabel(AcpCallers.Action.ALLOW, pending))
+        assertEquals("改为允许", AcpCallers.actionLabel(AcpCallers.Action.ALLOW, denied))
+        assertEquals("denied", AcpCallers.wireState(AcpCallers.Action.REVOKE))
         assertEquals("allowed", AcpCallers.wireState(AcpCallers.Action.ALLOW))
         assertEquals("removed", AcpCallers.wireState(AcpCallers.Action.REMOVE))
         // only a deliberate action on a denied app ever produces "allowed"
@@ -90,6 +97,7 @@ class AcpCallersLogicTest {
         assertTrue(allow.message.contains("每次都会再问你"))
         val revoke = AcpCallers.confirm(AcpCallers.parse(json(item()))[0], AcpCallers.Action.REVOKE)
         assertTrue(revoke.message.contains("立即断开"))
+        assertTrue(revoke.message.contains("10 分钟内"))
         assertTrue(revoke.message.contains("重新询问"))
         assertEquals("操作失败，请稍后再试", AcpCallers.errorText("agentos.x: secret /data/x"))
         assertNull(AcpCallers.parse(json(item())).firstOrNull { it.packageName == "none" })
