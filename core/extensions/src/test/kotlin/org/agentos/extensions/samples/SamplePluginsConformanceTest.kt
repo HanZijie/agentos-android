@@ -17,11 +17,11 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * 三个示例 App 的**真实文件**与 docs/sample-apps.md 的一致性（A12）。读的是各 App 的 `assets/agent-plugin/`、`AndroidManifest.xml` 和工具层 Kotlin 源码，
+ * 五个示例 App（闹钟、日历、备忘录、待办、短信）的**真实文件**与 docs/sample-apps.md 的一致性（A12）。读的是各 App 的 `assets/agent-plugin/`、`AndroidManifest.xml` 和工具层 Kotlin 源码，
  * 不是测试里手写的样本（[org.agentos.extensions.SamplePluginsTest] 是手写样本的契约测试）。
  *
  * ## 文件从哪里读
- * 默认读仓库根的 `plugins/samples/{alarm,calendar,notes}/`。环境变量 `AGENTOS_SAMPLES_ROOT` 可以改：
+ * 默认读仓库根的 `plugins/samples/{alarm,calendar,notes,todo,sms}/`。环境变量 `AGENTOS_SAMPLES_ROOT` 可以改：
  * 一个或多个目录，用 [File.pathSeparator]（macOS / Linux 是 `:`）分隔，每个目录是**一个仓库根**（里面有 `plugins/samples/<名>/`），或者就是
  * `samples` 目录本身（里面直接有 `<名>/`）；每个 App 取第一个找得到 `src/main/assets/agent-plugin/plugin.json` 的目录。例如在 App 还没合入 main 时：
  *
@@ -57,7 +57,7 @@ class SamplePluginsConformanceTest {
     private val specs = listOf(
         Spec(
             "alarm", "alarm", "alarm", "org.agentos.sample.alarm",
-            listOf("alarm_list", "alarm_get", "alarm_create", "alarm_update", "alarm_set_enabled", "alarm_delete", "alarm_next", "alarm_dismiss"),
+            listOf("alarm_list", "alarm_get", "alarm_create", "alarm_update", "alarm_set_enabled", "alarm_delete", "alarm_next", "alarm_dismiss", "alarm_system_next"),
             "org.agentos.sample.alarm.agent.AlarmMcpService",
         ),
         Spec(
@@ -77,6 +77,11 @@ class SamplePluginsConformanceTest {
             "todo", "todo", "todo", "org.agentos.sample.todo",
             listOf("todo_list", "todo_get", "todo_create", "todo_update", "todo_set_status", "todo_delete", "todo_search", "todo_summary"),
             "org.agentos.sample.todo.agent.TodoMcpService",
+        ),
+        Spec(
+            "sms", "sms", "sms", "org.agentos.sample.sms",
+            listOf("sms_thread_list", "sms_message_list", "sms_search", "sms_send", "sms_send_status", "sms_compose"),
+            "org.agentos.sample.sms.agent.SmsMcpService",
         ),
     )
 
@@ -199,21 +204,25 @@ class SamplePluginsConformanceTest {
     @Test fun `calendar - plugin json is accepted with the documented names (skipped when plugins-samples-calendar is absent)`() = checkManifest("calendar")
     @Test fun `notes - plugin json is accepted with the documented names (skipped when plugins-samples-notes is absent)`() = checkManifest("notes")
     @Test fun `todo - plugin json is accepted with the documented names (skipped when plugins-samples-todo is absent)`() = checkManifest("todo")
+    @Test fun `sms - plugin json is accepted with the documented names (skipped when plugins-samples-sms is absent)`() = checkManifest("sms")
 
     @Test fun `alarm - the app manifest exports the bound MCP service (skipped when plugins-samples-alarm is absent)`() = checkAndroidManifest("alarm")
     @Test fun `calendar - the app manifest exports the bound MCP service (skipped when plugins-samples-calendar is absent)`() = checkAndroidManifest("calendar")
     @Test fun `notes - the app manifest exports the bound MCP service (skipped when plugins-samples-notes is absent)`() = checkAndroidManifest("notes")
     @Test fun `todo - the app manifest exports the bound MCP service (skipped when plugins-samples-todo is absent)`() = checkAndroidManifest("todo")
+    @Test fun `sms - the app manifest exports the bound MCP service (skipped when plugins-samples-sms is absent)`() = checkAndroidManifest("sms")
 
     @Test fun `alarm - SKILL md is valid and covers every required tool (skipped when plugins-samples-alarm is absent)`() = checkSkills("alarm")
     @Test fun `calendar - SKILL md is valid and covers every required tool (skipped when plugins-samples-calendar is absent)`() = checkSkills("calendar")
     @Test fun `notes - SKILL md is valid and covers every required tool (skipped when plugins-samples-notes is absent)`() = checkSkills("notes")
     @Test fun `todo - SKILL md is valid and covers every required tool (skipped when plugins-samples-todo is absent)`() = checkSkills("todo")
+    @Test fun `sms - SKILL md is valid and covers every required tool (skipped when plugins-samples-sms is absent)`() = checkSkills("sms")
 
     @Test fun `alarm - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-alarm is absent)`() = checkTools("alarm")
     @Test fun `calendar - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-calendar is absent)`() = checkTools("calendar")
     @Test fun `notes - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-notes is absent)`() = checkTools("notes")
     @Test fun `todo - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-todo is absent)`() = checkTools("todo")
+    @Test fun `sms - every documented tool is registered in the Kotlin sources, more is fine (skipped when plugins-samples-sms is absent)`() = checkTools("sms")
 
     // ------------------------------------------------------------------ 不依赖 App 文件的检查（总是运行）
 
@@ -222,21 +231,21 @@ class SamplePluginsConformanceTest {
         val doc = File(repoRoot(), "docs/sample-apps.md").readText()
         val section = doc.substringAfter("## 4.").substringBefore("\n## 5.")
         val parts = Regex("(?m)^### 4\\.\\d+ .*`([a-z]+)`\\s*$").findAll(section).toList()
-        assertEquals(listOf("alarm", "calendar", "notes"), parts.map { it.groupValues[1] }, "sections 4.1–4.3 of docs/sample-apps.md")
+        assertEquals(listOf("alarm", "calendar", "notes", "todo", "sms"), parts.map { it.groupValues[1] }, "sections 4.1–4.5 of docs/sample-apps.md")
         for ((i, part) in parts.withIndex()) {
             val end = parts.getOrNull(i + 1)?.range?.first ?: section.length
             val body = section.substring(part.range.last, end)
             val names = Regex("(?m)^\\| `([a-z][a-z0-9_]*)` \\|").findAll(body).map { it.groupValues[1] }.toList()
             assertEquals(spec(part.groupValues[1]).tools, names, "tool table of ${part.groupValues[1]} in docs/sample-apps.md")
         }
-        assertEquals(listOf(8, 11, 10, 8), specs.map { it.tools.size })
+        assertEquals(listOf(9, 11, 10, 8, 6), specs.map { it.tools.size })
     }
 
     @Test
-    fun `the 37 documented tools get distinct valid model-facing names`() {
+    fun `the 44 documented tools get distinct valid model-facing names`() {
         val ids = specs.flatMap { s -> s.tools.map { ToolId(s.plugin, s.server, it) } }
         val names = ToolNaming.assign(ids)
-        assertEquals(37, names.values.toSet().size)
+        assertEquals(44, names.values.toSet().size)
         for ((id, n) in names) {
             assertEquals("mcp__${id.plugin}__${id.server}__${id.tool}", n)
             assertTrue(Regex("[A-Za-z0-9_-]{1,64}").matches(n), n)
