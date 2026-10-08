@@ -17,6 +17,9 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.agentos.sample.notes.agentos.AgentScheduleUseCase
+import org.agentos.sample.notes.agentos.OpenResult
+import org.agentos.sample.notes.agentos.ScheduleSource
 import org.agentos.sample.notes.data.Note
 import org.agentos.sample.notes.data.NoteColor
 import org.agentos.sample.notes.data.NoteException
@@ -74,7 +77,12 @@ sealed interface UiEvent {
  * 所以 MCP 工具对数据的任何修改都会通过它的 StateFlow 立刻反映到这里。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class NotesViewModel(private val repo: NoteRepository, private val prefs: SharedPreferences) : ViewModel() {
+class NotesViewModel(
+    private val repo: NoteRepository,
+    private val prefs: SharedPreferences,
+    /** “让 AgentOS 安排”的用例（进程内单例，面板读它的状态）。 */
+    val schedule: AgentScheduleUseCase,
+) : ViewModel() {
 
     private val _stack = MutableStateFlow<List<Screen>>(listOf(Screen.Home))
     val stack: StateFlow<List<Screen>> = _stack.asStateFlow()
@@ -161,6 +169,15 @@ class NotesViewModel(private val repo: NoteRepository, private val prefs: Shared
         _grid.value = next
         prefs.edit().putBoolean(PREF_GRID, next).apply()
     }
+
+    // ---------------------------------------------------------------- 让 AgentOS 安排
+
+    /**
+     * 工具栏的“让 AgentOS 安排”：有选中文字用选中的，没有用标题 + 正文。成功就弹出面板（Ready）；
+     * 文字太长或为空不发送，由界面提示。
+     */
+    fun askAgent(noteId: String?, title: String, content: String, selection: String?): OpenResult =
+        schedule.open(ScheduleSource.of(noteId, title, content, selection))
 
     // ---------------------------------------------------------------- 列表上的操作
 

@@ -44,8 +44,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
 
-    // 与 SDK 有关的只有 agent/NotesMcpService（McpBinderService）；工具层只依赖 kotlinx-serialization-json 和仓库
+    // 与 SDK 有关的只有两处薄层：agent/NotesMcpService（McpBinderService，把备忘录暴露给 AgentOS）和
+    // agentos/RealAgentOsGateway（AgentOs，经 ACP 让 AgentOS 安排日程 / 闹钟）；工具层只依赖 kotlinx-serialization-json 和仓库
     implementation(project(":sdk:plugin-sdk"))
+    implementation(project(":sdk:acp-android"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 

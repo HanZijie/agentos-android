@@ -16,13 +16,15 @@ class MainActivity : ComponentActivity() {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                NotesViewModel(NotesGraph.repository, NotesGraph.preferences()) as T
+                NotesViewModel(NotesGraph.repository, NotesGraph.preferences(), NotesGraph.agentSchedule) as T
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 上一轮“让 AgentOS 安排”还没走完进程就被回收了：面板会说明（同一进程里重复调用无效）
+        NotesGraph.agentSchedule.restoreInterrupted()
         setContent {
             NotesTheme {
                 NotesApp(viewModel)
