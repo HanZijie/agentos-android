@@ -21,10 +21,10 @@ class TaskStore internal constructor(private val db: DbScope) {
     ): TaskRecord {
         val position = (db.queryOne("SELECT MAX(position) FROM tasks WHERE session_id = ?", sessionId) { it.longOrNull(0) } ?: 0) + 1
         db.exec(
-            "INSERT INTO tasks (id, session_id, position, state, input, input_hash, client_request_id, caller_kind, caller_uid, caller_label, created_at, queue_deadline) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, session_id, position, state, input, input_hash, client_request_id, caller_kind, caller_uid, caller_label, caller_package, created_at, queue_deadline) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             id, sessionId, position, TaskState.QUEUED.wire, input.toString(), hash(input), clientRequestId,
-            caller.kind, caller.uid, caller.label, now, queueDeadline,
+            caller.kind, caller.uid, caller.label, if (caller.kind == CallerKind.APP) caller.packageName else null, now, queueDeadline,
         )
         return requireNotNull(get(id))
     }
@@ -122,6 +122,7 @@ class TaskStore internal constructor(private val db: DbScope) {
         callerKind = CallerKind.valueOf(r.string(6).uppercase()),
         callerUid = r.int(7),
         callerLabel = r.stringOrNull(17),
+        callerPackage = r.stringOrNull(18),
         attempt = r.int(8),
         createdAt = r.long(9),
         startedAt = r.longOrNull(10),
@@ -135,7 +136,7 @@ class TaskStore internal constructor(private val db: DbScope) {
 
     companion object {
         private const val SELECT = "SELECT id, session_id, position, state, input, client_request_id, caller_kind, caller_uid, attempt, " +
-            "created_at, started_at, finished_at, execution_deadline, queue_deadline, cancel_reason, stop_reason, error, caller_label FROM tasks"
+            "created_at, started_at, finished_at, execution_deadline, queue_deadline, cancel_reason, stop_reason, error, caller_label, caller_package FROM tasks"
 
         fun hash(input: JsonArray): String =
             MessageDigest.getInstance("SHA-256").digest(input.toString().toByteArray()).joinToString("") { "%02x".format(it) }

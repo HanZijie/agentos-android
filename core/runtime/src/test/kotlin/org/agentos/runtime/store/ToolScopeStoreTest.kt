@@ -214,7 +214,7 @@ class ToolScopeStoreTest {
     private fun userVersion(file: java.io.File): Long = rawSql(file)
 
     @Test
-    fun `a version 1 database opens, moves to version 2 and its sessions keep working`() {
+    fun `a version 1 database opens, moves up to the current version and its sessions keep working`() {
         val first = runtime()
         var selfSession = ""
         var appSession = ""
@@ -222,9 +222,9 @@ class ToolScopeStoreTest {
             selfSession = first.engine.createSession(TestRuntime.SELF, null).id
             appSession = first.engine.createSession(TestRuntime.APP, null).id
         }
-        assertEquals(2L, userVersion(first.databaseFile), "a new database is created at version 2")
-        // take it back to what a version 1 phone has: no tool_scope column, user_version 1
-        rawSql(first.databaseFile, "ALTER TABLE sessions DROP COLUMN tool_scope", "PRAGMA user_version = 1")
+        assertEquals(3L, userVersion(first.databaseFile), "a new database is created at the current version")
+        // take it back to what a version 1 phone has: no tool_scope column, no caller_package column, user_version 1
+        rawSql(first.databaseFile, "ALTER TABLE sessions DROP COLUMN tool_scope", "ALTER TABLE tasks DROP COLUMN caller_package", "PRAGMA user_version = 1")
         assertEquals(1L, userVersion(first.databaseFile))
 
         val second = runtime(file = first.databaseFile)
@@ -240,17 +240,17 @@ class ToolScopeStoreTest {
             // and new sessions can carry a scope
             assertEquals(ToolScope.normalize(memoScope), second.engine.createSession(TestRuntime.APP, null, memoScope).toolScope)
         }
-        assertEquals(2L, userVersion(second.databaseFile))
+        assertEquals(3L, userVersion(second.databaseFile))
         second.host.deleteDatabase()
     }
 
     @Test
-    fun `migration runs once - opening a version 2 database again changes nothing`() {
+    fun `migration runs once - opening a current database again changes nothing`() {
         val first = runtime()
         run(first) { first.engine.createSession(TestRuntime.APP, null, memoScope) }
         val second = runtime(file = first.databaseFile)
         run(second) { assertEquals(1, second.engine.storeForTesting.read { it.sessions.listByOwner(TestRuntime.APP.ownerKey) }.size) }
-        assertEquals(2L, userVersion(second.databaseFile))
+        assertEquals(3L, userVersion(second.databaseFile))
         second.host.deleteDatabase()
     }
 

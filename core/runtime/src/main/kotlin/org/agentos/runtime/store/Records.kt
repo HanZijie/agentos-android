@@ -104,6 +104,8 @@ data class TaskRecord(
     val callerUid: Int,
     /** 调用方的显示名（宿主层按 UID 解析，不来自客户端），确认界面要写明发起请求的 App。 */
     val callerLabel: String?,
+    /** 第三方 App 的包名（宿主层按 UID 解析）；其他调用方、以及 schema v3 之前的任务为 null。重建调用方身份（确认框）时要用，所以随任务保存。 */
+    val callerPackage: String? = null,
     val attempt: Int,
     val createdAt: Long,
     val startedAt: Long?,

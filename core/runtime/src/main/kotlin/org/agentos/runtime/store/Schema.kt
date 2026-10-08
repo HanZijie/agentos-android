@@ -3,10 +3,10 @@ package org.agentos.runtime.store
 /**
  * Store 的 schema。Android（AndroidStore / SQLiteDriver）与电脑测试共用这一份；版本记在 `PRAGMA user_version`。
  *
- * 迁移只向前（W12 起加 Migrations.kt：迁移前备份，失败回滚并停在 safe mode）。v1 是第一版，v2 给会话加 toolScope 列。
+ * 迁移只向前（W12 起加 Migrations.kt：迁移前备份，失败回滚并停在 safe mode）。v1 是第一版，v2 给会话加 toolScope 列，v3 给任务加调用方包名列。
  */
 internal object Schema {
-    const val VERSION = 2
+    const val VERSION = 3
 
     /** v1：会话、事件、任务、工具调用、各会话的 Pi messages。 */
     val V1 = """
@@ -94,6 +94,13 @@ internal object Schema {
      */
     const val V2 = "ALTER TABLE sessions ADD COLUMN tool_scope TEXT"
 
+    /**
+     * v3: the package name of a third-party caller, next to `caller_label` (the display name). The confirmation dialog is rebuilt from the task
+     * record when the task starts (also after a restart), and it must name the real package, not only the name the app gave itself.
+     * NULL = not a third-party app, or the task was queued before v3.
+     */
+    const val V3 = "ALTER TABLE tasks ADD COLUMN caller_package TEXT"
+
     fun migrate(db: DbScope, now: Long) {
         val version = db.queryOne("PRAGMA user_version") { it.int(0) } ?: 0
         check(version <= VERSION) { "store schema $version is newer than this runtime ($VERSION)" }
@@ -108,6 +115,10 @@ internal object Schema {
         if (version < 2) {
             db.exec(V2)
             db.exec("PRAGMA user_version = 2")
+        }
+        if (version < 3) {
+            db.exec(V3)
+            db.exec("PRAGMA user_version = 3")
         }
     }
 }

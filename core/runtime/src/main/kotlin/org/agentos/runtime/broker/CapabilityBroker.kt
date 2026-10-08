@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.agentos.runtime.Ids
+import org.agentos.runtime.consent.ConsentText
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.errors.ErrorInfo
 import org.agentos.runtime.events.EventTypes
@@ -223,6 +224,8 @@ class DefaultCapabilityBroker(
                         put("toolName", call.name)
                         put("risk", tool.risk.name.lowercase())
                         put("callerUid", ctx.caller.uid)
+                        // audit (additive): the real package of a third-party app; the label it calls itself is not a safe way to tell apps apart
+                        ConsentText.packageOf(ctx.caller)?.let { put("callerPackage", it) }
                     },
                 ),
             )

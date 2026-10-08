@@ -32,7 +32,8 @@ enum class ConsentSeverity { NORMAL, ELEVATED, CRITICAL }
 
 /**
  * 发起者。[kind] 与 [uid] 来自 `CallerIdentity`（宿主层根据 UID 解析，不来自客户端）。
- * [packageName]：第三方 App（`CallerKind.APP`）发起时的包名，界面把它解析成 App 的名字和图标（解析不到就显示包名）；其他调用方为 null。
+ * [packageName]：第三方 App（`CallerKind.APP`）发起时的**包名**（宿主层按 UID 解析，已清理、单行、最多 128 字符），界面把它解析成 App 的名字和图标
+ * （解析不到就显示包名）；其他调用方、以及不知道包名时为 null。**不是 App 自己起的显示名**（那个只出现在 [ConsentView.initiatorLine] 里）：显示名谁都能随便写。
  */
 data class ConsentCaller(val kind: CallerKind, val uid: Int, val packageName: String?)
 
@@ -43,7 +44,8 @@ data class ConsentCaller(val kind: CallerKind, val uid: Int, val packageName: St
  * 它们被「」包起来、只占一行、有长度上限。
  *
  * @property title 标题：`要允许「<工具显示名>」吗？`
- * @property initiatorLine 发起者一行：`由 <调用方> 发起`（App：`由 com.example.app 发起`，界面可用 [caller] 换成 App 名；电脑端：`由电脑端发起`；AgentOS 自己：`由 AgentOS 自己发起`）
+ * @property initiatorLine 发起者一行：`由 <调用方> 发起`（第三方 App：知道包名时 `由 <名字> 发起（<包名>）`，包名一定在、名字先被截断；不知道包名时 `由 <名字> 发起`；
+ *   界面可用 [caller] 换成 App 名和图标；电脑端：`由电脑端发起`；AgentOS 自己：`由 AgentOS 自己发起`）
  * @property sourceLine 来源一行：`来自插件 X · 服务器 Y`；不属于任何插件的工具为 null
  * @property toolDisplayName 工具显示名（title 优先，否则原始名），已清理，单行
  * @property toolName 模型调用的工具名（已清理）
