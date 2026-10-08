@@ -5,6 +5,7 @@ import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -108,6 +109,11 @@ class AgentScheduleUseCase(
     private val _state = MutableStateFlow<ScheduleState>(ScheduleState.Idle)
     val state: StateFlow<ScheduleState> = _state.asStateFlow()
 
+    /** 最近一轮是不是因为 [runToEnd] 的硬超时被停止的。 */
+    @Volatile
+    var lastRunTimedOut: Boolean = false
+        private set
+
     private var generation = 0
     private var job: Job? = null
     private var gateway: AgentOsGateway? = null
@@ -140,6 +146,7 @@ class AgentScheduleUseCase(
                 else -> return false
             }
             run = ++generation
+            lastRunTimedOut = false
             gw = gatewayFactory()
             gateway = gw
             marker.set()
@@ -208,24 +215,31 @@ class AgentScheduleUseCase(
     }
 
     /**
-     * debug 用：和按钮同一条路径，等这一轮走到 Done / Error 再返回；[timeoutMs] 到了还没完就停止并返回当时的状态
-     * （timedOut = true）。
+     * debug 用：和按钮同一条路径（open → start），然后最多等 [waitMs] 毫秒看这一轮是否走到 Done / Error。
+     * 这一轮自己有 [timeoutMs] 的硬超时：到点还没完就停止（[lastRunTimedOut] 为 true），哪怕调用方早就不等了。
+     * 没等到结束返回 `pending = true`，调用方稍后读 [lastRun] / [state]。
+     * （广播接收器的后台广播超时是 60 秒，所以 debug 入口的 [waitMs] 取 45 秒，更长的轮次让调用方轮询。）
      */
-    suspend fun runToEnd(source: ScheduleSource, timeoutMs: Long): RunOutcome {
+    suspend fun runToEnd(source: ScheduleSource, timeoutMs: Long, waitMs: Long = timeoutMs + 2_000): RunOutcome {
         when (open(source)) {
             OpenResult.OPENED -> Unit
-            OpenResult.TOO_LONG -> return RunOutcome(ScheduleState.Error(source, AgentOsError.TOO_LARGE), timedOut = false)
-            OpenResult.EMPTY -> return RunOutcome(ScheduleState.Error(source, AgentOsError.FAILED, "nothing to send"), timedOut = false)
-            OpenResult.BUSY -> return RunOutcome(ScheduleState.Error(source, AgentOsError.BUSY, "another run is in progress"), timedOut = false)
+            OpenResult.TOO_LONG -> return RunOutcome(ScheduleState.Error(source, AgentOsError.TOO_LARGE), timedOut = false, pending = false)
+            OpenResult.EMPTY -> return RunOutcome(ScheduleState.Error(source, AgentOsError.FAILED, "nothing to send"), timedOut = false, pending = false)
+            OpenResult.BUSY -> return RunOutcome(ScheduleState.Error(source, AgentOsError.BUSY, "another run is in progress"), timedOut = false, pending = false)
         }
-        if (!start()) return RunOutcome(ScheduleState.Error(source, AgentOsError.BUSY, "another run is in progress"), timedOut = false)
-        val finished = withTimeoutOrNull(timeoutMs) { _state.first { it.isTerminal } }
-        if (finished != null) return RunOutcome(finished, timedOut = false)
-        stop()
-        return RunOutcome(lastRun ?: _state.value, timedOut = true)
+        if (!start()) return RunOutcome(ScheduleState.Error(source, AgentOsError.BUSY, "another run is in progress"), timedOut = false, pending = false)
+        val run = synchronized(lock) { generation }
+        scope.launch {
+            delay(timeoutMs)
+            val expired = synchronized(lock) { (generation == run && _state.value.inFlight).also { if (it) lastRunTimedOut = true } }
+            if (expired) stop()
+        }
+        val ended = withTimeoutOrNull(waitMs) { _state.first { !it.inFlight } }
+        if (ended == null) return RunOutcome(lastRun ?: _state.value, timedOut = false, pending = true)
+        return RunOutcome(lastRun ?: ended, timedOut = lastRunTimedOut, pending = false)
     }
 
-    data class RunOutcome(val state: ScheduleState, val timedOut: Boolean)
+    data class RunOutcome(val state: ScheduleState, val timedOut: Boolean, val pending: Boolean = false)
 
     // ---------------------------------------------------------------- 一轮的执行
 

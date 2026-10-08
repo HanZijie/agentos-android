@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Code
@@ -65,6 +66,11 @@ import androidx.compose.material.icons.rounded.Title
 import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -105,6 +111,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.launch
 import org.agentos.sample.notes.R
+import org.agentos.sample.notes.agentos.OpenResult
 import org.agentos.sample.notes.data.NoteException
 import org.agentos.sample.notes.data.NoteLimits
 import org.agentos.sample.notes.data.NoteStatus
@@ -166,6 +173,16 @@ fun EditorScreen(vm: NotesViewModel, session: EditorSession, allTags: List<TagCo
     }
     BackHandler(onBack = ::requestBack)
 
+    // 有选中文字用选中的（编辑页里正文或标题），没有（或在预览里）用标题 + 正文；太长 / 为空不发送
+    fun requestSchedule() {
+        val selected = if (editing) selectedText(body) ?: selectedText(title) else null
+        when (vm.askAgent(state.noteId, state.title, state.content, selected)) {
+            OpenResult.TOO_LONG -> scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(resources.getString(R.string.agent_too_long)) }
+            OpenResult.EMPTY -> scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(resources.getString(R.string.agent_empty)) }
+            OpenResult.OPENED, OpenResult.BUSY -> Unit
+        }
+    }
+
     fun applyEdit(result: EditResult) {
         body = TextFieldValue(result.text, TextRange(result.selStart, result.selEnd))
         session.setContent(result.text)
@@ -181,6 +198,7 @@ fun EditorScreen(vm: NotesViewModel, session: EditorSession, allTags: List<TagCo
                 canTogglePreview = !readOnly,
                 onBack = ::requestBack,
                 onTogglePreview = { preview = !preview },
+                onSchedule = ::requestSchedule,
                 onPin = { session.setPinned(!state.pinned) },
                 onColor = { showColors = true },
                 showMenu = showMenu,
@@ -405,6 +423,7 @@ fun EditorScreen(vm: NotesViewModel, session: EditorSession, allTags: List<TagCo
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditorTopBar(
     state: EditorSession.State,
@@ -412,6 +431,7 @@ private fun EditorTopBar(
     canTogglePreview: Boolean,
     onBack: () -> Unit,
     onTogglePreview: () -> Unit,
+    onSchedule: () -> Unit,
     onPin: () -> Unit,
     onColor: () -> Unit,
     showMenu: Boolean,
@@ -427,6 +447,15 @@ private fun EditorTopBar(
             Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.action_back), tint = scheme.onSurface)
         }
         Box(Modifier.weight(1f).padding(start = 4.dp)) { SaveIndicator(state) }
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text(stringResource(R.string.agent_button)) } },
+            state = rememberTooltipState(),
+        ) {
+            IconButton(onClick = onSchedule) {
+                Icon(Icons.Rounded.AutoAwesome, stringResource(R.string.agent_button), tint = scheme.primary)
+            }
+        }
         if (canTogglePreview) {
             IconButton(onClick = onTogglePreview) {
                 Icon(
@@ -678,4 +707,13 @@ private fun AddTagDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel), color = scheme.onSurfaceVariant) } },
     )
+}
+
+/** 输入框里选中的文字；没有选中返回 null。 */
+private fun selectedText(value: TextFieldValue): String? {
+    val sel = value.selection
+    if (sel.collapsed) return null
+    val start = minOf(sel.start, sel.end).coerceIn(0, value.text.length)
+    val end = maxOf(sel.start, sel.end).coerceIn(0, value.text.length)
+    return value.text.substring(start, end).takeIf { it.isNotBlank() }
 }

@@ -13,7 +13,7 @@ object FakeScripts {
     val names: List<String> = listOf(
         "success", "first_run", "reject", "no_time", "no_model", "auth_timeout", "denied", "disconnect",
         "busy", "rate_limited", "too_large", "failed", "not_installed",
-        "hold_auth", "hold_running", "hold_approval",
+        "hold_auth", "hold_running", "hold_approval", "slow", "hold_forever",
     )
 
     fun byName(name: String, now: ZonedDateTime = ZonedDateTime.now()): FakeScript? = when (name) {
@@ -62,6 +62,9 @@ object FakeScripts {
                 FakeStep.Hang,
             ),
         )
+        // 很慢的一轮（100 秒才结束）：验证 ask_agent 的 goAsync 撑得住 150 秒；hold_forever 永远不结束：验证 150 秒超时
+        "slow" -> script(prompt = listOf(FakeStep.Delay(100_000)) + work(now, Outcome.CREATED, Outcome.CREATED))
+        "hold_forever" -> script(prompt = listOf(FakeStep.Delay(300), text("还在想……"), FakeStep.Hang))
         else -> null
     }
 

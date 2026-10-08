@@ -379,6 +379,32 @@ class AgentScheduleUseCaseTest {
         assertTrue(e.gateways.single().closeCount >= 1)
     }
 
+    @Test fun `runToEnd with a short wait returns pending and the hard timeout still stops the round later`() = runTest {
+        val e = env("hold_approval")
+        var out: AgentScheduleUseCase.RunOutcome? = null
+        backgroundScope.launch { out = e.useCase.runToEnd(note, 20_000, 5_000) }
+        advanceTimeBy(6_000); runCurrent()
+        assertTrue("the caller stopped waiting", out!!.pending)
+        assertFalse(out!!.timedOut)
+        assertTrue("but the round goes on", e.useCase.state.value.inFlight)
+        assertFalse(e.useCase.lastRunTimedOut)
+        advanceTimeBy(20_000); runCurrent()
+        assertFalse(e.useCase.state.value.inFlight)
+        assertTrue(e.useCase.lastRunTimedOut)
+        assertTrue((e.useCase.lastRun as ScheduleState.Done).stopped)
+        assertTrue(e.gateways.single().closeCount >= 1)
+    }
+
+    @Test fun `a round that finished in time is never marked timed out by its leftover watchdog`() = runTest {
+        val e = env("success")
+        val out = e.useCase.runToEnd(note, 150_000)
+        assertFalse(out.pending)
+        settle(200_000)
+        assertFalse(e.useCase.lastRunTimedOut)
+        assertTrue(e.useCase.lastRun is ScheduleState.Done)
+        assertFalse((e.useCase.lastRun as ScheduleState.Done).stopped)
+    }
+
     @Test fun `runToEnd rejects too long, empty and busy without sending`() = runTest {
         val e = env("hold_running")
         assertEquals(AgentOsError.TOO_LARGE, (e.useCase.runToEnd(ScheduleSource.of(null, "", "a".repeat(20_000), null), 1_000).state as ScheduleState.Error).error)

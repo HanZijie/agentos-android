@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -24,8 +25,11 @@ enum class ItemStatus {
     val isFinal: Boolean get() = this == CREATED || this == DENIED || this == FAILED || this == CANCELLED
 }
 
-/** `event_create` 的结果里我们要的三个字段（title / start / end，start 与 end 是带时区偏移的 ISO-8601）。 */
-data class EventInfo(val title: String, val start: String?, val end: String?)
+/** `event_create` 的结果里我们要的字段（title / start / end，start 与 end 是带时区偏移的 ISO-8601；all_day 为 true 时只显示日期）。 */
+data class EventInfo(val title: String, val start: String?, val end: String?, val allDay: Boolean = false)
+
+/** 一个 ISO-8601 时间：[millis] 是时间点，[offset] 是它自带的偏移（如 "+08:00"，没有偏移时用设备时区），[dateOnly] 表示只有日期。 */
+data class IsoWhen(val millis: Long, val offset: String, val dateOnly: Boolean)
 
 /** `alarm_create` 的结果里我们要的三个字段（time 是 "HH:mm"，label，days 是 mon..sun；空表示只响一次）。 */
 data class AlarmInfo(val time: String, val label: String, val days: List<String>)
@@ -102,7 +106,32 @@ object ScheduleItems {
     fun parseEvent(resultJson: String?): EventInfo? {
         val obj = asObject(resultJson) ?: return null
         val title = obj.string("title") ?: return null
-        return EventInfo(title, obj.string("start"), obj.string("end"))
+        val allDay = (obj["all_day"] as? JsonPrimitive)?.booleanOrNull ?: false
+        return EventInfo(title, obj.string("start"), obj.string("end"), allDay)
+    }
+
+    /**
+     * 解析工具结果里的时间：带偏移的 ISO-8601（`2026-10-09T15:00:00+08:00`）、不带偏移的本地时间、只有日期三种都认；
+     * 认不出来返回 null（界面就不显示时间，不猜）。
+     */
+    fun parseWhen(iso: String?, deviceZone: java.time.ZoneId = java.time.ZoneId.systemDefault()): IsoWhen? {
+        val text = iso?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        try {
+            val odt = java.time.OffsetDateTime.parse(text)
+            return IsoWhen(odt.toInstant().toEpochMilli(), odt.offset.id.let { if (it == "Z") "+00:00" else it }, dateOnly = false)
+        } catch (_: java.time.format.DateTimeParseException) {
+        }
+        try {
+            val zoned = java.time.LocalDateTime.parse(text).atZone(deviceZone)
+            return IsoWhen(zoned.toInstant().toEpochMilli(), zoned.offset.id.let { if (it == "Z") "+00:00" else it }, dateOnly = false)
+        } catch (_: java.time.format.DateTimeParseException) {
+        }
+        try {
+            val zoned = java.time.LocalDate.parse(text).atStartOfDay(deviceZone)
+            return IsoWhen(zoned.toInstant().toEpochMilli(), zoned.offset.id.let { if (it == "Z") "+00:00" else it }, dateOnly = true)
+        } catch (_: java.time.format.DateTimeParseException) {
+        }
+        return null
     }
 
     fun parseAlarm(resultJson: String?): AlarmInfo? {

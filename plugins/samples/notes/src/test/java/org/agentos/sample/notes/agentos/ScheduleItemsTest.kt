@@ -41,6 +41,27 @@ class ScheduleItemsTest {
         assertEquals("2026-10-09T16:00:00+08:00", info.end)
     }
 
+    @Test fun `an all-day event is flagged`() {
+        val info = ScheduleItems.parseEvent("""{"title":"出差","start":"2026-10-12T00:00:00+08:00","end":"2026-10-14T23:59:59+08:00","all_day":true}""")!!
+        assertTrue(info.allDay)
+        assertFalse(ScheduleItems.parseEvent(eventJson)!!.allDay)
+    }
+
+    @Test fun `times are read with their own offset, local time or just a date`() {
+        val zone = java.time.ZoneId.of("Asia/Tokyo")
+        val a = ScheduleItems.parseWhen("2026-10-09T15:00:00+08:00", zone)!!
+        assertEquals("+08:00", a.offset)
+        assertEquals(java.time.OffsetDateTime.parse("2026-10-09T07:00:00Z").toInstant().toEpochMilli(), a.millis)
+        assertFalse(a.dateOnly)
+        assertEquals("+00:00", ScheduleItems.parseWhen("2026-10-09T07:00:00Z", zone)!!.offset)
+        val local = ScheduleItems.parseWhen("2026-10-09T15:00:00", zone)!!
+        assertEquals("+09:00", local.offset)
+        assertEquals(java.time.OffsetDateTime.parse("2026-10-09T06:00:00Z").toInstant().toEpochMilli(), local.millis)
+        val day = ScheduleItems.parseWhen("2026-10-09", zone)!!
+        assertTrue(day.dateOnly)
+        for (bad in listOf(null, "", "tomorrow", "2026-13-40", "15:00")) assertNull(bad, ScheduleItems.parseWhen(bad, zone))
+    }
+
     @Test fun `an alarm result gives time label and days`() {
         val info = ScheduleItems.parseAlarm(alarmJson)!!
         assertEquals("07:00", info.time)
