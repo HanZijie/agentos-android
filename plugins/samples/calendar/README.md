@@ -172,7 +172,7 @@ CalendarRepository ── 按 id 前缀路由 ──┬─ LocalBackend  ── 
 - **R4**：周范围改用 ICU `DateIntervalFormat`（`Fmt.weekRange`），不再按语言硬补“日”：中文 `10月5日至11日`，英文 `Oct 4 – 10`（周起始日也跟随系统区域）。
 - **R5**：`res/xml/locales_config.xml`（`zh`、`en`）+ manifest `android:localeConfig`；设置页有“语言”入口（`Settings.ACTION_APP_LOCALE_SETTINGS`，不引入 AppCompat）。
 - **R7**：英文下和 1.3 倍字体下各界面看过（见上面的截图），文字都有 `maxLines` / `overflow`；设置页的“当前值”改成标题下方一行，避免 1.3 倍字体下被截断。
-- **R8**：产生文案的数据层通过 `CalendarTexts` 提供默认日历名，JVM 测试中英各一个用例；工具 / 错误信息 / `SKILL.md` 保持英文（R2）。`src/main` 的 Kotlin 里没有中文字面量（旧默认名用 Unicode 转义，见 `LegacyDefaultNames`）。
+- **R8**：产生文案的数据层通过 `CalendarTexts` 提供默认日历名，JVM 测试中英各一个用例；工具 / 错误信息 / `SKILL.md` 保持英文（R2）。`src/main` 的 Kotlin 里唯一的中文字面量是 `LegacyDefaultNames` 里旧版写进库的默认名（迁移要匹配的历史数据值，不是界面文案，按 `tools/check-i18n.py` 的规则用 `i18n-ok` 注释豁免）；`python3 tools/check-i18n.py` 0 error，白名单里已没有日历的条目。
 
 ## MCP 工具
 

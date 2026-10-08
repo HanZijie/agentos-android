@@ -24,10 +24,11 @@ interface CalendarStore {
  */
 object LegacyDefaultNames {
     /**
-     * 中文默认名（`values/strings.xml` 的 `default_calendar_name`，“我的日历”）与英文默认名（`values-en`，“My Calendar”）。
-     * 中文用 Unicode 转义写：用户可见的中文只放资源文件，Kotlin 源码里不写中文字面量（R9 门禁）。
+     * 旧版本写进库里的默认名：中文（`values/strings.xml` 的 `default_calendar_name`，“我的日历”）和英文（`values-en`，“My Calendar”）。
+     * 这是迁移要匹配的**历史数据值**，不是界面文案（界面上显示的默认名走资源，见 `AndroidTexts`），所以按门禁规则豁免。
      */
-    val all: List<String> = listOf("\u6211\u7684\u65e5\u5386", "My Calendar")
+    // i18n-ok: 旧版写进数据库的默认日历名（历史数据值，迁移时按它识别“用户没改过”），不是界面文案
+    val all: List<String> = listOf("我的日历", "My Calendar")
 
     fun isSystemDefault(name: String, isDefault: Boolean): Boolean = isDefault && name in all
 
