@@ -14,6 +14,8 @@ import android.util.Log
 import android.widget.Toast
 import org.agentos.app.agent.consent.ConsentService
 import org.agentos.app.agent.consent.ConsentWire
+import org.agentos.app.agent.consent.ConsentWire.AuthRequest
+import org.agentos.app.agent.consent.ConsentWire.Card
 import org.agentos.internal.IConsentListener
 import org.agentos.internal.IConsentService
 import org.agentos.runtime.consent.ConsentChoice
@@ -37,20 +39,28 @@ object ConsentHost {
     private var service: IConsentService? = null
     private var bound = false
     private var dialog: ConsentDialog? = null
+    private var authDialog: AuthorizationDialog? = null
     private var shownFor: String? = null
+
+    /** 授权提示的回答出口（C 的 IAgentControl.answerAuthorization）；测试里可以换成假的。 */
+    @Volatile var authorizationAnswerer: AuthorizationAnswerer = AuthorizationAnswerer.Control
+
+    /** 登记监听者后收到过 `:agent` 的快照：之前队列是空的不代表没有待决，之后才是。 */
+    var snapshotReady = false
+        private set
 
     /** 每条请求最近一次的 App 标签缓存（PackageManager 解析，不可信文字：清理后再显示）。 */
     private val labels = HashMap<String, String?>()
 
     private val listener = object : IConsentListener.Stub() {
         override fun onSnapshot(pendingJson: String?) {
-            val cards = ConsentWire.parseCards(pendingJson)
-            main.post { queue.replaceAll(cards); render() }
+            val items = ConsentWire.parsePendings(pendingJson)
+            main.post { snapshotReady = true; queue.replaceAll(items); render() }
         }
 
         override fun onRequested(viewJson: String?) {
-            val card = ConsentWire.parseCard(viewJson) ?: return
-            main.post { queue.add(card); render() }
+            val item = ConsentWire.parsePending(viewJson) ?: return
+            main.post { queue.add(item); render() }
         }
 
         override fun onResolved(requestId: String?, resolutionJson: String?) {
@@ -77,7 +87,7 @@ object ConsentHost {
         override fun onServiceDisconnected(name: ComponentName?) {
             // :agent 重启：之前的请求已按拒绝结案；清空，等它回来（BIND_AUTO_CREATE 会重连并重新登记）
             service = null
-            main.post { queue.clear(); closeDialog() }
+            main.post { snapshotReady = false; queue.clear(); closeDialog() }
         }
     }
 
@@ -127,6 +137,7 @@ object ConsentHost {
         runCatching { app.unbindService(connection) }
         bound = false
         service = null
+        snapshotReady = false
         queue.clear()
         closeDialog()
     }
@@ -136,6 +147,8 @@ object ConsentHost {
     private fun closeDialog() {
         dialog?.dismiss()
         dialog = null
+        authDialog?.dismiss()
+        authDialog = null
         shownFor = null
     }
 
@@ -146,15 +159,26 @@ object ConsentHost {
         if (activity == null || activity.isFinishing || head == null) {
             if (head == null) {
                 closeDialog()
-                (activity as? ConsentActivity)?.onQueueEmpty()
+                // 快照到达之前队列是空的，不能当“没有待决”
+                if (snapshotReady) (activity as? QueueEmptyAware)?.onQueueEmpty()
             }
             return
         }
-        if (shownFor == head.requestId && dialog != null) return
+        (activity as? QueueEmptyAware)?.onQueueChanged()
+        if (shownFor == head.requestId && (dialog != null || authDialog != null)) return
         closeDialog()
         shownFor = head.requestId
-        val label = appLabel(head)
-        dialog = ConsentDialog.show(activity, head, label, queue.size) { choice -> answer(head.requestId, choice) }
+        when (head) {
+            is Card -> dialog = ConsentDialog.show(activity, head, appLabel(head.callerPackage), queue.size) { choice -> answer(head.requestId, choice) }
+            is AuthRequest -> authDialog = AuthorizationDialog.show(activity, head, appLabel(head.packageName), queue.size) { allow -> answerAuthorization(head.requestId, allow) }
+        }
+    }
+
+    private fun answerAuthorization(requestId: String, allow: Boolean) {
+        val answerer = authorizationAnswerer
+        Thread {
+            runCatching { answerer.answer(app, requestId, allow) }.onFailure { Log.w(TAG, "answerAuthorization failed: ${it.javaClass.simpleName}") }
+        }.start()
     }
 
     private fun answer(requestId: String, choice: ConsentChoice) {
@@ -164,8 +188,8 @@ object ConsentHost {
         }.start()
     }
 
-    private fun appLabel(card: ConsentWire.Card): String? {
-        val pkg = card.callerPackage ?: return null
+    private fun appLabel(pkg: String?): String? {
+        if (pkg == null) return null
         return labels.getOrPut(pkg) {
             runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrNull()
         }

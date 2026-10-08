@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  随 sdk:acp-android 合并进依赖它的 App。Android 11+ 的包可见性：不声明就看不见 AgentOS，isInstalled / bind 都会失败。
+  包名和 ACP 服务的 intent action 都声明（后者让 AgentOS 换包名、或有多个渠道包时仍然能找到）。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="org.agentos.app" />
+        <intent>
+            <action android:name="org.agentos.intent.action.ACP" />
+        </intent>
+    </queries>
+</manifest>

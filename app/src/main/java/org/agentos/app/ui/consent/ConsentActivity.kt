@@ -13,7 +13,7 @@ import org.agentos.app.ui.Ui
  * 点确认通知进来的页面（D5.2）：本身只是一块底，对话框由 [ConsentHost] 画在它上面（它是前台 Activity）。
  * 没有待确认了（已超时、已答复）就说一句并关闭；队列里有的话对话框答复完、队列空了自动关闭。
  */
-class ConsentActivity : Activity() {
+class ConsentActivity : Activity(), QueueEmptyAware {
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,7 +39,7 @@ class ConsentActivity : Activity() {
     }
 
     /** 对话框答复完、队列空了就回到原来的地方。 */
-    fun onQueueEmpty() {
+    override fun onQueueEmpty() {
         if (!isFinishing) finish()
     }
 
