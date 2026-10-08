@@ -222,7 +222,8 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 - 首次调用时，AgentOS 弹窗询问“是否允许 X 使用 AgentOS”，结果可以在设置页撤销；
 - 同一个 App 被拒绝后，短时间内不再弹窗，防止骚扰；
 - 每个 App 有并发、频率和用量上限（`CallerQuota`：同时一个 prompt、单次 16,000 字符、每小时 30 次的滑动窗口，数值可配，计数在内存里），用量在设置页可见。第三方 App 消耗的是用户自己的模型额度；
-- 授权记在（包名，签名摘要）上，存 `files/acp/callers.json`；签名变了视为新 App；共享 UID 一律拒绝；撤销立即关闭它的通道并取消进行中的任务。
+- 授权记在（包名，签名摘要）上，存 `files/acp/callers.json`；签名变了视为新 App；共享 UID 一律拒绝；撤销立即关闭它的通道并取消进行中的任务（`RuntimeEngine.cancelOwner`）。
+- `CallerIdentity` 带第三方的包名（`packageName`，由宿主层按 UID 解析，不来自客户端），和显示名 `label` 分开：确认卡写“名字（包名）”，名字只用来显示，不能当身份用；任务记下包名（存储 schema v3）。
 
 ### 5.4 App 内部接口
 

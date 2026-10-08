@@ -34,7 +34,7 @@
 | 反复弹窗骚扰 | 用户拒绝后 10 分钟内同一个 App 的 `open` 直接返回 `denied`，不再弹窗；设置里可以改成允许 |
 | 资源滥用 | 每个 App 同时只能有一个进行中的 prompt；单次文字上限 16,000 字符；每小时最多 30 次 prompt；用量（次数、最近使用）在设置里可见。数值放在配置里 |
 | 会话互相窥探 | 已有：会话按调用方 UID 隔离（`CallerIdentity.ownerKey`），`APP` 只能看自己的 |
-| 撤销 | 撤销授权后，这个 App 现有的通道立即关闭、进行中的任务取消 |
+| 撤销 | 撤销授权后，这个 App 现有的通道立即关闭，进行中和排队中的任务取消（`RuntimeEngine.cancelOwner(by="revoked")`，按会话归属键，只动这个 App 的；这个 App 的 prompt 名额随任务结束释放；通道已先关掉、任务还在跑的情况（F7）靠“准入时见过的 UID”找到）。真机实测通道立即为 0，任务在 15 秒内取消 |
 
 ## 4. 契约
 
@@ -44,7 +44,7 @@
 
 1. 取 `Binder.getCallingUid()` → 包名（必须恰好一个）→ 签名摘要 → App 名。
 2. `CallerRegistry`（持久化：`files/acp/callers.json`，原子写，损坏时 fail closed，像 `ApprovalStore`）里查（包名，签名摘要）：
-   - 已允许 → 打开通道，调用方身份 `CallerIdentity(uid, CallerKind.APP, label = App 名)`；
+   - 已允许 → 打开通道，调用方身份 `CallerIdentity(uid, CallerKind.APP, label = App 显示名, packageName = 准入时解析出、和签名摘要一起检查的包名)`。**label 是 App 自己起的名字，可以重名、可以冒充系统 App，只用来显示；身份是 `packageName`**（`ConsentCaller.packageName` 是这个包名，确认卡写“由 Notes 发起（org.agentos.sample.notes）”，包名不会被截掉；会话归属仍按 UID）；
    - 没记录或签名变了 → 记为“待用户决定”，让界面弹授权提示，**立刻**抛 `agentos.acp.authorization_pending`；
    - 已拒绝且在 10 分钟内 → 抛 `agentos.acp.denied`；
    - 其他 UID 规则（共享 UID、查不到包）→ `agentos.acp.not_open`。
@@ -89,7 +89,7 @@
 - `toolScope` 只在 `initialize` 里**声明**，不需要协商：它只会让会话的工具更少，不改变标准方法的含义。
 - 受限范围的会话里**没有 `read_skill`，系统提示里也不写 Skill 目录**（`read_skill` 没有来源插件，按（插件，工具）匹配点不到它；也避免第三方 Skill 的文字进到被收窄的会话）。不带范围时照旧有。
 - 自动选会话（`autoSelect`）只会选到范围与这次请求**相同**的会话（顺序、重复不算），否则新建；不然调用方能借“选已有会话”拿到不同的工具范围。
-- 存储里的范围值损坏时读成“没有工具”，不是“不限”（fail closed）。会话存储的 schema 升到 v2（`sessions.tool_scope`），v1 自动迁移，旧会话照常用。
+- 存储里的范围值损坏时读成“没有工具”，不是“不限”（fail closed）。会话存储的 schema 升到 v2（`sessions.tool_scope`），再升到 v3（`tasks.caller_package`：任务记下发起它的第三方包名，重启后重建的确认卡仍写包名），v1 / v2 自动迁移，旧会话照常用。
 - **对确认规则的影响**：默认的 `OpenCallerPolicy` 下，第三方会话和 AgentOS 自己的会话用同一套确认；`StrictCallerPolicy`（`RuntimeConfig.callerPolicy`）打开时，第三方没有范围就没有工具，且每次都确认（读也确认）、不提供“本次对话内不再询问”和“始终允许”。严格版本写好、测过、默认关。
 
 ### 4.6 配额（A，`core/runtime` 里一个纯类 `CallerQuota`，带时钟，可测）
