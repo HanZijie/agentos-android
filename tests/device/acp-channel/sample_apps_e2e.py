@@ -93,6 +93,8 @@ def run_acceptance(env, opts, log=log_line):
         ctx.skipped = skipped
         for item in skipped:
             log("  skip %s: %s" % (item["what"], item["reason"]))
+        if peer:
+            log("  sms steps send one message to emulator %s (the first other emulator in `adb devices`, or --sms-peer; --sms-peer none to send nothing)" % peer)
         n = len(apps)
         record(S.run_check_step("setup.model", "the phone's model source is the intended one", S.setup_model(opts.live, opts.tunnel), ctx))
         if opts.reset:
