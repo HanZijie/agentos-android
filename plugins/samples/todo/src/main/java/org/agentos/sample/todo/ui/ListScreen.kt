@@ -74,6 +74,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -98,6 +99,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.input.ImeAction
 import java.time.ZoneId
+import kotlinx.coroutines.launch
 import java.time.temporal.WeekFields
 import org.agentos.sample.todo.R
 import org.agentos.sample.todo.data.Priority
@@ -131,8 +133,9 @@ fun ListScreen(
     val openSections = sections.filter { it.kind != SectionKind.SHELVED && it.kind != SectionKind.DONE }
     val allClear = loaded && todos.isNotEmpty() && openSections.isEmpty() && !filter.isActive
 
+    Box(modifier.fillMaxSize()) {
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             top = WindowInsets.systemBars.asPaddingValues().calculateTopPadding() + 12.dp,
             bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 104.dp,
@@ -207,6 +210,15 @@ fun ListScreen(
             }
         }
     }
+    // 状态栏下面的渐隐：列表滚上去时，状态栏图标不压在卡片文字上
+    val barHeight = WindowInsets.systemBars.asPaddingValues().calculateTopPadding()
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(barHeight + 10.dp)
+            .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background.copy(alpha = 0f)))),
+    )
+    }
 }
 
 // ---------------------------------------------------------------- 概览卡
@@ -215,7 +227,8 @@ fun ListScreen(
 private fun Hero(todos: List<Todo>, now: Long, zone: ZoneId, onLanguage: () -> Unit, modifier: Modifier = Modifier) {
     val palette = MaterialTheme.todo
     val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
-    val summary = remember(todos, now, zone, locale) { TodoQueries.summary(todos, now, zone, WeekFields.of(locale)) }
+    // 概览只数顶层待办，和下面分组里看到的行数一致（MCP 的 todo_summary 连子任务一起数）
+    val summary = remember(todos, now, zone, locale) { TodoQueries.summary(todos.filter { it.parentId == null }, now, zone, WeekFields.of(locale)) }
     val open = summary.counts.getValue(TodoStatus.TODO) + summary.counts.getValue(TodoStatus.DOING)
     val topLevel = todos.filter { it.parentId == null && it.status != TodoStatus.SHELVED }
     val doneTop = topLevel.count { it.status == TodoStatus.DONE }
@@ -513,21 +526,26 @@ private fun SwipeRow(
 ) {
     val complete by rememberUpdatedState(onComplete)
     val delete by rememberUpdatedState(onDelete)
-    // 动作触发后让行弹回原位（完成会换分组，删除会从数据里消失）
-    val state = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
+    val scope = rememberCoroutineScope()
+    val state = rememberSwipeToDismissBoxState()
+    // onDismiss 只在滑到头（settled）时调一次；做完动作就让行弹回原位（完成会换分组，删除会从数据里消失）。
+    // lambda 要稳定：它的身份一变，库里的 LaunchedEffect 会重启并再调一次。
+    val onDismiss = remember(state) {
+        { value: SwipeToDismissBoxValue ->
             when (value) {
                 SwipeToDismissBoxValue.EndToStart -> complete()
                 SwipeToDismissBoxValue.StartToEnd -> delete()
                 SwipeToDismissBoxValue.Settled -> Unit
             }
-            false
-        },
-    )
+            scope.launch { state.reset() }
+            Unit
+        }
+    }
     val reopen = todo.status == TodoStatus.DONE
     SwipeToDismissBox(
         state = state,
         modifier = modifier,
+        onDismiss = onDismiss,
         backgroundContent = {
             val palette = MaterialTheme.todo
             val direction = state.dismissDirection
