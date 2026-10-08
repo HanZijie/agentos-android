@@ -423,11 +423,15 @@ private fun DoneBody(state: ScheduleState.Done, actions: Actions) {
             Surface(shape = RoundedCornerShape(18.dp), color = scheme.surfaceContainer) {
                 Row(Modifier.height(IntrinsicSize.Min)) {
                     Box(Modifier.width(4.dp).fillMaxHeight().background(scheme.secondary))
+                    // Agent 的解释可能很长：卡片有高度上限，里面自己滚动，不把整个面板撑满
                     Text(
                         state.text.ifBlank { stringResource(R.string.agent_done_nothing_fallback) },
                         style = MaterialTheme.typography.bodyMedium,
                         color = scheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        modifier = Modifier
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                     )
                 }
             }

@@ -104,6 +104,8 @@ class AgentScheduleUseCase(
     private val clock: () -> ZonedDateTime = { ZonedDateTime.now() },
     private val locale: () -> Locale = { Locale.getDefault() },
     private val marker: RunMarker = RunMarker.None,
+    /** 把备忘文字变成发给 AgentOS 的提示词。默认是 [NoteSchedulePrompt.build]；只有 debug 包能换成别的（见 GatewayProvider）。 */
+    private val promptFor: (String, ZonedDateTime, Locale) -> String = { text, now, locale -> NoteSchedulePrompt.build(text, now, locale) },
 ) {
     private val lock = Any()
     private val _state = MutableStateFlow<ScheduleState>(ScheduleState.Idle)
@@ -167,7 +169,7 @@ class AgentScheduleUseCase(
             generation++ // 让这一轮之后的事件作废
             running = job
             val stopped = stoppedDone(current)
-            lastRun = stopped
+            lastRun = stopped // 先记下 lastRun 再发布状态：别的线程一看到状态变了，读到的 lastRun 就是新的
             _state.value = if (stopped.summary.isEmpty) ScheduleState.Idle else stopped
             marker.clear()
         }
@@ -209,8 +211,8 @@ class AgentScheduleUseCase(
             marker.clear()
             if (_state.value != ScheduleState.Idle) return
             val lost = ScheduleState.Error(ScheduleSource.NONE, AgentOsError.DISCONNECTED, interrupted = true)
-            _state.value = lost
             lastRun = lost
+            _state.value = lost
         }
     }
 
@@ -254,7 +256,7 @@ class AgentScheduleUseCase(
             }
             gw.newSession(NotesToolScope)
             transition(run) { if (it.inFlight) ScheduleState.Running(source, emptyList(), "") else it }
-            gw.prompt(NoteSchedulePrompt.build(source.text, clock(), locale())).collect { event ->
+            gw.prompt(promptFor(source.text, clock(), locale())).collect { event ->
                 when (event) {
                     is GatewayEvent.Text -> {
                         text.append(event.chunk)
@@ -302,16 +304,17 @@ class AgentScheduleUseCase(
     private fun transition(run: Int, change: (ScheduleState) -> ScheduleState) {
         synchronized(lock) {
             if (run != generation) return
-            _state.value = change(_state.value)
-            lastRun = _state.value
+            val next = change(_state.value)
+            lastRun = next
+            _state.value = next
         }
     }
 
     private fun finish(run: Int, terminal: ScheduleState) {
         synchronized(lock) {
             if (run != generation) return
-            _state.value = terminal
             lastRun = terminal
+            _state.value = terminal
         }
     }
 
