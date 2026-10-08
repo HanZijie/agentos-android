@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
+import org.agentos.runtime.ports.SessionMcpResult
 import org.agentos.runtime.ports.ToolRef
 import org.agentos.runtime.ports.ToolScope
 import org.agentos.runtime.router.SessionRouter
@@ -36,7 +37,15 @@ object ProfileExtensions {
     const val SESSION_TOOL_SCOPE = "toolScope"
 
     /** 本版本支持的扩展及其版本。持久化提交、增量恢复在 W10 加入。 */
-    val SUPPORTED: Map<String, Int> = mapOf(SESSION_AUTO_SELECT to 1, SESSION_TOOL_SCOPE to 1)
+    val SUPPORTED: Map<String, Int> = mapOf(SESSION_AUTO_SELECT to 1, SESSION_TOOL_SCOPE to 1, SESSION_SETUP to 1)
+
+    /**
+     * 会话建立收尾标记（`session/new | load | resume | fork`）：**要协商**。协商了的客户端，每次会话建立的最后（响应之前）都会收到一条
+     * `session_info_update`，`_meta."org.agentos".setup = { "replayed": N }`——前面一共重放了 N 条 `session/update`（不含这条和其他 `session_info_update`）。
+     * 客户端等到收尾标记和 N 条都到齐，就知道历史、服务器状态收全了：通知和响应在客户端那边是并发处理的，光靠“响应回来了”不能保证通知都到了。
+     * 没协商的客户端不会收到这条（行为和以前一样）。
+     */
+    const val SESSION_SETUP = "sessionSetup"
 
     /** `initialize` 响应的 `_meta`。 */
     fun initializeMeta(runtimeVersion: String): JsonObject = buildJsonObject {
@@ -122,6 +131,59 @@ object ProfileExtensions {
                 )
             },
         )
+    }
+
+    /**
+     * 会话建立（`session/new | load | resume | fork`）之后，经 `session_info_update` 的 `_meta."org.agentos"` 告诉客户端的几件事，都是可选的：
+     * - `selection`：自动选会话的结果（只有 `session/new` 带 `autoSelect` 时）；
+     * - `mcpServers`：这次挂的会话级 MCP 服务器各自的结局 `[{name, connected, toolCount, reason?}]`。`reason` 是短代码，不含 URL 和头；
+     *   连不上的服务器不会让会话建立失败，客户端据此提示用户；
+     * - `activeTask`：`session/load | resume` 时这个会话里还有一轮没结束 `{taskId, state}`；客户端等它结束再发新的，或者先取消。
+     * 三样都没有时返回 null（不发这条通知）。
+     */
+    fun sessionMeta(
+        selection: SessionRouter.Result?,
+        mcp: List<SessionMcpResult>?,
+        activeTask: Pair<String, String>?,
+        /** 协商了 [SESSION_SETUP] 时：前面重放了多少条 `session/update`；没协商为 null。 */
+        replayed: Int? = null,
+    ): JsonObject? {
+        if (selection == null && mcp.isNullOrEmpty() && activeTask == null && replayed == null) return null
+        return buildJsonObject {
+            put(
+                META_KEY,
+                buildJsonObject {
+                    replayed?.let { put("setup", buildJsonObject { put("replayed", it) }) }
+                    selection?.let { r ->
+                        put(
+                            "selection",
+                            buildJsonObject {
+                                put("sessionId", r.session.id)
+                                put("created", r.created)
+                                put("method", r.method)
+                                r.fallbackReason?.let { put("fallbackReason", it) }
+                            },
+                        )
+                    }
+                    if (!mcp.isNullOrEmpty()) {
+                        put(
+                            "mcpServers",
+                            JsonArray(
+                                mcp.map { m ->
+                                    buildJsonObject {
+                                        put("name", m.server)
+                                        put("connected", m.connected)
+                                        put("toolCount", m.toolCount)
+                                        m.reason?.let { put("reason", it) }
+                                    }
+                                },
+                            ),
+                        )
+                    }
+                    activeTask?.let { (id, state) -> put("activeTask", buildJsonObject { put("taskId", id); put("state", state) }) }
+                },
+            )
+        }
     }
 
     /** `session/prompt` 响应的 `_meta`：本轮对应的任务 ID（诊断与 W10 的恢复扩展用）。 */

@@ -8,4 +8,13 @@
     <issue id="AndroidGradlePluginVersion" severity="ignore" />
     <issue id="GradleDependency" severity="ignore" />
     <issue id="NewerVersionAvailable" severity="ignore" />
+
+    <!--
+      中英文资源（docs/next-apps-plan.md 7.2 R9）：缺翻译、多余翻译、格式化占位符对不上都是错误。
+      tools/check-i18n.py 在不需要 Android SDK 的 CI 里做同样的对齐检查（还管英文资源里不能有中文、字面量里不能有中文）。
+    -->
+    <issue id="MissingTranslation" severity="error" />
+    <issue id="ExtraTranslation" severity="error" />
+    <issue id="StringFormatMatches" severity="error" />
+    <issue id="StringFormatInvalid" severity="error" />
 </lint>

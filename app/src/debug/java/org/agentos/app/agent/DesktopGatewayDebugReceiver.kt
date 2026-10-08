@@ -42,6 +42,9 @@ class DesktopGatewayDebugReceiver : BroadcastReceiver() {
                             .put("modelUsable", (src["usable"] as? JsonPrimitive)?.booleanOrNull == true)
                             .put("modelBaseUrl", str("baseUrl") ?: JSONObject.NULL)
                             .put("modelId", str("model") ?: JSONObject.NULL)
+                            // 会话可选的模型（ModelConfigPort.choices）：运行时看到的同一个实例
+                            .put("modelChoices", org.json.JSONArray(process.models.choices.value.map { it.id }))
+                            .put("hostChoices", org.json.JSONArray(process.hostPort.models.choices.value.map { it.id }))
                     }
                     "revoke_all" -> JSONObject().put("ok", true).put("revoked", gw.revokeAll())
                     "pair" -> gw.newPairingCodeJson(intent.getLongExtra("ttlMs", 0L)).put("ok", true)

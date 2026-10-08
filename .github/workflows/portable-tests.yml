@@ -4,10 +4,13 @@
 # - tests/acp-conformance：官方 TypeScript ACP 客户端的一致性测试：经 stdio（W4 起），经电脑上的网关 + tools/acp-bridge，
 #   以及网关的配对与安全用例（W9 起）。手机上的用例（AGENTOS_ACP_DEVICE）需要设备，CI 里自动跳过
 # 后两项在对应工程出现之前自动跳过。
+# - tools/check-i18n.py：中英文资源对齐与字面量门禁（docs/next-apps-plan.md 7.2 R9），秒级
 name: portable-tests
 
 on:
   push:
+    # 只在 main 上跑 push；功能分支靠 pull_request，避免同一个提交跑两遍
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -24,6 +27,23 @@ env:
   NODE_VERSION: "22"
 
 jobs:
+  i18n:
+    name: 中英文资源与字面量门禁（tools/check-i18n.py，不需要 Android SDK）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 脚本自己的单元测试
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
+
+      - name: check-i18n
+        run: python3 tools/check-i18n.py
+
   gradle:
     name: Gradle 单元测试与 Lint
     runs-on: ubuntu-latest
@@ -37,6 +57,9 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
 
       - uses: android-actions/setup-android@v3
+        with:
+          # action 默认是 "tools platform-tools"；旧的 tools 包已从 SDK 仓库下线，sdkmanager 会以 exit 1 失败
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -99,6 +122,8 @@ jobs:
       # Gradle 配置全部项目时 AGP 需要 Android SDK
       - uses: android-actions/setup-android@v3
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''
+        with:
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
         if: hashFiles('tests/acp-conformance/package-lock.json') != ''

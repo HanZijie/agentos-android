@@ -118,26 +118,57 @@ object AgentOs {
 }
 class AgentOsConnection : AutoCloseable {
     val isConnected: Boolean
-    suspend fun newSession(toolScope: List<ToolRef>? = null): AgentOsSession   // null = 不发范围（整个目录）；emptyList() = 零个工具
+    val capabilities: AgentOsCapabilities     // 旧版本的 AgentOS 只有 newSession：先看这里，别的调用会得到 UNSUPPORTED
+
+    suspend fun newSession(toolScope: List<ToolRef>? = null, mcpServers: List<McpHttpServer> = emptyList()): AgentOsSession
+    suspend fun loadSession(sessionId: String, mcpServers: List<McpHttpServer> = emptyList()): AgentOsSession   // 带 history
+    suspend fun resumeSession(sessionId: String, mcpServers: List<McpHttpServer> = emptyList()): AgentOsSession // 不重放
+    suspend fun forkSession(sessionId: String, toolScope: List<ToolRef>? = null, mcpServers: List<McpHttpServer> = emptyList()): AgentOsSession
+    suspend fun listSessions(): List<SessionSummary>
+    suspend fun deleteSession(sessionId: String)
 }
-class AgentOsSession { fun prompt(text: String): Flow<AgentOsEvent>; suspend fun cancel() }   // flow 是冷的，取消收集等于 cancel
+class AgentOsSession {
+    val sessionId: String                      // 存下来，以后 loadSession 用
+    val history: List<AgentOsEvent>            // loadSession 重放回来的；其余为空
+    val mcpServers: List<McpServerStatus>      // 自带的 MCP 服务器各自连上没有
+    val activeTaskId: String?                  // load / resume 时会话里还有一轮没结束
+    val mode: SessionMode;  suspend fun setMode(mode: SessionMode)
+    val availableModels: List<ModelOption>; val model: String?;  suspend fun setModel(id: String)
+    fun prompt(text: String, includeThoughts: Boolean = false): Flow<AgentOsEvent>   // flow 是冷的，取消收集等于 cancel
+    suspend fun cancel()
+    suspend fun close()                        // 释放内存，保留会话和历史
+}
 data class ToolRef(val plugin: String, val tool: String)
+class McpHttpServer(val name: String, val url: String, val headers: List<Pair<String, String>> = emptyList())   // toString 只写名字
+data class McpServerStatus(val name: String, val connected: Boolean, val toolCount: Int, val reason: String?)
+enum class SessionMode { DEFAULT, READ_ONLY, CHAT }
+data class ModelOption(val id: String, val name: String)
+data class SessionSummary(val sessionId: String, val title: String?, val updatedAt: String?)
 data class Waiting(val elapsedMillis: Long, val timeoutMillis: Long)
 sealed interface AgentOsEvent {
     data class Text(val chunk: String) : AgentOsEvent
+    data class Thought(val chunk: String) : AgentOsEvent       // prompt(includeThoughts = true)；loadSession 的历史里总是带
+    data class UserMessage(val text: String) : AgentOsEvent    // 只在 loadSession 的历史里
     data class ToolCall(val id: String, val tool: String, val status: ToolStatus, val resultJson: String?,
                         val argumentsJson: String? = null, val ref: ToolRef? = null) : AgentOsEvent
     data class Done(val stopReason: String) : AgentOsEvent
 }
 enum class ToolStatus { PENDING_APPROVAL, RUNNING, COMPLETED, DENIED, FAILED }
-enum class AgentOsError { NOT_INSTALLED, AUTHORIZATION_PENDING_TIMEOUT, DENIED, NO_MODEL, BUSY, RATE_LIMITED, TOO_LARGE, DISCONNECTED, FAILED }
+enum class AgentOsError { NOT_INSTALLED, AUTHORIZATION_PENDING_TIMEOUT, DENIED, NO_MODEL, BUSY, RATE_LIMITED, TOO_LARGE, DISCONNECTED,
+                          SESSION_NOT_FOUND, INVALID_REQUEST, UNSUPPORTED, FAILED }
 ```
 
 - 底层是 `acp:0.30.1` 的客户端 + `BinderAcpTransport.connect`，对上层屏蔽 ACP 类型；不引入新依赖版本。库清单带 `<queries>`（AgentOS 包名和 ACP action），合并进依赖它的 App。
-- `connect` 在收到 `authorization_pending` 时每秒重试 `open`，最多 90 秒，期间回调 `onWaiting`；没人决定按拒绝记（进入 10 分钟冷却）。
+- `connect` 在收到 `authorization_pending` 时每秒重试 `open`，最多 90 秒，期间回调 `onWaiting`；没人决定按拒绝记（进入 10 分钟冷却）。`initialize` 里协商 `sessionSetup`（见下）。
+- **会话 ID** 是 `ses_` 加 26 位 ULID，只有创建它的 App 能再用；知道别人的 ID 拿不到别人的会话（权限按 Binder 调用方 UID 判断，ID 不是密钥）。别人的、已删除的、从没有过的，`loadSession`、`deleteSession` 等一律 `SESSION_NOT_FOUND`，看不出是哪一种。
+- **`loadSession`**：AgentOS 在响应之前把历史重放过来（用户消息、Agent 的文字和思考、工具调用，与实时一轮同一个映射），SDK 等到 AgentOS 的收尾标记和它说的那么多条都到齐才返回（最多 5 秒，等不到用手上有的），所以 `history` 是完整的。会话很长时只有最近 200 轮。会话的 `toolScope` 创建时定下，**load 改不了**；`mcpServers` 是这次连接要用的那批，替换原来的。
+- **同一条连接上同一个会话 ID** 只保留一份会话对象：官方 Kotlin 客户端（0.30.1）对同 ID 的第二次 load 把通知和流式输出继续发给第一次的对象，新对象 prompt 收不到文字（acp-mapping.md 4a）。SDK 复用第一份，再次 `loadSession` 只是重新要一遍历史和状态，返回的 `AgentOsSession` 的 `mode`、`model`、`history` 是这次响应的。
+- **自带 MCP 服务器（`McpHttpServer`，Streamable HTTP）**：只对挂上去的那个会话可见；URL 和头只在 AgentOS 的内存里，不写盘、不进日志和事件，AgentOS 重启后要在 `loadSession` 里重新带上来。它们的工具对用户来说是“这个 App 带来的”：**每次调用都要用户确认，没有“始终允许”，永远不当只读工具**，`READ_ONLY` 和 `CHAT` 模式下看不到。工具名是 `ses__<服务器>__<工具>`，事件里就是这个名字（`ref` 为 null）。地址不合规（不是 https、指向本机或内网、带 userinfo…）整批 `INVALID_REQUEST`、不创建会话；地址合规但连不上不让会话失败，看 `AgentOsSession.mcpServers`。校验细则见 acp-mapping.md 4c。
+- **模式**只能在会话创建时的工具范围之上再收一层；**模型**只能选 `availableModels` 里的（用户配置的那把 key 下的模型），用户用自定义端点时为空，`setModel` 是 `UNSUPPORTED`。
 - `ToolStatus`：`PENDING_APPROVAL` = ACP `tool_call` 的 pending（还没派发，AgentOS 在等用户确认；**默认策略下用户设了“始终允许”的工具不会经过这个状态**，直接 `RUNNING`），`RUNNING` = in_progress，`COMPLETED` / `FAILED` 按结果，`DENIED` = failed 且结果文字以 `[agentos:tool_denied]` 开头。
-- `ToolCall.ref` 能对应上本次 toolScope 的某一项时不为 null，这时 `tool` 就是原始工具名；否则 `tool` 是 AgentOS 给模型的最终名字（调用方不该知道后缀规则，SDK 在本地按 toolScope 反推）。
-- `model_not_configured`（-32051）映射成 `NO_MODEL`；`resultJson` 是工具结果文字，不是 ACP 的包装，是第三方内容，不可信。
+- `ToolCall.ref` 能对应上本次 toolScope 的某一项时不为 null，这时 `tool` 就是原始工具名；否则 `tool` 是 AgentOS 给模型的最终名字（调用方不该知道后缀规则，SDK 在本地按 toolScope 反推）。`loadSession` 回来的会话不知道 toolScope（在服务端），所以历史里的 `ref` 是 null。
+- 错误映射：`model_not_configured`（-32051）→ `NO_MODEL`；`session_not_found` → `SESSION_NOT_FOUND`；`invalid_params` 和 MCP 服务器数量超限 → `INVALID_REQUEST`；`unsupported` 和旧版本 AgentOS 没有的方法（-32601）→ `UNSUPPORTED`。官方 Kotlin 客户端把 `-32602` 转成只有消息的 `AcpExpectedError`，SDK 按 AgentOS 固定的消息前缀 `<错误码>: …` 还原；异常的 `message` 只写代码，不带服务端的说明，更不带调用方传的值。`resultJson` 是工具结果文字，不是 ACP 的包装，是第三方内容，不可信。
+- **源码兼容性**：`AgentOsEvent` 和 `AgentOsError` 新增了成员（`Thought`、`UserMessage`；`SESSION_NOT_FOUND`、`INVALID_REQUEST`、`UNSUPPORTED`）。对它们写穷尽 `when` 的调用方要加分支或 `else`；以后还会增加，建议一开始就带 `else`。SDK 还没有发布到 Maven，仓库内的调用方（备忘录示例、设备测试客户端）已经改过。
 - 没有 key、不联网、不读 AgentOS 的任何私有数据。
 
 ## 5. 备忘录的功能规格（notes SubAgent）
@@ -180,7 +211,7 @@ enum class AgentOsError { NOT_INSTALLED, AUTHORIZATION_PENDING_TIMEOUT, DENIED, 
 
 ## 8. 明确不做（本切片）
 
-W25 的完整出口条件里，这里没有：一致性测试扩展到第三方通道、完整的安全测试清单（伪造身份、越权读取其他 App 的会话）——C 的设备用例覆盖其中一部分，剩下的以后补；用量上限的设置页编辑；撤销之外的细粒度权限（App × 插件的授权，只做设计讨论，见第 9 节）；`AgentOs` 对 Java 的友好封装；发布到 Maven。
+W25 的完整出口条件里，这里没有：一致性测试扩展到第三方通道、完整的安全测试清单（伪造身份、越权读取其他 App 的会话）——C 的设备用例覆盖其中一部分，剩下的以后补；用量上限的设置页编辑；撤销之外的细粒度权限（App × 插件的授权，只做设计讨论，见第 9 节）；`AgentOs` 对 Java 的友好封装；发布到 Maven。会话生命周期、会话级模式与模型、自带 MCP 服务器已在后续实现（acp-mapping.md 4a–4d），这里的“不做”不包括它们。
 
 ## 9. 权限管控机制：设计讨论（不实现）
 

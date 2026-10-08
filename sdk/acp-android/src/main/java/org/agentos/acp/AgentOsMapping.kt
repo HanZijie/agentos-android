@@ -3,12 +3,16 @@
 package org.agentos.acp
 
 import com.agentclientprotocol.model.ContentBlock
+import com.agentclientprotocol.model.HttpHeader
+import com.agentclientprotocol.model.McpServer
 import com.agentclientprotocol.model.SessionUpdate
 import com.agentclientprotocol.model.StopReason
 import com.agentclientprotocol.model.ToolCallContent
 import com.agentclientprotocol.model.ToolCallStatus
+import com.agentclientprotocol.protocol.AcpExpectedError
 import com.agentclientprotocol.protocol.JsonRpcException
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -71,13 +75,37 @@ internal object AgentOsMapping {
             code == "rate_limited" && reason == "busy" -> AgentOsError.BUSY
             code == "rate_limited" -> AgentOsError.RATE_LIMITED
             e.code == RPC_BUSY -> AgentOsError.BUSY
+            // 每小时 prompt 次数是 RATE_LIMITED；这个 App 挂的 MCP 服务器总数超限是请求本身的问题
+            code == "quota_exceeded" && reason == "mcp_servers" -> AgentOsError.INVALID_REQUEST
             e.code == RPC_QUOTA_EXCEEDED -> AgentOsError.RATE_LIMITED
             code == "invalid_params" && reason == "too_large" -> AgentOsError.TOO_LARGE
             e.code == RPC_PAYLOAD_TOO_LARGE -> AgentOsError.TOO_LARGE
+            code == "session_not_found" -> AgentOsError.SESSION_NOT_FOUND
+            code == "invalid_params" -> AgentOsError.INVALID_REQUEST
+            code == "unsupported" -> AgentOsError.UNSUPPORTED
+            // 旧版本的 AgentOS 没有这个 ACP 方法
+            e.code == RPC_METHOD_NOT_FOUND -> AgentOsError.UNSUPPORTED
             else -> AgentOsError.FAILED
         }
         // 不把服务端的 message 原样带出去（可能含用户文字）：只留代码
         return AgentOsException(error, "rpc ${e.code}${code?.let { " $it" }.orEmpty()}${reason?.let { " ($it)" }.orEmpty()}")
+    }
+
+    /**
+     * 官方 Kotlin 客户端把 `-32602`（`invalid_params`、`unsupported` 都用这个码）的错误响应转成 [AcpExpectedError]，只留消息、丢掉 `data`。
+     * AgentOS 的消息固定是 `<错误码>: <说明>`（errors.md 第 5 节），所以按前缀还原错误类别；说明里不会有调用方传的值，也不原样带出去。
+     */
+    fun fromExpected(e: AcpExpectedError): AgentOsException {
+        val text = e.message.orEmpty()
+        val code = text.substringBefore(':', "").trim()
+        val error = when {
+            code == "unsupported" -> AgentOsError.UNSUPPORTED
+            code == "session_not_found" -> AgentOsError.SESSION_NOT_FOUND
+            code == "invalid_params" && "too_large" in text -> AgentOsError.TOO_LARGE
+            code == "invalid_params" -> AgentOsError.INVALID_REQUEST
+            else -> AgentOsError.FAILED
+        }
+        return AgentOsException(error, "rpc -32602${code.takeIf { it.isNotEmpty() && ' ' !in it }?.let { " $it" }.orEmpty()}")
     }
 
     /** 协议关闭 / 对端死亡 / 取消导致的请求失败。[callerCancelled] 为 true 时不应该走到这里（调用方自己取消，直接重抛）。 */
@@ -112,13 +140,68 @@ internal object AgentOsMapping {
         }
     }
 
+    // ------------------------------------------------------------------ 会话级 MCP 服务器（acp-mapping.md 4c）
+
+    /** 调用方自带的服务器 → ACP 的 `mcpServers`（只有 Streamable HTTP，对应 ACP 的 `type: "http"`）。服务器名和地址是否合规由 AgentOS 判定。 */
+    fun mcpServers(servers: List<McpHttpServer>): List<McpServer> = servers.map { s ->
+        require(s.name.isNotBlank()) { "an MCP server needs a name" }
+        require(s.url.isNotBlank()) { "an MCP server needs a url" }
+        McpServer.Http(s.name, s.url, s.headers.map { (k, v) -> HttpHeader(k, v) })
+    }
+
+    /** `session_info_update` 的 `_meta."org.agentos"` 里 AgentOS 告诉调用方的几件事（acp-mapping.md 4c）。 */
+    class SessionInfo(val mcpServers: List<McpServerStatus>?, val activeTaskId: String?)
+
+    /** 解析 `session_info_update` 的 `_meta`；没有 AgentOS 的字段时返回 null。形状不对的字段忽略，不抛异常。 */
+    fun sessionInfo(meta: kotlinx.serialization.json.JsonElement?): SessionInfo? {
+        val ext = (meta as? JsonObject)?.get("org.agentos") as? JsonObject ?: return null
+        val servers = (ext["mcpServers"] as? JsonArray)?.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val name = (o["name"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+            McpServerStatus(
+                name = name,
+                connected = (o["connected"] as? JsonPrimitive)?.contentOrNull == "true",
+                toolCount = (o["toolCount"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0,
+                reason = (o["reason"] as? JsonPrimitive)?.contentOrNull,
+            )
+        }
+        val task = ((ext["activeTask"] as? JsonObject)?.get("taskId") as? JsonPrimitive)?.contentOrNull
+        if (servers == null && task == null) return null
+        return SessionInfo(servers, task)
+    }
+
+    // ------------------------------------------------------------------ 会话建立收尾标记（acp-mapping.md 4d）
+
+    /** SDK 在 `initialize` 里要用的扩展（`_meta."org.agentos".extensions`）。 */
+    const val EXTENSION_SESSION_SETUP = "sessionSetup"
+
+    fun initializeMeta(): JsonObject = buildJsonObject {
+        put("org.agentos", buildJsonObject { put("extensions", buildJsonArray { add(JsonPrimitive(EXTENSION_SESSION_SETUP)) }) })
+    }
+
+    /** AgentOS 的 `initialize` 响应声明了这个扩展：它会在每次会话建立的最后发收尾标记。旧版本没有，SDK 就不等。 */
+    fun supportsSetupMarker(initializeMeta: kotlinx.serialization.json.JsonElement?): Boolean =
+        (((initializeMeta as? JsonObject)?.get("org.agentos") as? JsonObject)?.get("extensions") as? JsonObject)?.containsKey(EXTENSION_SESSION_SETUP) == true
+
+    /** `session_info_update` 里的收尾标记：前面重放了多少条 `session/update`；不是收尾标记返回 null。 */
+    fun setupReplayed(meta: kotlinx.serialization.json.JsonElement?): Int? {
+        val setup = ((meta as? JsonObject)?.get("org.agentos") as? JsonObject)?.get("setup") as? JsonObject ?: return null
+        return (setup["replayed"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.takeIf { it >= 0 }
+    }
+
     // ------------------------------------------------------------------ 事件映射（4.7）
 
     /**
      * 一轮 prompt 里的事件映射。同一个工具调用的几次更新共用一份记录（工具名、对应的 toolScope 项、参数、最近的状态），
      * 所以 `tool_call_update` 这种只带变化字段的补丁也能给出完整的 [AgentOsEvent.ToolCall]。
      */
-    class PromptMapper(private val scope: List<ToolRef>?) {
+    class PromptMapper(
+        private val scope: List<ToolRef>?,
+        /** 思考过程也映射成 [AgentOsEvent.Thought]（默认不）。 */
+        private val includeThoughts: Boolean = false,
+        /** 用户消息也映射成 [AgentOsEvent.UserMessage]：只有重放历史（`session/load`）时才有。 */
+        private val includeUserMessages: Boolean = false,
+    ) {
         private class Known(val tool: String, val ref: ToolRef?, val args: String?, var status: ToolStatus)
 
         private val calls = HashMap<String, Known>()
@@ -140,7 +223,11 @@ internal object AgentOsMapping {
                 status(update.status, result)?.let { known.status = it }
                 AgentOsEvent.ToolCall(id, known.tool, known.status, result, known.args, known.ref)
             }
-            else -> null // 思考、计划、用量…不对外
+            is SessionUpdate.AgentThoughtChunk ->
+                if (includeThoughts) (update.content as? ContentBlock.Text)?.text?.takeIf { it.isNotEmpty() }?.let { AgentOsEvent.Thought(it) } else null
+            is SessionUpdate.UserMessageChunk ->
+                if (includeUserMessages) (update.content as? ContentBlock.Text)?.text?.let { AgentOsEvent.UserMessage(it) } else null
+            else -> null // 计划、用量…不对外
         }
 
         private fun text(content: List<ToolCallContent>?): String? =
@@ -183,6 +270,7 @@ internal object AgentOsMapping {
     const val MAX_PROMPT_CHARS = 16_000
 
     // errors.md 的 JSON-RPC 码（core/runtime 的 RpcCodes）
+    private const val RPC_METHOD_NOT_FOUND = -32601
     private const val RPC_PAYLOAD_TOO_LARGE = -32046
     private const val RPC_BUSY = -32047
     private const val RPC_QUOTA_EXCEEDED = -32048

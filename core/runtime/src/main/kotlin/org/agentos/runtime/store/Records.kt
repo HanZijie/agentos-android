@@ -62,6 +62,30 @@ enum class ToolCallState(val wire: String) {
     }
 }
 
+/**
+ * 会话模式（ACP `session/set_mode`，也是配置项 `mode`）。**只能收窄，不能放宽**：模式在会话创建时定下的工具范围（toolScope）里再收一层，
+ * 所以任何模式都不会让会话用到 toolScope 以外的工具；调用方在三者之间随便切，最多回到 [DEFAULT]，也就是创建时的上限。
+ */
+enum class SessionMode(val wire: String, val title: String, val description: String) {
+    /** 会话的工具范围里的全部工具；写级每次确认，高风险每次确认（用户策略照常生效）。 */
+    DEFAULT("default", "Default", "Use the tools this session is allowed to use. Writes are confirmed as usual."),
+
+    /** 只放行读级工具：写级和高风险工具不交给模型。会话级自带工具（写级起步）因此也不可用。 */
+    READ_ONLY("read_only", "Read only", "Only use tools that read. Nothing that changes data is offered to the model."),
+
+    /** 不用任何工具（也没有 Skill 目录），只对话。 */
+    CHAT("chat", "Chat", "No tools. Just talk."),
+    ;
+
+    companion object {
+        /** 未知的 wire 名返回 null（调用方据此报 invalid_params）；NULL / 空白按 [DEFAULT]。 */
+        fun parse(wire: String?): SessionMode? = if (wire.isNullOrBlank()) DEFAULT else entries.firstOrNull { it.wire == wire }
+
+        /** 存储里读出来的值：读不懂时当 [CHAT]（最窄）而不是 [DEFAULT]，一个损坏的值不能放宽会话。 */
+        fun fromStored(wire: String?): SessionMode = if (wire.isNullOrBlank()) DEFAULT else entries.firstOrNull { it.wire == wire } ?: CHAT
+    }
+}
+
 data class SessionRecord(
     val id: String,
     val ownerKey: String,
@@ -79,6 +103,10 @@ data class SessionRecord(
      * is created; a damaged stored value reads as an empty list (= no tools), never as null.
      */
     val toolScope: List<ToolRef>? = null,
+    /** 会话选的模型（[org.agentos.runtime.ports.ModelChoice.id]）；null = 跟随用户在设置里选的模型。 */
+    val modelId: String? = null,
+    /** 会话模式；创建时是 [SessionMode.DEFAULT]。 */
+    val mode: SessionMode = SessionMode.DEFAULT,
 ) {
     /** What the session may use, before the caller kind is taken into account ([ToolScope.forCaller]). */
     val scope: ToolScope get() = toolScope?.let { ToolScope.only(it) } ?: ToolScope.ALL

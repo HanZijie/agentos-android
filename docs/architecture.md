@@ -197,12 +197,15 @@ ACP 的服务端（Agent）是 `:agent` 进程里的运行时，所有前端都�
 | ACP 能力 | 状态 | 说明 |
 |---|---|---|
 | `initialize` | M1 | 声明 AgentOS Profile 版本和已启用的扩展 |
-| `session/new` | M1 | `cwd` 仅作标签；`mcpServers` 非空时按 Profile 明确返回“不支持” |
+| `session/new` | M1 | `cwd` 仅作标签；`mcpServers` 只收 Streamable HTTP（`http`），`stdio`、`sse` 明确返回“不支持”，见 acp-mapping.md 4c |
 | `session/prompt` | M1 | 本轮结束才返回 `stopReason`，不提前返回入队回执 |
 | `session/update` | M1 | 见 5.6 的事件映射 |
 | `session/cancel` | M1 | — |
 | Profile 扩展：自动选择会话 | M1 | 用户不指定会话时，由 Jev 在**调用方自己的**会话里选择，或新建一个。W4 已冻结：客户端在 `session/new` 的 `_meta."org.agentos".autoSelect` 里带上问题，选中结果经随后的 `session_info_update` 告知（`core/protocol/acp-extensions.schema.json`）。没有做成单独的方法，因为 SDK 只在 `session/new` 里把会话登记到连接上 |
-| `session/load` | M2 | 只能加载调用方自己的会话 |
+| `session/load`、`resume` | 已实现 | 只能取回调用方自己的会话；`load` 先重放历史再返回，`toolScope` 不能改。acp-mapping.md 4a |
+| `session/list`、`fork`、`delete`、`close` | 已实现 | 同上归属规则；`fork` 的范围只能收窄；`delete` 连事件日志一起删；`close` 释放内存、保留历史 |
+| `session/set_mode`、`set_model`、配置项 | 已实现 | 模式只能在 toolScope 之上再收一层；模型只能选用户那把 key 下的。acp-mapping.md 4b |
+| Profile 扩展：会话建立收尾标记（`sessionSetup`） | 已实现 | 要协商；让客户端确定历史和服务器状态收齐了。acp-mapping.md 4d |
 | Profile 扩展：持久化提交、增量恢复 | M2 | 按 Profile 的要求，由客户端和服务端协商后启用；方法名和字段在 W10 冻结 |
 | `session/request_permission` | M3a | 见下方“权限规则” |
 | 客户端的文件系统、终端能力 | 不启用 | Android 上没有对应的工作目录语义 |

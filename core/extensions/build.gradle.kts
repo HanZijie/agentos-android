@@ -10,8 +10,11 @@ dependencies {
     // 反方向没有依赖：core:runtime 不知道 core:extensions
     api(project(":core:runtime"))
     implementation(libs.kotlinx.serialization.json)
+    // 会话级工具（session/）：Streamable HTTP 的 MCP 客户端。core:runtime 的 okhttp 是 implementation，不会传递过来
+    implementation(libs.okhttp)
 
     testImplementation(libs.kotlin.test.junit)
+    testImplementation(libs.okhttp.mockwebserver)
     // 记忆丢失的测试用真实的 CapabilityBroker + FakeHostPort 看“模型能看到哪些工具”
     testImplementation(testFixtures(project(":core:runtime")))
     testImplementation(libs.junit4)

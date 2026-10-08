@@ -35,6 +35,7 @@ import org.agentos.runtime.ports.ToolInvocationResult
 import org.agentos.runtime.ports.ToolScope
 import org.agentos.runtime.ports.ToolResult
 import org.agentos.runtime.ports.ToolRisk
+import org.agentos.runtime.store.SessionMode
 import org.agentos.runtime.store.StoreTx
 import org.agentos.runtime.store.ToolCallState
 import java.util.concurrent.ConcurrentHashMap
@@ -66,8 +67,10 @@ interface CapabilityBroker {
     /**
      * 交给模型的工具。[scope] 是这个会话能用的工具（调用方已经按调用方类别收紧：[ToolContext.effectiveScope]）；
      * 默认 [ToolScope.ALL]：不限制，当前目录里用户策略没有禁用的全部工具。
+     * [view] 是会话自己的那一层：会话模式再收一层（只读、不用工具），以及调用方自带的会话级工具（`HostPort.sessionTools`）；
+     * null = 没有这一层（和以前一样）。
      */
-    fun declarations(scope: ToolScope = ToolScope.ALL): List<ToolDeclaration>
+    fun declarations(scope: ToolScope = ToolScope.ALL, view: SessionToolView? = null): List<ToolDeclaration>
 
     /**
      * 这个调用方在会话创建时要求的范围 [requested]（[ToolScope.ALL] = 没要求）经 [CallerPolicy] 之后实际生效的范围；只会比 [requested] 更小。
@@ -80,6 +83,9 @@ interface CapabilityBroker {
     suspend fun execute(ctx: ToolContext, call: ToolCall): ToolResult
 
     suspend fun afterExecute(ctx: ToolContext, call: ToolCall, result: ToolResult): ToolResult?
+
+    /** 会话关闭或删除时：忘掉这个会话里用户选过的“本会话内不再询问”。 */
+    fun forgetSession(sessionId: String) {}
 }
 
 /**
@@ -99,8 +105,27 @@ class ToolContext(
      * 默认不限制。Broker 每次校验时还会按 [ToolContext.caller] 再过一遍策略，所以直接构造的上下文也不会比策略允许的更宽。
      */
     val scope: ToolScope = ToolScope.ALL,
+    /** 会话自己的那一层（模式、会话级工具）；null = 没有。调度器在任务开始时按会话当时的模式算好。 */
+    val view: SessionToolView? = null,
     val commit: suspend (block: (StoreTx) -> Unit) -> Unit,
 )
+
+/**
+ * 会话对工具目录的附加视图（ACP `session/set_mode` 与 `mcpServers`）：
+ * - [mode] 只能在 [ToolContext.scope] 之上**再收一层**：[SessionMode.READ_ONLY] 只放行读级工具，[SessionMode.CHAT] 一个工具都没有；
+ *   任何模式都不会放宽 toolScope；
+ * - 会话级工具（调用方自带的 MCP 服务器）只在 [SessionMode.DEFAULT] 里可见，且永远不会是读级（至少写级，每次确认）。
+ */
+class SessionToolView(val sessionId: String, val mode: SessionMode = SessionMode.DEFAULT) {
+    /** 允许的最高风险等级。 */
+    val maxRisk: ToolRisk get() = if (mode == SessionMode.READ_ONLY) ToolRisk.READ else ToolRisk.HIGH
+
+    /** 这个模式下有没有任何工具（包括内置的 read_skill）。 */
+    val allowsAnyTool: Boolean get() = mode != SessionMode.CHAT
+
+    /** 会话级工具是否可见。 */
+    val allowsSessionTools: Boolean get() = mode == SessionMode.DEFAULT
+}
 
 data class BrokerConfig(
     /** 一次工具调用的超时。超时后按“结果未知”处理（已经发出）。 */
@@ -121,12 +146,21 @@ class DefaultCapabilityBroker(
     /** PreToolUse Hook 改写后的参数：toolCallId → 参数。 */
     private val rewrittenInput = ConcurrentHashMap<String, JsonObject>()
 
-    override fun declarations(scope: ToolScope): List<ToolDeclaration> {
+    override fun declarations(scope: ToolScope, view: SessionToolView?): List<ToolDeclaration> {
+        if (view != null && !view.allowsAnyTool) return emptyList()
+        val maxRisk = view?.maxRisk ?: ToolRisk.HIGH
         val policy = host.approvals.policy.value
         val tools = host.tools.catalog.value.tools
-            .filter { policy.resolve(it.source).enabled && scope.allows(it.source) }
+            .filter { policy.resolve(it.source).enabled && scope.allows(it.source) && it.risk <= maxRisk }
             .map { ToolDeclaration(it.name, it.description, it.inputSchema, it.title) }
-        return if (skillsAvailable() && scope.allowsBuiltinTools) tools.filter { it.name != READ_SKILL } + readSkillDeclaration() else tools
+        val withSkill = if (skillsAvailable() && scope.allowsBuiltinTools) tools.filter { it.name != READ_SKILL } + readSkillDeclaration() else tools
+        if (view == null || !view.allowsSessionTools) return withSkill
+        // 会话级工具的名字不会和目录里的重名（命名规则保证）；万一重名也只留目录里的那个，名字必须唯一
+        val taken = withSkill.mapTo(HashSet()) { it.name }
+        val own = host.sessionTools.tools(view.sessionId)
+            .filter { it.risk <= maxRisk && it.name !in taken }
+            .map { ToolDeclaration(it.name, it.description, it.inputSchema, it.title) }
+        return withSkill + own
     }
 
     /** 策略的答案与请求的范围取交集：策略只能缩小，不能放大。策略出错时失败关闭：没有任何工具。 */
@@ -150,18 +184,32 @@ class DefaultCapabilityBroker(
     private val readSkillTool = CatalogTool(READ_SKILL, READ_SKILL_DESCRIPTION, READ_SKILL_SCHEMA, ToolRisk.READ, provider = "agentos", title = "Read a skill")
 
     /** 目录里有、用户策略没有禁用、且在会话的 [scope] 里的工具；否则 null（对模型来说就是“不存在”）。 */
-    private fun availableTool(name: String, scope: ToolScope): Pair<CatalogTool, ToolPolicy>? {
+    private fun availableTool(name: String, scope: ToolScope, view: SessionToolView? = null): Pair<CatalogTool, ToolPolicy>? {
+        if (view != null && !view.allowsAnyTool) return null
+        val maxRisk = view?.maxRisk ?: ToolRisk.HIGH
         if (name == READ_SKILL && skillsAvailable()) {
             return if (scope.allowsBuiltinTools) readSkillTool to ToolPolicy(enabled = true, approval = ApprovalMode.ASK) else null
         }
-        val tool = host.tools.catalog.value[name] ?: return null
-        if (!scope.allows(tool.source)) return null
-        val policy = host.approvals.policy.value.resolve(tool.source)
-        return if (policy.enabled) tool to policy else null
+        val tool = host.tools.catalog.value[name]
+        if (tool != null) {
+            if (!scope.allows(tool.source) || tool.risk > maxRisk) return null
+            val policy = host.approvals.policy.value.resolve(tool.source)
+            return if (policy.enabled) tool to policy else null
+        }
+        // 调用方自带的会话级工具：不进用户策略（用户没审阅过它），固定每次确认
+        if (view != null && view.allowsSessionTools) {
+            val own = host.sessionTools.tools(view.sessionId).firstOrNull { it.name == name } ?: return null
+            if (own.risk > maxRisk) return null
+            return own to ToolPolicy(enabled = true, approval = ApprovalMode.ASK)
+        }
+        return null
     }
 
+    /** 调用方自带的会话级工具：不属于任何插件（没有 source），提供方是 `session:<服务器名>`。 */
+    private fun isSessionTool(tool: CatalogTool) = tool.source == null && tool.provider.startsWith(SESSION_PROVIDER_PREFIX)
+
     override suspend fun authorize(ctx: ToolContext, call: ToolCall): ToolCallDecision {
-        val (tool, policy) = availableTool(call.name, scopeFor(ctx.caller, ctx.scope))
+        val (tool, policy) = availableTool(call.name, scopeFor(ctx.caller, ctx.scope), ctx.view)
             ?: return reject(ctx, call, ErrorCode.TOOL_NOT_IN_CATALOG, "Tool ${call.name} is not available.")
 
         val hook = host.hooks.dispatch(
@@ -200,7 +248,9 @@ class DefaultCapabilityBroker(
         val remembered = rememberedAllow[ctx.sessionId]?.contains(tool.name) == true
         val base = RiskPolicy.consentRequirement(tool.risk, policy.approval, remembered, hookAsk = hook.decision == HookDecision.ASK)
         // 调用方策略（4.4）：只能加严。要问就问；不问的原因（读 / 策略 / 记住）仍然是基础规则算出来的那个
-        val terms = termsFor(ctx.caller, tool, base)
+        val policyTerms = termsFor(ctx.caller, tool, base)
+        // 会话级工具永远没有“始终允许”：ApprovalStore 的键是插件/服务器/工具，调用方可以随便取名撞上用户给别的工具设的键
+        val terms = if (isSessionTool(tool)) policyTerms.copy(offerAlwaysAllow = false) else policyTerms
         val need = if (base == ConsentRequirement.ASK || terms.requirement == ConsentRequirement.ASK) ConsentRequirement.ASK else base
         return when (need) {
             ConsentRequirement.ASK -> askUser(ctx, call, tool, terms)
@@ -312,7 +362,7 @@ class DefaultCapabilityBroker(
     }
 
     override suspend fun execute(ctx: ToolContext, call: ToolCall): ToolResult {
-        val tool = availableTool(call.name, scopeFor(ctx.caller, ctx.scope))?.first
+        val tool = availableTool(call.name, scopeFor(ctx.caller, ctx.scope), ctx.view)?.first
         if (tool == null) {
             val decision = reject(ctx, call, ErrorCode.TOOL_NOT_IN_CATALOG, "Tool ${call.name} is not available.")
             return ToolResult.text(decision.reason, isError = true)
@@ -336,7 +386,12 @@ class DefaultCapabilityBroker(
 
         val invocation = ToolInvocation(ctx.sessionId, ctx.taskId, call.toolCallId, call.name, arguments, ctx.caller, config.toolTimeoutMillis)
         val outcome = try {
-            withTimeoutOrNull(config.toolTimeoutMillis) { if (tool === readSkillTool) readSkill(arguments) else host.tools.invoke(invocation) }
+            withTimeoutOrNull(config.toolTimeoutMillis) { when {
+                    tool === readSkillTool -> readSkill(arguments)
+                    isSessionTool(tool) -> host.sessionTools.invoke(invocation)
+                    else -> host.tools.invoke(invocation)
+                }
+            }
                 ?: ToolInvocationResult.Unknown(ErrorCode.TOOL_TIMEOUT.info("Tool ${call.name} did not respond in ${config.toolTimeoutMillis} ms."))
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
@@ -402,7 +457,7 @@ class DefaultCapabilityBroker(
     }
 
     /** 会话结束时清掉“本会话内不再询问”。 */
-    fun forgetSession(sessionId: String) {
+    override fun forgetSession(sessionId: String) {
         rememberedAllow.remove(sessionId)
     }
 
@@ -438,6 +493,9 @@ class DefaultCapabilityBroker(
 
         /** 内置工具：读 Skill 的 SKILL.md 或同目录的文件（docs/extensions.md 第 6 节）。 */
         const val READ_SKILL = "read_skill"
+
+        /** 会话级工具（调用方自带的 MCP 服务器）的 [CatalogTool.provider] 前缀，见 `SessionToolPort`。 */
+        const val SESSION_PROVIDER_PREFIX = "session:"
         private const val MAX_LISTED_SKILLS = 20
         private const val READ_SKILL_DESCRIPTION =
             "Read the instructions of an installed skill (a how-to guide that came with a plugin). " +

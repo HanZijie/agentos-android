@@ -7,9 +7,19 @@ import org.junit.Test
 
 /** 真网关的映射层：SDK 的类型和本 App 的类型一一对应（枚举名相同），工具名优先用 toolScope 里的原始名字。 */
 class SdkMappingTest {
-    @Test fun `every sdk error maps to the error with the same name`() {
-        for (e in org.agentos.acp.AgentOsError.entries) assertEquals(e.name, SdkMapping.fromSdk(e).name)
-        assertEquals(org.agentos.acp.AgentOsError.entries.size, AgentOsError.entries.size)
+    /** 这个 App 不用的会话 / MCP 能力带来的错误：并入 FAILED（界面没有单独的文案）。 */
+    private val foldedIntoFailed = setOf("SESSION_NOT_FOUND", "INVALID_REQUEST", "UNSUPPORTED")
+
+    @Test fun `every sdk error maps to the error with the same name, except the ones this app folds into FAILED`() {
+        for (e in org.agentos.acp.AgentOsError.entries) {
+            assertEquals(if (e.name in foldedIntoFailed) "FAILED" else e.name, SdkMapping.fromSdk(e).name)
+        }
+        assertEquals(org.agentos.acp.AgentOsError.entries.size - foldedIntoFailed.size, AgentOsError.entries.size)
+    }
+
+    @Test fun `thoughts and replayed user messages are skipped, never shown as the answer`() {
+        org.junit.Assert.assertNull(SdkMapping.fromSdk(org.agentos.acp.AgentOsEvent.Thought("hmm")))
+        org.junit.Assert.assertNull(SdkMapping.fromSdk(org.agentos.acp.AgentOsEvent.UserMessage("hi")))
     }
 
     @Test fun `every sdk tool status maps to the status with the same name`() {

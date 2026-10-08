@@ -222,9 +222,9 @@ class ToolScopeStoreTest {
             selfSession = first.engine.createSession(TestRuntime.SELF, null).id
             appSession = first.engine.createSession(TestRuntime.APP, null).id
         }
-        assertEquals(3L, userVersion(first.databaseFile), "a new database is created at the current version")
-        // take it back to what a version 1 phone has: no tool_scope column, no caller_package column, user_version 1
-        rawSql(first.databaseFile, "ALTER TABLE sessions DROP COLUMN tool_scope", "ALTER TABLE tasks DROP COLUMN caller_package", "PRAGMA user_version = 1")
+        assertEquals(4L, userVersion(first.databaseFile), "a new database is created at the current version")
+        // take it back to what a version 1 phone has: no tool_scope, caller_package, model_id or mode column, user_version 1
+        rawSql(first.databaseFile, "ALTER TABLE sessions DROP COLUMN tool_scope", "ALTER TABLE tasks DROP COLUMN caller_package", "ALTER TABLE sessions DROP COLUMN model_id", "ALTER TABLE sessions DROP COLUMN mode", "PRAGMA user_version = 1")
         assertEquals(1L, userVersion(first.databaseFile))
 
         val second = runtime(file = first.databaseFile)
@@ -240,7 +240,7 @@ class ToolScopeStoreTest {
             // and new sessions can carry a scope
             assertEquals(ToolScope.normalize(memoScope), second.engine.createSession(TestRuntime.APP, null, memoScope).toolScope)
         }
-        assertEquals(3L, userVersion(second.databaseFile))
+        assertEquals(4L, userVersion(second.databaseFile))
         second.host.deleteDatabase()
     }
 
@@ -250,7 +250,7 @@ class ToolScopeStoreTest {
         run(first) { first.engine.createSession(TestRuntime.APP, null, memoScope) }
         val second = runtime(file = first.databaseFile)
         run(second) { assertEquals(1, second.engine.storeForTesting.read { it.sessions.listByOwner(TestRuntime.APP.ownerKey) }.size) }
-        assertEquals(3L, userVersion(second.databaseFile))
+        assertEquals(4L, userVersion(second.databaseFile))
         second.host.deleteDatabase()
     }
 

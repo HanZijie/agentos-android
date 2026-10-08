@@ -42,6 +42,12 @@ interface HostPort {
      */
     val approvals: ApprovalPolicyPort get() = ApprovalPolicyPort.DEFAULT
 
+    /**
+     * 会话级工具：调用方在 ACP `mcpServers` 里带来的 MCP 服务器，只对它自己的会话可见（见 SessionTools.kt）。
+     * 有默认实现（不支持），已有的 HostPort 实现不用改；`:agent` 接上 Streamable HTTP 的实现后覆盖它。
+     */
+    val sessionTools: SessionToolPort get() = SessionToolPort.NONE
+
     /** Store 用的 SQLite。 */
     val storage: StoragePort
 
@@ -336,7 +342,21 @@ interface StoragePort {
 interface ModelConfigPort {
     /** 用户当前选择的模型；没配置时为 null，任务以 model_not_configured 失败。变化后从下一轮起生效，不影响进行中的一轮。 */
     val activeModel: StateFlow<ModelSpec?>
+
+    /**
+     * 会话可以选的模型（ACP `session/set_model`、配置项 `model`）：和 [activeModel] **共用同一个 key** 的那些模型
+     * （同一个厂商预设下的其他模型）。调用方只能在这个列表里选，选不到的 id 一律拒绝：既不能借此用用户没配过 key 的模型，
+     * 也不能传自己的端点或 key。默认没有（只有 [activeModel]），已有的实现不用改。
+     */
+    val choices: StateFlow<List<ModelChoice>> get() = EMPTY_CHOICES
+
+    companion object {
+        private val EMPTY_CHOICES: StateFlow<List<ModelChoice>> = MutableStateFlow(emptyList<ModelChoice>()).asStateFlow()
+    }
 }
+
+/** 一个可选的模型。[id] 是厂商目录里的模型 id（稳定，写在会话上）；[name] 给人看。 */
+data class ModelChoice(val id: String, val name: String, val spec: ModelSpec)
 
 interface SecretPort {
     /**

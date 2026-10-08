@@ -102,9 +102,15 @@ class AgentProcess private constructor(val app: Context) {
         consentBridge.attach(c)
         autoConsent?.attach(c)
     }
+    /**
+     * 调用方在 ACP `mcpServers` 里带来的 MCP 服务器（Streamable HTTP，只对它自己的会话可见）。URL 和头只在这个进程的内存里；
+     * 进程结束时连接随之断开，调用方在 `session/load | resume` 里重新带上来。
+     */
+    val sessionTools = org.agentos.extensions.session.SessionToolHost(scope)
     val hostPort = HostPortImpl(
         store, models, secrets, environment, runtimeLog,
         tools = extensions, approvals = extensions.approvals, skills = extensions.skills, consent = consent,
+        sessionTools = sessionTools,
     )
 
     /** 宿主层。B2 之后 factory 换成 PiAdapter 的。 */
