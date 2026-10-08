@@ -528,8 +528,9 @@ internal class AcpSession(
                             }
                         }
                     }
-                // SDK 记下这个响应，这一轮的协程结束（或被取消）时才交给客户端
-                if (failure == null) emit(Event.PromptResponseEvent(result ?: PromptResponse(StopReason.END_TURN)))
+                // SDK 记下这个响应，这一轮的协程结束（或被取消）时才交给客户端。
+                // 没见到终态事件流就结束了，只可能是会话在这一轮进行中被删了（RuntimeEngine.events）：这一轮是被取消的
+                if (failure == null) emit(Event.PromptResponseEvent(result ?: PromptResponse(StopReason.CANCELLED)))
                 if (turn.cancelRequested.get()) awaitCancelHandoff()
                 failure?.let { throw it }
             } finally {
