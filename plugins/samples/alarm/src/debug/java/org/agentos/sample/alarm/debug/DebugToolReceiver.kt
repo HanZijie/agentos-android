@@ -19,6 +19,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.agentos.sample.alarm.AlarmGraph
+import org.agentos.sample.alarm.reliability.DeviceInfo
 
 /**
  * 仅 debug 构建（release 里没有），要求 DUMP 权限（只有 adb shell 和系统持有，其他 App 调不了）。
@@ -32,13 +33,15 @@ import org.agentos.sample.alarm.AlarmGraph
  * {"total":3,"offset":0,"limit":50,"next_offset":null,
  *  "alarms":[{"id","time","label","days","repeat","enabled","vibrate","snooze_minutes","snoozed_until","next_fire_at","ringing"}…],
  *  "scheduled":[{"id","fire_at","registered"}…],
- *  "system":{"next_alarm_clock":"2026-…+08:00" | null,"now":"2026-…+08:00","time_zone":"Asia/Shanghai"}}
+ *  "system":{"next_alarm_clock":"2026-…+08:00" | null,"next_alarm_clock_owned_by_this_app":true|false|null,
+ *            "next_alarm_clock_creator":"com.google.android.deskclock"|null,"now":"2026-…+08:00","time_zone":"Asia/Shanghai"}}
  * ```
  * - `alarms` 与 MCP 工具返回的闹钟字段完全一致（同一个序列化函数），按一天里的时刻排序，支持分页；`next_offset` 为 null 表示最后一页。
  * - `scheduled` 是**全部**闹钟里应当排在系统里的（有 `fire_at` 的）：`fire_at` 是仓库记录的已排触发时刻，
  *   `registered` 是向 AlarmManager 实测的——用 FLAG_NO_CREATE 取同一个 PendingIntent，取到才是 true，所以它能证明
  *   “通过 MCP 设的闹钟真的在系统里排了”。`system.next_alarm_clock` 是 `AlarmManager.nextAlarmClock`（系统眼里的下一个闹钟，
- *   含其他 App 的，只当旁证）。
+ *   含其他 App 的，只当旁证）；`next_alarm_clock_owned_by_this_app` / `_creator` 是它的 showIntent 创建者（`alarm_system_next` 判断归属用的同一个来源），
+ *   没有系统闹钟时两项都是 null。
  * - 只读：不创建、不修改、不取消任何东西；不返回任何密钥（这个 App 里本来也没有）。
  *
  * ## 复位
@@ -46,6 +49,12 @@ import org.agentos.sample.alarm.AlarmGraph
  * adb shell am broadcast -n org.agentos.sample.alarm/.debug.DebugToolReceiver --es cmd reset
  * ```
  * 清空全部闹钟数据并取消所有已排的系统闹钟（含正在响的会被停掉）。返回 `{"cleared":N,"remaining_registered":0}`。
+ *
+ * ## 假装厂商（检查页的厂商指引、截图用）
+ * ```
+ * adb shell am broadcast -n org.agentos.sample.alarm/.debug.DebugToolReceiver --es cmd manufacturer --es value xiaomi   # 空 value = 取消
+ * ```
+ * 只改“保证准时响铃”检查页判断厂商时用的字符串（`DeviceInfo.manufacturerOverride`），重启进程即失效。返回 `{"manufacturer":"xiaomi"}`。
  *
  * ## 调工具（进程内，与 MCP 注册的是同一批工具；结果写 logcat）
  * ```
@@ -94,7 +103,8 @@ class DebugToolReceiver : BroadcastReceiver() {
                 when (cmd) {
                     "dump" -> 1 to dump(context, intent.getIntExtra("offset", 0), intent.getIntExtra("limit", DEFAULT_LIMIT))
                     "reset" -> 1 to reset(context)
-                    else -> 2 to error("unknown cmd '$cmd'; use dump or reset")
+                    "manufacturer" -> 1 to manufacturer(intent.getStringExtra("value"))
+                    else -> 2 to error("unknown cmd '$cmd'; use dump, reset or manufacturer")
                 }
             } catch (e: Exception) {
                 2 to error("${e.javaClass.simpleName}: ${e.message}")
@@ -136,10 +146,13 @@ class DebugToolReceiver : BroadcastReceiver() {
                     }
                 },
             )
+            val systemNext = graph.systemAlarms.next()
             put(
                 "system",
                 buildJsonObject {
                     put("next_alarm_clock", graph.scheduler.nextAlarmClockMillis()?.let { JsonPrimitive(iso(it)) } ?: JsonNull)
+                    put("next_alarm_clock_owned_by_this_app", systemNext?.let { JsonPrimitive(it.isOwnedBy(graph.systemAlarms.ownPackage)) } ?: JsonNull)
+                    put("next_alarm_clock_creator", systemNext?.creatorPackage?.let { JsonPrimitive(it) } ?: JsonNull)
                     put("now", iso(System.currentTimeMillis()))
                     put("time_zone", zone.id)
                 },
@@ -157,6 +170,11 @@ class DebugToolReceiver : BroadcastReceiver() {
             put("cleared", cleared)
             put("remaining_registered", stillRegistered)
         }
+    }
+
+    private fun manufacturer(value: String?): JsonObject {
+        DeviceInfo.manufacturerOverride = value?.takeIf { it.isNotBlank() }
+        return buildJsonObject { put("manufacturer", DeviceInfo.manufacturer()) }
     }
 
     private fun error(message: String): JsonObject = buildJsonObject { put("error", message) }

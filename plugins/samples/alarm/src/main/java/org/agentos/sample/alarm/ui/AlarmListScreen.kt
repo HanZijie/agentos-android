@@ -36,9 +36,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.TaskAlt
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -55,6 +61,8 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -99,6 +107,8 @@ fun AlarmListScreen(
     onNew: () -> Unit,
     onEdit: (Alarm) -> Unit,
     onDismissRinging: () -> Unit,
+    onOpenReliability: () -> Unit,
+    onOpenLanguage: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -151,12 +161,17 @@ fun AlarmListScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "header") {
-                Column(Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = 20.dp, bottom = 4.dp)) {
+                Row(
+                    Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = 12.dp, bottom = 0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = stringResource(R.string.list_title),
                         style = MaterialTheme.typography.headlineLarge,
                         color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.weight(1f),
                     )
+                    OverflowMenu(onOpenReliability, onOpenLanguage)
                 }
             }
             item(key = "banners") { banners() }
@@ -212,6 +227,29 @@ fun AlarmListScreen(
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(bottom = 92.dp, start = 16.dp, end = 16.dp),
         )
+    }
+}
+
+/** 顶栏右侧的“⋮”菜单：保证准时响铃（检查页）、语言（系统的应用语言设置）。 */
+@Composable
+private fun OverflowMenu(onOpenReliability: () -> Unit, onOpenLanguage: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.menu_more))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.menu_reliability)) },
+                leadingIcon = { Icon(Icons.Rounded.TaskAlt, contentDescription = null) },
+                onClick = { expanded = false; onOpenReliability() },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.menu_language)) },
+                leadingIcon = { Icon(Icons.Rounded.Language, contentDescription = null) },
+                onClick = { expanded = false; onOpenLanguage() },
+            )
+        }
     }
 }
 
@@ -404,6 +442,15 @@ private fun AlarmCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).alpha(contentAlpha)) {
                     Row(verticalAlignment = Alignment.Bottom) {
+                        // 中文习惯“上午 7:30”：标记在前还是在后由系统的时间格式决定（见 Format.kt）
+                        parts.prefix?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 9.dp, end = 6.dp),
+                            )
+                        }
                         Text(
                             text = parts.main,
                             style = TimeNumeralStyle,
@@ -442,15 +489,6 @@ private fun AlarmCard(
                 )
             }
             Spacer(Modifier.height(10.dp))
-                        // 中文习惯“上午 7:30”：标记在前还是在后由系统的时间格式决定（见 Format.kt）
-                        parts.prefix?.let {
-                            Text(
-                                text = it,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(bottom = 9.dp, end = 6.dp),
-                            )
-                        }
             Row(
                 Modifier.fillMaxWidth().alpha(contentAlpha),
                 verticalAlignment = Alignment.CenterVertically,
