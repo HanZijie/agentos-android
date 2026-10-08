@@ -34,7 +34,9 @@ import org.json.JSONObject
  * - `tp-detach`：发一个长 prompt，看到第一段输出后自己关通道（不取消任务）；返回时任务还在 AgentOS 里跑、通道已经没有了。
  * - `tp-spoof`：用别的 App 的包名、名字去“冒充”：open 不带任何名字，initialize 的 clientInfo 里写别人的包名；AgentOS 只看 UID。
  * - `tp-sessions`：会话的完整生命周期（新建 → 列表 → 另一条连接 load / resume → fork → 模式 → 模型 → 自带 MCP 服务器 → close → delete），
- *   全部经真实的 Binder 和真实的 AgentOS；每一项返回一个布尔，由 third_party.py 核对。
+ *   全部经真实的 Binder 和真实的 AgentOS；每一项返回一个布尔，由 third_party.py 核对。args.realMcpUrl 给了时，再接一个公网 Streamable HTTP MCP 服务器，
+ *   确认连上、列出工具，并让（脚本化的）模型调一次它的工具（确认由主机端设成自动允许）。
+ * - `tp-live`：真实模型（手机上配好的厂商预设）下的会话级模型选择：可选模型、setModel 之后真实模型照常回答、另一条连接 load 看到的是切换后的模型。
  */
 class ThirdPartyScenarios(private val ctx: Context, private val scope: CoroutineScope, private val runId: String, private val status: (String) -> Unit) {
 
@@ -46,6 +48,7 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
         "tp-spoof" -> spoof(args)
         "tp-info" -> info()
         "tp-sessions" -> sessions(args)
+        "tp-live" -> live(args)
         else -> null
     }
 
@@ -337,6 +340,25 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
             val downTurn = withTimeout(90_000) { down.prompt(p1).toList() }
             check("sessionWorksWithUnreachableServer", (downTurn.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
 
+            // ---- 真实的公网 MCP 服务器（只有主机端给了地址才测）
+            val realUrl = args.optString("realMcpUrl", "")
+            if (realUrl.isNotEmpty()) {
+                val real = first.newSession(mcpServers = listOf(McpHttpServer("deepwiki", realUrl)))
+                val st = real.mcpServers.firstOrNull()
+                notes.put("realMcp", st?.let { "${it.name}:${it.connected}:${it.toolCount}:${it.reason}" } ?: "none")
+                check("realMcpConnected", st != null && st.connected && st.toolCount >= 1)
+                val toolName = args.optString("realMcpTool", "ses__deepwiki__read_wiki_structure")
+                val script = JSONObject().put("chunks", 1).put("intervalMs", 0).put("tool", toolName)
+                    .put("toolInput", JSONObject(args.optString("realMcpToolInput", "{\"repoName\":\"facebook/react\"}"))).toString()
+                val turn = withTimeout(120_000) { real.prompt(script).toList() }
+                val calls = turn.filterIsInstance<AgentOsEvent.ToolCall>().filter { it.tool == toolName }
+                val last = calls.lastOrNull()
+                notes.put("realMcpCall", last?.let { "${it.status}:${(it.resultJson ?: "").length} chars" } ?: "no call")
+                check("realMcpToolCompleted", last?.status == org.agentos.acp.ToolStatus.COMPLETED && !last.resultJson.isNullOrBlank())
+                check("realMcpTurnEnded", (turn.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
+                first.deleteSession(real.sessionId)
+            }
+
             // ---- close 保留会话；delete 彻底删除；找不到的和别人的一个样
             s1.close()
             val afterClose = second.loadSession(s1.sessionId)
@@ -348,6 +370,53 @@ class ThirdPartyScenarios(private val ctx: Context, private val scope: Coroutine
             check("neverExistedNotFound", errorOf { second.loadSession("ses_00000000000000000000000000") } == "SESSION_NOT_FOUND")
             check("deleteTwiceNotFound", errorOf { first.deleteSession(forked.sessionId) } == "SESSION_NOT_FOUND")
             first.deleteSession(down.sessionId)
+        } catch (e: AgentOsException) {
+            notes.put("exception", e.error.name + ": " + (e.message ?: ""))
+            check("noException", false)
+        } finally {
+            first.close()
+            second.close()
+        }
+        var all = true
+        for (k in checks.keys()) if (!checks.getBoolean(k)) all = false
+        return JSONObject().put("ok", all && !notes.has("exception")).put("checks", checks).put("notes", notes)
+    }
+
+    // ------------------------------------------------------------------ tp-live
+
+    /** 真实模型下的会话级模型选择。手机上要先配好一个厂商预设（同一把 key 下有多个模型）。 */
+    private suspend fun live(args: JSONObject): JSONObject {
+        val checks = JSONObject()
+        val notes = JSONObject()
+        fun check(name: String, ok: Boolean) { checks.put(name, ok) }
+        fun textOf(events: List<AgentOsEvent>) = events.filterIsInstance<AgentOsEvent.Text>().joinToString("") { it.chunk }
+        val ask = args.optString("prompt", "只回复两个字：好的")
+        val first = AgentOs.connect(ctx)
+        val second = AgentOs.connect(ctx)
+        try {
+            val s = first.newSession(toolScope = emptyList())
+            val models = s.availableModels
+            notes.put("models", models.joinToString { it.id }).put("current", s.model ?: "null")
+            check("hasModelChoices", models.size >= 2)
+            check("currentIsTheConfiguredModel", s.model != null && models.any { it.id == s.model })
+            val t1 = withTimeout(120_000) { s.prompt(ask).toList() }
+            notes.put("answer1", textOf(t1).take(60))
+            check("realModelAnswers", textOf(t1).isNotBlank() && (t1.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
+
+            val other = models.firstOrNull { it.id != s.model }
+            if (other != null) {
+                s.setModel(other.id)
+                check("setModelReflected", s.model == other.id)
+                val t2 = withTimeout(120_000) { s.prompt(ask).toList() }
+                notes.put("answer2", textOf(t2).take(60)).put("switchedTo", other.id)
+                check("switchedModelAnswers", textOf(t2).isNotBlank() && (t2.last() as? AgentOsEvent.Done)?.stopReason == "end_turn")
+                val loaded = second.loadSession(s.sessionId)
+                check("loadSeesSwitchedModel", loaded.model == other.id)
+                check("loadHistoryHasBothTurns", loaded.history.filterIsInstance<AgentOsEvent.UserMessage>().size == 2)
+            }
+            val bad = try { s.setModel("not-a-real-model"); "ACCEPTED" } catch (e: AgentOsException) { e.error.name }
+            check("unknownModelRejected", bad == "INVALID_REQUEST")
+            first.deleteSession(s.sessionId)
         } catch (e: AgentOsException) {
             notes.put("exception", e.error.name + ": " + (e.message ?: ""))
             check("noException", false)
