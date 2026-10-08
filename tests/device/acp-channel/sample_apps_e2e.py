@@ -1,35 +1,42 @@
 #!/usr/bin/env python3
 """
-Sample-apps acceptance (A12): can AgentOS operate the alarm, calendar and notes apps completely through MCP? Repeatable, with evidence.
+Sample-apps acceptance (A12): can AgentOS operate the alarm, calendar, notes, todo and sms apps completely through MCP? Repeatable, with evidence.
 
-adb only, no taps. Needs the AgentOS **debug** build and the three sample apps' **debug** builds on the device, `adb` and `node` (acp-bridge)
+adb only, no taps. Needs the AgentOS **debug** build and the five sample apps' **debug** builds on the device, `adb` and `node` (acp-bridge)
 on the computer. The state of each app is read through the app's own debug `dump` receiver (a real phone has no sqlite3), see sample_apps_lib.py.
 
-**It resets the three sample apps before and after the run** (`--es cmd reset`: every alarm, note and calendar event in them is removed and the
-alarms are cancelled in the system): run it on a test phone. `--no-reset` keeps what is there and only removes what this run created
-(marker `e2e-<run id>`).
+**It resets the sample apps before and after the run** (`--es cmd reset`: every alarm, note, calendar event and todo in them is removed and the
+alarms are cancelled in the system; the sms app only loses its own outbox and drafts, never the system SMS store): run it on a test phone.
+`--no-reset` keeps what is there and only removes what this run created (marker `e2e-<run id>`; the sms outbox rows cannot be removed one by one).
+
+**The sms app runs on emulators only** (serial `emulator-NNNN`): it reads and sends real text messages. The incoming messages are made with
+`adb emu sms send`, the send goes to a second emulator when `adb devices` lists one (`--sms-peer 5616|none|auto`). On a real phone the sms app is left out
+of everything (not installed, enabled, reset or driven) and the report says "skipped"; `--sms-on-device` allows it (sends only to the number given).
 
     ./gradlew :app:assembleDebug :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug \\
-              :tests:device:acp-channel:client:assembleDebug
-    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL                # scripted, deterministic (fake model)
+              :plugins:samples:todo:assembleDebug :plugins:samples:sms:assembleDebug :tests:device:acp-channel:client:assembleDebug
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial emulator-5604                  # scripted, deterministic (fake model), all five apps
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial 38290DLJH0007B                 # a real phone: four apps, sms skipped
     set -a; . ../.secrets/minimax.env; set +a
-    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live         # natural language, real MiniMax-M3
-    python3 tests/device/acp-channel/sample_apps_e2e.py --serial $ANDROID_SERIAL --live --tunnel  # phone without internet (see live_tunnel.py)
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial emulator-5604 --live           # natural language, real MiniMax-M3
+    python3 tests/device/acp-channel/sample_apps_e2e.py --serial emulator-5604 --live --tunnel  # phone without internet (see live_tunnel.py)
 
 Flow (every part writes its checks into the result JSON, `results/raw/sample-apps-*.json`; exit code 0 when all checks pass):
   1. install (unless --no-install), start each sample app once, grant AgentOS what it needs, battery-optimisation exemption for AgentOS while it
-     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入").
+     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入"); the sms app also gets READ_SMS / SEND_SMS (`pm grant`).
   2. desktop access on from the foreground UI (inapp `desktop-access`: it runs `ensureTestModel` and puts the loopback fake model endpoint on
      the phone), THEN the model: the fake endpoint (scripted) or, with --live, the real MiniMax preset minimax-cn / MiniMax-M3 (key through stdin,
      removed afterwards). `setup.model` reads DesktopGatewayDebugReceiver `status` and checks the model source before anything is asked.
-  3. reset of the three apps; `ExtensionDebugReceiver list`: the three plugins are discovered and off by default (--allow-enabled skips the "off" check).
-  4. `enable` each, `catalog`: all documented tools are offered under their final names (`mcp__alarm__alarm__alarm_create`...), risk level as
-     RiskPolicy gives it for third-party MCP tools: WRITE, and HIGH for `*_delete` (destructiveHint).
+  3. reset of the apps; `ExtensionDebugReceiver list`: the plugins are discovered and off by default (--allow-enabled skips the "off" check).
+  4. `enable` each, `catalog`: all 44 documented tools are offered under their final names (`mcp__alarm__alarm__alarm_create`...), risk level as
+     RiskPolicy gives it for third-party MCP tools: WRITE (also the read tools, `sms_thread_list` included: readOnlyHint never lowers it), and HIGH for
+     `*_delete` and `sms_send` (destructiveHint).
   5. pair, `ConsentDebugReceiver mode=allow`, ACP session through acp-bridge.
   6. scripted: one fake-model script per step (deterministic CRUD of each app, failure paths: missing parameter, unknown id, declined
      confirmation in a new session, plugin switched off); after each step the app's dump is compared with what the step must have done (alarms:
-     also that they are really registered with AlarmManager). live: three natural-language prompts; the verdict is the app state, not a fixed
-     tool sequence (the model may look first), the sequence and the times are recorded.
+     also that they are really registered with AlarmManager). live: natural-language prompts (alarm, calendar, notes, todo, sms and the cross-app scenario
+     of docs/next-apps-plan.md section 9); the verdict is the app state, not a fixed tool sequence (the model may look first), the sequence and the times
+     are recorded. The live sms cases never send: the single-app one is declined by the driver, the cross-app one is refused by the app (short number).
   7. reset (or the marker cleanup), consent mode off, plugins off, desktop access off, exemption restored, live model removed.
 
 AGENTOS_EXT_RECEIVER and AGENTOS_CONSENT_RECEIVER override the component names of the AgentOS debug receivers; LIVE_MODEL the live model id.
@@ -52,9 +59,10 @@ TEST_MODEL_KEY = "agtest-fake-model-key"
 
 class Options:
     def __init__(self, live=False, tunnel=False, only=None, allow_enabled=False, keep_data=False, reset=True, tell_date=False,
-                 step_timeout=90, live_timeout=240):
+                 step_timeout=90, live_timeout=240, sms_on_device=False, sms_peer="auto"):
         self.live, self.tunnel, self.only, self.allow_enabled, self.keep_data = live, tunnel, only, allow_enabled, keep_data
         self.reset, self.tell_date, self.step_timeout, self.live_timeout = reset, tell_date, step_timeout, live_timeout
+        self.sms_on_device, self.sms_peer = sms_on_device, sms_peer
 
 
 def log_line(m):
@@ -65,6 +73,9 @@ def run_acceptance(env, opts, log=log_line):
     """The whole acceptance against `env` (see RealEnv for what it must offer). Returns the report dict (never raises for a failed check)."""
     run_id = uuid.uuid4().hex[:6]
     today, offset = L.device_today_and_offset(env.adb)
+    apps, skipped = L.select_apps(env.adb, opts.sms_on_device)        # the sms app only on emulators (or with --sms-on-device)
+    env.apps = apps                                                    # what gets installed, started, enabled and switched off again
+    peer = L.find_sms_peer(env.adb, opts.sms_peer) if "sms" in apps else None
     steps, notes = [], []
     session = None
     ctx = None
@@ -78,12 +89,18 @@ def run_acceptance(env, opts, log=log_line):
         env.prepare_device(opts)
         env.open_desktop(opts)      # first: its scenario puts the loopback fake model endpoint on the phone
         env.ensure_model(opts)      # then the model (the real one last)
-        ctx = L.Context(env.adb, env.ext, env.consent, None, today, offset, run_id, log=log, gateway=env.gateway, exclusive=opts.reset)
+        ctx = L.Context(env.adb, env.ext, env.consent, None, today, offset, run_id, log=log, gateway=env.gateway, exclusive=opts.reset, apps=apps, sms_peer=peer)
+        ctx.skipped = skipped
+        for item in skipped:
+            log("  skip %s: %s" % (item["what"], item["reason"]))
+        if peer:
+            log("  sms steps send one message to emulator %s (the first other emulator in `adb devices`, or --sms-peer; --sms-peer none to send nothing)" % peer)
+        n = len(apps)
         record(S.run_check_step("setup.model", "the phone's model source is the intended one", S.setup_model(opts.live, opts.tunnel), ctx))
         if opts.reset:
-            record(S.run_check_step("setup.reset", "the three apps start empty (debug reset)", S.setup_reset, ctx))
-        record(S.run_check_step("setup.discover", "three plugins are discovered" + ("" if opts.allow_enabled else " and off by default"), S.setup_discover(opts.allow_enabled), ctx))
-        record(S.run_check_step("setup.enable", "enable the three plugins", S.setup_enable, ctx))
+            record(S.run_check_step("setup.reset", "the %d apps start empty (debug reset)" % n, S.setup_reset, ctx))
+        record(S.run_check_step("setup.discover", "%d plugins are discovered" % n + ("" if opts.allow_enabled else " and off by default"), S.setup_discover(opts.allow_enabled), ctx))
+        record(S.run_check_step("setup.enable", "enable the %d plugins" % n, S.setup_enable, ctx))
         record(S.run_check_step("setup.catalog", "catalog: documented tools, final names, risk levels", S.setup_catalog, ctx))
         session = env.open_session()
         ctx.session = session
@@ -91,17 +108,15 @@ def run_acceptance(env, opts, log=log_line):
         if all(s["ok"] for s in steps):
             plan = S.live_cases(ctx, opts.tell_date) if opts.live else S.scripted_steps(ctx)
             for item in plan:
-                if opts.only and item_sample(item) not in opts.only:
+                if opts.only and not set(item_apps(item)) <= opts.only:
                     continue
                 if isinstance(item, tuple):
-                    record(S.run_check_step(item[0], item[1], item[2], ctx))
+                    record(S.run_check_step(item[0], item[1], item[2], ctx))     # (id, title, fn[, apps])
                 elif opts.live:
                     record(S.run_live_case(item, ctx, opts.live_timeout))
                 else:
                     record(L.run_step(item, ctx, opts.step_timeout))
-            if opts.live:
-                for sample in sorted({i.sample for i in plan if opts.only is None or i.sample in opts.only}):
-                    record(S.run_check_step(*S.consent_audit_step(sample), ctx))
+            # live: the audit of an app is a plan item right after its case (ConsentDebugReceiver keeps only the latest 50 requests)
         else:
             notes.append("setup failed: the app steps were not run")
     except Exception as e:  # noqa: BLE001
@@ -111,7 +126,7 @@ def run_acceptance(env, opts, log=log_line):
     try:
         if ctx is not None and not opts.keep_data:
             if opts.reset:
-                record(S.run_check_step("teardown.reset", "the three apps are left empty (debug reset)", S.setup_reset, ctx))
+                record(S.run_check_step("teardown.reset", "the %d apps are left empty (debug reset)" % len(apps), S.setup_reset, ctx))
             elif session is not None:
                 leftovers = S.cleanup(ctx)
                 if leftovers:
@@ -121,15 +136,25 @@ def run_acceptance(env, opts, log=log_line):
     finally:
         env.finish(notes)
     summary = L.summarize(steps)
+    notes += ["skipped %s: %s" % (x["what"], x["reason"]) for x in (ctx.skipped if ctx is not None else skipped)]
     return {"suite": "sample-apps", "mode": "live" if opts.live else "scripted", "runId": run_id, "ok": summary["failed"] == 0 and bool(steps),
-            "summary": summary, "steps": steps, "leftovers": leftovers, "notes": notes, "totalSec": round(time.time() - t0, 1)}
+            "summary": summary, "apps": apps, "skipped": ctx.skipped if ctx is not None else skipped, "smsPeer": peer,
+            "steps": steps, "leftovers": leftovers, "notes": notes, "totalSec": round(time.time() - t0, 1)}
 
 
 def item_sample(item):
-    """The app a plan item belongs to (check steps are tuples `(id, title, fn)` whose id is `audit.<app>`)."""
+    """The app a plan item belongs to (check steps are tuples `(id, title, fn)`; the app is the first part of the id that names one: `audit.todo`,
+    `audit.cross.sms`, `sms.prepare`)."""
     if isinstance(item, tuple):
-        return item[0].split(".", 1)[1]
+        return next((part for part in item[0].split(".") if part in L.SAMPLES), None)
     return getattr(item, "sample", None)
+
+
+def item_apps(item):
+    """Every app a plan item touches (a cross-app live case and its audits touch several; for the others it is [item_sample])."""
+    if isinstance(item, tuple) and len(item) > 3:
+        return list(item[3])
+    return list(getattr(item, "apps", None) or [item_sample(item)])
 
 
 def _first_failure(result):
@@ -158,6 +183,7 @@ class RealEnv:
         self.tunnel = None
         self.bridge = None
         self.state_dir = tempfile.TemporaryDirectory(prefix="e2e-bridge-")
+        self.apps = list(L.SAMPLES)         # the sample apps this run drives (run_acceptance narrows it: no sms on a real phone)
         self.had_exemption = False
         self.live_key = None
         self.tunnel_requests = None
@@ -168,10 +194,15 @@ class RealEnv:
         if not self.args.no_install:
             R.install(adb.base, os.path.join(R.REPO, "app", "build", "outputs", "apk", "debug", "app-debug.apk"))
             R.install(adb.base, os.path.join(R.REPO, "tests", "device", "acp-channel", "client", "build", "outputs", "apk", "debug", "client-debug.apk"))
-            for s in L.SAMPLES.values():
-                R.install(adb.base, s.apk_path(R.REPO))
-        for s in L.SAMPLES.values():
-            adb.sh("monkey -p %s -c android.intent.category.LAUNCHER 1" % s.package, check=False)
+            for name in self.apps:
+                R.install(adb.base, L.SAMPLES[name].apk_path(R.REPO))
+        for name in self.apps:
+            adb.sh("monkey -p %s -c android.intent.category.LAUNCHER 1" % L.SAMPLES[name].package, check=False)
+        if "sms" in self.apps:
+            # an emulator: the SMS permissions are granted from the shell (the user would tap "grant"; an app installed with `adb install` is not under the
+            # restricted-settings rule, sms README V1 row 1/5). The sms steps revoke them once and restore them.
+            for perm in L.SMS_PERMISSIONS:
+                adb.sh("pm grant %s %s" % (L.SAMPLES["sms"].package, perm), check=False)
         time.sleep(2)
         adb.sh("input keyevent KEYCODE_HOME", check=False)
         adb.sh("pm grant %s android.permission.POST_NOTIFICATIONS" % R.APP_PKG, check=False)
@@ -228,7 +259,7 @@ class RealEnv:
     def finish(self, notes):
         R = self.R
         for what, fn in (("consent off", lambda: self.consent.set_mode("off")),
-                         ("plugins off", lambda: [self.ext.disable(s.package) for s in L.SAMPLES.values()]),
+                         ("plugins off", lambda: [self.ext.disable(L.SAMPLES[n].package) for n in self.apps]),
                          ("bridge close", lambda: self.bridge and self.bridge.close()),
                          ("desktop access off", lambda: self.gateway.op("disable")),
                          ("revoke pairings", lambda: self.gateway.op("revoke_all"))):
@@ -292,7 +323,11 @@ def main():
     ap.add_argument("--live", action="store_true", help="natural-language prompts to the real MiniMax (key from MINIMAX_API_KEY, delivered through stdin)")
     ap.add_argument("--tunnel", action="store_true", help="with --live, for a phone without internet: the real key stays on the computer (live_tunnel.py)")
     ap.add_argument("--tell-date", action="store_true", help="with --live, start each prompt with today's date (otherwise the model has to find it out itself, agenda_today)")
-    ap.add_argument("--only", help="comma separated: alarm,calendar,notes")
+    ap.add_argument("--only", help="comma separated: alarm,calendar,notes,todo,sms (the plan items of the other apps are not run; setup still covers all of them)")
+    ap.add_argument("--sms-on-device", action="store_true", help="run the sms steps on a REAL phone too (default: only on emulators, serial emulator-NNNN: the sms app "
+                    "reads and sends real text messages). Nothing is ever sent to a number the driver was not given")
+    ap.add_argument("--sms-peer", default="auto", help="the number the sms steps send to: a second emulator's console port (5616), 'none' (only check the "
+                    "confirmation and the refusal), or 'auto' = the first other emulator in `adb devices`")
     ap.add_argument("--no-install", action="store_true")
     ap.add_argument("--allow-enabled", action="store_true", help="do not require the plugins to be off at the start (rerun after an aborted run)")
     ap.add_argument("--no-reset", action="store_true", help="do not reset the three apps before and after; only remove what this run created")
@@ -308,10 +343,11 @@ def main():
     device = device_info(adb)
     print(json.dumps(device, ensure_ascii=False), flush=True)
     if not a.no_reset:
-        print("note: the alarm, calendar and notes apps on this phone are reset before and after the run (--no-reset keeps them)", flush=True)
+        print("note: the alarm, calendar, notes, todo and sms apps on this phone are reset before and after the run (--no-reset keeps them; the sms reset only "
+              "clears the app's own outbox and drafts)", flush=True)
     env = RealEnv(adb, a)
     opts = Options(live=a.live, tunnel=a.tunnel, only=set(a.only.split(",")) if a.only else None, allow_enabled=a.allow_enabled,
-                   keep_data=a.keep_data, reset=not a.no_reset, tell_date=a.tell_date)
+                   keep_data=a.keep_data, reset=not a.no_reset, tell_date=a.tell_date, sms_on_device=a.sms_on_device, sms_peer=a.sms_peer)
     report = run_acceptance(env, opts)
     if env.tunnel_requests is not None:
         report["tunnelRequests"] = env.tunnel_requests

@@ -1,6 +1,6 @@
 """Sample-apps acceptance: building blocks (A12). The driver is sample_apps_e2e.py, the scenarios are sample_apps_scenarios.py.
 
-Goal of the acceptance: the alarm, calendar and notes apps (plugins/samples/*) can be driven completely by AgentOS through MCP, with
+Goal of the acceptance: the alarm, calendar, notes, todo and sms apps (plugins/samples/*) can be driven completely by AgentOS through MCP, with
 evidence. Everything here goes through adb only (no taps): debug broadcast receivers of AgentOS, the acp-bridge for the conversation,
 and the **apps' own debug dump / reset receivers** for the ground truth (a real phone has no `sqlite3`, `run-as <pkg> sqlite3` fails there).
 
@@ -27,6 +27,21 @@ paged with `next_offset`, null = last page; `--es cmd reset` clears the app):
                     reschedules synchronously: no polling needed). `--es cmd clear` still exists (logcat only, not used here).
           The calendar keeps exactly one reminder alarm armed: the earliest upcoming reminder of all events. It is rescheduled with a 250 ms debounce after
           a data change, so the checks on it re-read the dump for a few seconds instead of trusting the first read.
+  todo     org.agentos.sample.todo/.debug.DebugToolReceiver
+           dump  -> {"todos":[{id,title,status (todo|doing|done|shelved),priority (high|medium|low),due (date | ISO with offset | null),due_all_day,tags,parent_id,
+                     completed_at,overdue,created_at,updated_at,notes}] (every todo, subtasks and done ones included; the fields of todo_get),
+                     "counts":{todo,doing,done,shelved},"total","offset","count","next_offset","now","time_zone"}
+           reset -> {"cleared":N,"remaining":0,"remaining_in_db":0}   (synchronous: remaining_in_db counts the database rows)
+  sms      org.agentos.sample.sms/.debug.DebugToolReceiver     (an independent sample app: its read tools are confirmed every time too)
+           dump  -> {"mode":"full|partial|compose_only","permissions":{read_sms,send_sms},"settings":{mask_codes,allow_short_numbers,rate_limit},
+                     "outbox":[{id,to,text,parts,state (queued|sent|delivered|failed),sent_parts,delivered_parts,error,created_at,updated_at}] (what THIS app sent,
+                     newest first),"drafts":[{id,to,text,created_at}],"total","offset","count","next_offset","now","time_zone"}
+                    no incoming messages in it: the dump does not read the system SMS store
+           reset -> {"cleared":N,"outbox_remaining":0,"drafts_cleared":M}   (outbox and drafts only; never the system SMS store, the settings or the permissions)
+           set   --es cmd set --es key mask_codes|allow_short_numbers|rate_limit --es value <v>  -> the new settings. Emulators call each other by their port
+                    number ("5616"), which is a short number: allow_short_numbers has to be on to send to it.
+          The sms steps run on emulators only (`adb -s emulator-NNNN emu sms send <from> <text>` makes the incoming messages; nothing here is ever sent to a real
+          number); a real phone needs --sms-on-device.
 The state readers return plain dicts (the driver's own shape, below), so the scenarios do not depend on the apps' JSON names.
 
 The AgentOS debug receivers (main, app/src/debug; shapes checked against the code, A12 follow-up):
@@ -84,7 +99,8 @@ class Sample:
 # docs/sample-apps.md section 4 (the minimum lists; the apps may offer more)
 SAMPLES = {
     "alarm": Sample("alarm", "org.agentos.sample.alarm",
-                    ["alarm_list", "alarm_get", "alarm_create", "alarm_update", "alarm_set_enabled", "alarm_delete", "alarm_next", "alarm_dismiss"],
+                    ["alarm_list", "alarm_get", "alarm_create", "alarm_update", "alarm_set_enabled", "alarm_delete", "alarm_next", "alarm_dismiss",
+                     "alarm_system_next"],
                     ".debug.DebugToolReceiver"),
     "calendar": Sample("calendar", "org.agentos.sample.calendar",
                        ["calendar_list", "calendar_create", "calendar_delete", "event_list", "event_get", "event_create", "event_update",
@@ -93,7 +109,15 @@ SAMPLES = {
     "notes": Sample("notes", "org.agentos.sample.notes",
                     ["note_list", "note_get", "note_create", "note_update", "note_append", "note_search", "note_trash", "note_restore", "note_delete", "tag_list"],
                     ".debug.DebugCallReceiver"),
+    "todo": Sample("todo", "org.agentos.sample.todo",
+                   ["todo_list", "todo_get", "todo_create", "todo_update", "todo_set_status", "todo_delete", "todo_search", "todo_summary"],
+                   ".debug.DebugToolReceiver"),
+    "sms": Sample("sms", "org.agentos.sample.sms",
+                  ["sms_thread_list", "sms_message_list", "sms_search", "sms_send", "sms_send_status", "sms_compose"],
+                  ".debug.DebugToolReceiver"),
 }
+
+SMS_PERMISSIONS = ["android.permission.READ_SMS", "android.permission.SEND_SMS"]
 
 
 def model_name(sample, tool):
@@ -105,9 +129,14 @@ def source_line(sample):
     return "来自插件「%s」 · 服务器「%s」" % (sample, sample)
 
 
+# The tools that carry destructiveHint=true without being called *_delete: sms_send (docs/next-apps-plan.md 4: every send is confirmed, never "always allow")
+DESTRUCTIVE_TOOLS = {"sms_send"}
+
+
 def expected_risk(tool):
-    """RiskPolicy for third-party MCP tools: WRITE by default, readOnlyHint never lowers it, destructiveHint (the *_delete tools) raises to HIGH."""
-    return "HIGH" if tool.endswith("_delete") else "WRITE"
+    """RiskPolicy for third-party MCP tools (core/runtime broker/RiskPolicy.kt): WRITE by default, readOnlyHint never lowers it (so the read tools of the
+    independent sample apps, sms_thread_list included, are WRITE = confirmed every time), destructiveHint (the *_delete tools and sms_send) raises to HIGH."""
+    return "HIGH" if tool.endswith("_delete") or tool in DESTRUCTIVE_TOOLS else "WRITE"
 
 
 # ---------------------------------------------------------------------- adb helpers
@@ -132,6 +161,13 @@ class RealAdb:
 
     def prop(self, name):
         return self.base.prop(name)
+
+    def devices(self):
+        """Serials of the devices `adb devices` lists as online (this one included). The one place the driver looks beyond its own `-s <serial>`:
+        it needs to know whether a second emulator exists to send an SMS to."""
+        import subprocess
+        out = subprocess.run([self.adb, "devices"], capture_output=True, text=True, timeout=30).stdout
+        return [p[0] for p in (line.split() for line in out.splitlines()[1:]) if len(p) >= 2 and p[1] == "device"]
 
 
 class LongExtra(int):
@@ -364,8 +400,76 @@ class CalendarState:
 SLEEP_SCALE = 1.0  # unit tests shrink the waits
 
 
+class TodoState:
+    """Todos from the app's dump (`todos`: every todo, subtasks and done ones included, each with the fields of `todo_get`). Stable fields only, so that
+    "unchanged" comparisons do not trip over clocks: `created_at`, `updated_at` and the derived `overdue` flag are left out. `completed_at` stays (it only
+    changes when the status does; "setting the status it already has changes nothing" is checked with it). `due` is the app's own string (a plain date
+    for an all-day due, ISO-8601 with the device offset otherwise), `due_ms` the same instant as epoch milliseconds for timed dues (None for all-day)."""
+    sample = SAMPLES["todo"]
+
+    def __init__(self, adb):
+        self.adb = adb
+
+    def snapshot(self):
+        d = dump_pages(self.adb, self.sample, "todos")
+        todos = []
+        for t in d["todos"]:
+            all_day = bool(t.get("due_all_day"))
+            todos.append({"id": str(t["id"]), "title": t["title"], "notes": t.get("notes") or "", "status": t["status"], "priority": t["priority"],
+                          "due": t.get("due"), "due_all_day": all_day, "due_ms": None if all_day or not t.get("due") else iso_ms(t["due"]),
+                          "tags": list(t.get("tags") or []), "parent_id": t.get("parent_id"), "completed_at": t.get("completed_at")})
+        return {"todos": todos, "counts": dict(d.get("counts") or {})}
+
+    def reset(self):
+        code, data = broadcast(self.adb, self.sample.component, {"cmd": "reset"})
+        # the receiver counts the rows in the database itself, so the app is empty when this returns
+        return code == 1 and data.get("remaining") == 0 and data.get("remaining_in_db") == 0, data
+
+
+class SmsState:
+    """The sms app's own records from its dump: `mode` (full / partial / compose_only), `permissions`, `settings`, the `outbox` (what THIS app sent, newest
+    first) and the `drafts` sms_compose left. The dump has no incoming messages (it does not read the system SMS store). Clocks are left out. The state of an
+    outbox row (queued -> sent -> delivered) changes by itself after a send: compare the rows by (id, to, text), not by state, when a step must not have
+    sent anything."""
+    sample = SAMPLES["sms"]
+
+    def __init__(self, adb):
+        self.adb = adb
+
+    def snapshot(self):
+        d = dump_pages(self.adb, self.sample, "outbox")
+        outbox = [{"id": str(o["id"]), "to": o["to"], "text": o["text"], "parts": o.get("parts"), "state": o["state"], "sent_parts": o.get("sent_parts"),
+                   "delivered_parts": o.get("delivered_parts"), "error": o.get("error")} for o in d["outbox"]]
+        return {"mode": d.get("mode"), "permissions": dict(d.get("permissions") or {}), "settings": dict(d.get("settings") or {}), "outbox": outbox,
+                # (id, to, text) of every outbox row: what was sent, without the state that moves by itself. "Nothing was sent" compares these.
+                "outbox_keys": [(o["id"], o["to"], o["text"]) for o in outbox],
+                "drafts": [{"id": str(x["id"]), "to": x["to"], "text": x.get("text")} for x in d.get("drafts") or []]}
+
+    def reset(self):
+        """Clears the outbox (with the send-rate and duplicate history) and the drafts; never the system SMS store, the settings or the permissions."""
+        code, data = broadcast(self.adb, self.sample.component, {"cmd": "reset"})
+        return code == 1 and data.get("outbox_remaining") == 0, data
+
+    def set(self, key, value):
+        """Debug `set` (mask_codes / allow_short_numbers true|false, rate_limit 1..30) -> the new settings."""
+        code, data = broadcast(self.adb, self.sample.component, {"cmd": "set", "key": key, "value": str(value).lower() if isinstance(value, bool) else str(value)})
+        if code != 1 or "error" in data:
+            raise StateReadError("sms set %s=%s failed: %s" % (key, value, json.dumps(data, ensure_ascii=False)[:300]))
+        return data
+
+    def call(self, tool, args):
+        """Debug `tool` (in-process, the same tools MCP registers) -> (isError, parsed result or text). Emulator only: the result would be printed by adb."""
+        code, data = broadcast(self.adb, self.sample.component, {"tool": tool, "args": json.dumps(args, ensure_ascii=False)})
+        text = data.get("result")
+        try:
+            return bool(data.get("isError", code != 1)), json.loads(text)
+        except (TypeError, ValueError):
+            return bool(data.get("isError", code != 1)), text
+
+
 def reset_apps(adb, only=None):
-    """Clear the three sample apps (debug builds only): [{app, ok, detail}]. Used before and after a run (everything in the apps is removed)."""
+    """Clear the sample apps (debug builds only): [{app, ok, detail}]. Used before and after a run (everything in the apps is removed;
+    the sms app only loses its own outbox and drafts)."""
     out = []
     for name, cls in STATE_READERS.items():
         if only and name not in only:
@@ -378,7 +482,7 @@ def reset_apps(adb, only=None):
     return out
 
 
-STATE_READERS = {"alarm": AlarmState, "calendar": CalendarState, "notes": NotesState}
+STATE_READERS = {"alarm": AlarmState, "calendar": CalendarState, "notes": NotesState, "todo": TodoState, "sms": SmsState}
 
 
 # ---------------------------------------------------------------------- results
@@ -538,8 +642,13 @@ class Step:
 class Context:
     """Everything a step needs: the device pieces, the variables captured by earlier steps, the dates."""
 
-    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print, gateway=None, exclusive=False):
+    def __init__(self, adb, ext, consent, session, today, tz_offset, run_id, log=print, gateway=None, exclusive=False, apps=None, sms_peer=None):
         self.adb, self.ext, self.consent, self.session, self.gateway = adb, ext, consent, session, gateway
+        # the sample apps this run drives (all five; the sms app only on emulators or with --sms-on-device, see [select_apps])
+        self.apps = list(apps) if apps is not None else list(SAMPLES)
+        # the number (= console port) of a second emulator the sms app can send to, None when there is none: then the send / delivery steps are not run
+        self.sms_peer = sms_peer
+        self.skipped = []           # [{"what", "reason"}]: parts of the acceptance that were not run (they go into the report)
         # the apps were reset before the run: what is in them is this run's data only (the calendar's single armed alarm is then one of this run's events)
         self.exclusive = exclusive
         self.today, self.tz_offset, self.run_id, self.log = today, tz_offset, run_id, log
@@ -710,3 +819,48 @@ def device_today_and_offset(adb):
     if not re.fullmatch(r"[+-]\d{4}", z):
         raise DriverError("cannot read the device time zone: %r" % z)
     return today, "%s%s:%s" % (z[0], z[1:3], z[3:5])
+
+
+# ---------------------------------------------------------------------- which apps run on which device
+
+def is_emulator(serial):
+    return str(serial).startswith("emulator-")
+
+
+def select_apps(adb, sms_on_device=False):
+    """-> (apps, skipped). The sms app sends and reads real text messages: its steps run on emulators only (serial `emulator-NNNN`; the incoming messages
+    come from `adb emu sms send`, the recipient is another emulator), on a real phone only with --sms-on-device. Otherwise it is left out of everything
+    (not installed, not enabled, not reset, no steps) and the report says so."""
+    apps = list(SAMPLES)
+    skipped = []
+    if "sms" in apps and not is_emulator(adb.serial) and not sms_on_device:
+        apps.remove("sms")
+        skipped.append({"what": "sms", "reason": "%s is not an emulator: the sms app reads and sends real text messages, so its steps run on emulators only "
+                                                  "(--sms-on-device allows a real phone)" % adb.serial})
+    return apps, skipped
+
+
+def find_sms_peer(adb, spec="auto"):
+    """The number of the emulator the sms steps send to: `spec` is a console port ("5616"), "none", or "auto" = the first other emulator `adb devices`
+    lists (an emulator's number is its console port: `emulator-5616` is reached as 5616). None when there is none."""
+    if spec == "none":
+        return None
+    if spec not in (None, "auto"):
+        return str(spec)
+    others = [x for x in adb.devices() if is_emulator(x) and x != adb.serial]
+    return others[0].split("-", 1)[1] if others else None
+
+
+# ---------------------------------------------------------------------- the sms app on an emulator
+
+def emu_sms_send(adb, sender, text):
+    """An incoming SMS on an emulator (`adb -s emulator-NNNN emu sms send <from> <text>`): it lands in the system SMS store like a real one."""
+    out = adb.run("emu", "sms", "send", sender, text, check=False)
+    if "KO" in out:
+        raise DriverError("emu sms send %s failed: %s" % (sender, out.strip()[:200]))
+    return out
+
+
+def sms_permissions(adb, grant):
+    """Grant / revoke READ_SMS and SEND_SMS of the sms app from the shell (what the user does in the app's permission screen)."""
+    return [adb.sh("pm %s %s %s" % ("grant" if grant else "revoke", SAMPLES["sms"].package, perm), check=False) for perm in SMS_PERMISSIONS]
