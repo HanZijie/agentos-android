@@ -17,8 +17,11 @@ class ConsentUiLogicTest {
     private fun card(id: String, kind: String = "APP", pkg: String? = "com.example.app") = Card(
         requestId = id, title = MessageRef.of(ConsentMessages.TITLE, "t"), initiatorLine = MessageRef.of(ConsentMessages.INITIATOR_NAMED, "com.example.app"), callerKind = kind, callerPackage = pkg, sourceLine = null,
         toolDisplayName = "x", argumentsPreview = "", argumentsTruncated = false, risk = "WRITE", severity = ConsentSeverity.ELEVATED,
-        riskLabel = "", riskDescription = "",
-        options = listOf(Option(ConsentChoice.ALLOW_ONCE, "允许一次", false), Option(ConsentChoice.DENY, "拒绝", true)),
+        riskLabel = MessageRef.of(ConsentMessages.RISK_WRITE), riskDescription = MessageRef.of(ConsentMessages.RISK_DESC_WRITE),
+        options = listOf(
+            Option(ConsentChoice.ALLOW_ONCE, MessageRef.of(ConsentMessages.OPTION_ALLOW_ONCE), false),
+            Option(ConsentChoice.DENY, MessageRef.of(ConsentMessages.OPTION_DENY), true),
+        ),
         deadlineMillis = 61_000, timeoutMillis = 60_000, queuePosition = 0, queueSize = 1,
     )
 
@@ -70,10 +73,18 @@ class ConsentUiLogicTest {
 
     @Test
     fun countdownAndQueueNote() {
-        assertEquals("还剩 60 秒；不回答将按拒绝处理", ConsentLabels.countdown(61_000, 1_000))
-        assertEquals("还剩 1 秒；不回答将按拒绝处理", ConsentLabels.countdown(61_000, 60_001))
-        assertTrue(ConsentLabels.countdown(61_000, 61_000).contains("已超时"))
-        assertNull(ConsentLabels.queueNote(1))
-        assertEquals("还有 2 条待确认，答复后会依次显示", ConsentLabels.queueNote(3))
+        val zh = ResStrings.zh
+        val en = ResStrings.en
+        assertEquals("还剩 60 秒；不回答将按拒绝处理", ConsentLabels.countdown(61_000, 1_000, zh))
+        assertEquals("还剩 1 秒；不回答将按拒绝处理", ConsentLabels.countdown(61_000, 60_001, zh))
+        assertTrue(ConsentLabels.countdown(61_000, 61_000, zh).contains("已超时"))
+        assertEquals("60 seconds left. No answer counts as Deny", ConsentLabels.countdown(61_000, 1_000, en))
+        assertEquals("1 second left. No answer counts as Deny", ConsentLabels.countdown(61_000, 60_001, en))
+        assertEquals("Timed out. Treating it as Deny…", ConsentLabels.countdown(61_000, 61_000, en))
+        assertNull(ConsentLabels.queueNote(1, zh))
+        assertNull(ConsentLabels.queueNote(1, en))
+        assertEquals("还有 2 条待确认，答复后会依次显示", ConsentLabels.queueNote(3, zh))
+        assertEquals("2 more requests are waiting. They appear one by one after you answer", ConsentLabels.queueNote(3, en))
+        assertEquals("1 more request is waiting. It appears after you answer", ConsentLabels.queueNote(2, en))
     }
 }

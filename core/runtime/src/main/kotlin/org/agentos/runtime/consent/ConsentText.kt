@@ -164,24 +164,30 @@ internal object ConsentText {
         ToolRisk.HIGH -> ConsentSeverity.CRITICAL
     }
 
-    fun riskLabel(risk: ToolRisk) = when (risk) {
-        ToolRisk.READ -> "只读"
-        ToolRisk.WRITE -> "会修改数据"
-        ToolRisk.HIGH -> "高风险"
-    }
+    fun riskLabel(risk: ToolRisk) = MessageRef.of(
+        when (risk) {
+            ToolRisk.READ -> ConsentMessages.RISK_READ
+            ToolRisk.WRITE -> ConsentMessages.RISK_WRITE
+            ToolRisk.HIGH -> ConsentMessages.RISK_HIGH
+        },
+    )
 
-    fun riskDescription(risk: ToolRisk) = when (risk) {
-        ToolRisk.READ -> "这个操作只读取数据，不会修改。"
-        ToolRisk.WRITE -> "这个操作会修改手机上的数据。"
-        ToolRisk.HIGH -> "这是高风险操作，可能不可恢复（例如永久删除数据）。只有在你清楚它会做什么时才允许。"
-    }
+    fun riskDescription(risk: ToolRisk) = MessageRef.of(
+        when (risk) {
+            ToolRisk.READ -> ConsentMessages.RISK_DESC_READ
+            ToolRisk.WRITE -> ConsentMessages.RISK_DESC_WRITE
+            ToolRisk.HIGH -> ConsentMessages.RISK_DESC_HIGH
+        },
+    )
 
-    fun optionLabel(choice: ConsentChoice) = when (choice) {
-        ConsentChoice.ALLOW_ONCE -> "允许一次"
-        ConsentChoice.ALLOW_FOR_SESSION -> "本次对话内不再询问"
-        ConsentChoice.ALWAYS_ALLOW -> "始终允许这个工具"
-        ConsentChoice.DENY -> "拒绝"
-    }
+    fun optionLabel(choice: ConsentChoice) = MessageRef.of(
+        when (choice) {
+            ConsentChoice.ALLOW_ONCE -> ConsentMessages.OPTION_ALLOW_ONCE
+            ConsentChoice.ALLOW_FOR_SESSION -> ConsentMessages.OPTION_ALLOW_FOR_SESSION
+            ConsentChoice.ALWAYS_ALLOW -> ConsentMessages.OPTION_ALWAYS_ALLOW
+            ConsentChoice.DENY -> ConsentMessages.OPTION_DENY
+        },
+    )
 
     /**
      * 这条请求能选哪些：高风险只有“允许一次”和“拒绝”；“始终允许”需要有来源插件、写级、并且写回通道可用。

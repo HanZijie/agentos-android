@@ -25,8 +25,8 @@ enum class ConsentChoice {
     DENY,
 }
 
-/** 一个可选项，连同界面上显示的文字（文案在这里定，界面不改）。[destructive] 为 true 的是拒绝类，界面用次要样式。 */
-data class ConsentOption(val choice: ConsentChoice, val label: String, val destructive: Boolean = false)
+/** 一个可选项，连同界面上显示的文案（key，见 [ConsentMessages]；用哪种语言由界面定）。[destructive] 为 true 的是拒绝类，界面用次要样式。 */
+data class ConsentOption(val choice: ConsentChoice, val label: MessageRef, val destructive: Boolean = false)
 
 /** 界面显示的醒目程度：只读 / 写 / 高风险。 */
 enum class ConsentSeverity { NORMAL, ELEVATED, CRITICAL }
@@ -75,8 +75,8 @@ data class ConsentView(
     val argumentsTruncated: Boolean,
     val risk: ToolRisk,
     val severity: ConsentSeverity,
-    val riskLabel: String,
-    val riskDescription: String,
+    val riskLabel: MessageRef,
+    val riskDescription: MessageRef,
     val options: List<ConsentOption>,
     val createdAtMillis: Long,
     val deadlineMillis: Long,
@@ -104,7 +104,7 @@ enum class ConsentEnd {
  * 请求结案。[choice] 只在 [ConsentEnd.ANSWERED] 时有值；[notice] 是要告诉用户的一句话（例如“始终允许”没能保存、这次按“允许一次”处理），
  * 没有为 null。
  */
-data class ConsentResolution(val end: ConsentEnd, val choice: ConsentChoice? = null, val notice: String? = null)
+data class ConsentResolution(val end: ConsentEnd, val choice: ConsentChoice? = null, val notice: MessageRef? = null)
 
 /**
  * 确认界面（**Android 接缝，由 D 实现**）。协调器只负责“现在有哪些待确认”和“谁该被通知”；前台时 App 把待确认渲染成对话框，

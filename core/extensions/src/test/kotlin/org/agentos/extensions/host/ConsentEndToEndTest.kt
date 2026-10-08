@@ -254,7 +254,7 @@ class ConsentEndToEndTest {
             assertEquals(1, server.calls.size, "the user said yes: this call went through")
             E2e.awaitUntil("the surface to be told the request is resolved") { user.resolutions.isNotEmpty() }
             val notice = assertNotNull(user.resolutions.single().second.notice)
-            assertTrue("没能保存" in notice, notice)
+            assertEquals(MessageRef.of(ConsentMessages.NOTICE_UNSAVED_POLICY), notice)
 
             rt.turn()
             assertEquals(2, user.shown.size, "nothing was remembered: asked again")
@@ -269,7 +269,7 @@ class ConsentEndToEndTest {
             val v = user.shown.single()
             assertEquals(ToolRisk.HIGH, v.risk)
             assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.DENY), v.options.map { it.choice })
-            assertTrue("可能不可恢复" in v.riskDescription)
+            assertEquals(MessageRef.of(ConsentMessages.RISK_DESC_HIGH), v.riskDescription)
             assertTrue(server.calls.isEmpty(), "the forged answer did not get a destructive call through")
             assertTrue(writer.writes.isEmpty())
             assertTrue(events.single { it.eventType == EventTypes.TOOL_EXECUTION_END }.resultText().startsWith("[agentos:tool_denied]"))

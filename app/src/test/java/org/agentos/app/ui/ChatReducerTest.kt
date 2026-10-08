@@ -1,5 +1,6 @@
 package org.agentos.app.ui
 
+import org.agentos.app.i18n.ResStrings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -102,13 +103,18 @@ class ChatReducerTest {
 
     @Test
     fun failureBecomesAnErrorNotice() {
-        val err = AgentErrors.fromRpc(-32051, "model_auth_failed: 401", "model_auth_failed", false)
-        val s = ChatReducer.finished(sent().u(AgentUpdate.MessageChunk("par")), TurnOutcome.Failed(err))
-        val notice = s.items.last() as ChatItem.Notice
-        assertEquals(ChatItem.Notice.Kind.ERROR, notice.kind)
-        assertEquals("模型服务拒绝了 key", notice.title)
-        assertEquals("到设置页检查 key 是否正确、是否有这个模型的权限", notice.hint)
-        assertFalse((s.items[1] as ChatItem.Agent).streaming)
+        for ((strings, title, hint) in listOf(
+            Triple(ResStrings.zh, "模型服务拒绝了 key", "到设置页检查 key 是否正确、是否有这个模型的权限"),
+            Triple(ResStrings.en, "The model service rejected the key", "Open Settings and check that the key is correct and has access to this model"),
+        )) {
+            val err = AgentErrors.fromRpc(strings, -32051, "model_auth_failed: 401", "model_auth_failed", false)
+            val s = ChatReducer.finished(sent().u(AgentUpdate.MessageChunk("par")), TurnOutcome.Failed(err))
+            val notice = s.items.last() as ChatItem.Notice
+            assertEquals(ChatItem.Notice.Kind.ERROR, notice.kind)
+            assertEquals(title, notice.title)
+            assertEquals(hint, notice.hint)
+            assertFalse((s.items[1] as ChatItem.Agent).streaming)
+        }
     }
 
     @Test

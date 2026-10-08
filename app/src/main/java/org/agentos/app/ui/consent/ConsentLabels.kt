@@ -55,12 +55,15 @@ object ConsentLabels {
         }
     }
 
-    /** 倒计时文字：还剩几秒（向上取整）；到点后“正在按拒绝处理”。 */
-    fun countdown(deadlineMillis: Long, nowMillis: Long): String {
+    /** 倒计时文字：还剩几秒（向上取整，复数按语言）；到点后“正在按拒绝处理”。工具确认和授权提示共用。 */
+    fun countdown(deadlineMillis: Long, nowMillis: Long, strings: Strings): String {
         val left = deadlineMillis - nowMillis
-        return if (left <= 0) "已超时，正在按拒绝处理…" else "还剩 ${(left + 999) / 1000} 秒；不回答将按拒绝处理"
+        if (left <= 0) return strings.get(R.string.consent_timed_out)
+        val seconds = ((left + 999) / 1000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        return strings.plural(R.plurals.consent_countdown, seconds, seconds)
     }
 
     /** 队列提示：还有别的待确认时才有。 */
-    fun queueNote(size: Int): String? = if (size > 1) "还有 ${size - 1} 条待确认，答复后会依次显示" else null
+    fun queueNote(size: Int, strings: Strings): String? =
+        if (size > 1) strings.plural(R.plurals.consent_queue_note, size - 1, size - 1) else null
 }

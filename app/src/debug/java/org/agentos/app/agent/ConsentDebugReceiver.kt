@@ -116,7 +116,7 @@ class ConsentDebugReceiver : BroadcastReceiver() {
                                 .put("options", JSONArray(e.options.map { it.name }))
                                 .put("answeredWith", e.answeredWith?.name ?: JSONObject.NULL)
                                 .put("end", e.end?.name ?: JSONObject.NULL)
-                                .put("notice", e.notice ?: JSONObject.NULL)
+                                .put("notice", e.notice?.let { zh.get(it) } ?: JSONObject.NULL)
                         },
                     ),
                 )

@@ -14,6 +14,7 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import org.agentos.runtime.consent.ConsentChoice
 import org.agentos.runtime.consent.ConsentEnd
+import org.agentos.runtime.consent.ConsentMessages
 import org.agentos.runtime.consent.ConsentResolution
 import org.agentos.runtime.consent.ConsentSeverity
 import org.agentos.runtime.consent.ConsentView
@@ -72,8 +73,8 @@ object ConsentWire {
         val argumentsTruncated: Boolean,
         val risk: String,
         val severity: ConsentSeverity,
-        val riskLabel: String,
-        val riskDescription: String,
+        val riskLabel: MessageRef,
+        val riskDescription: MessageRef,
         val options: List<Option>,
         override val deadlineMillis: Long,
         val timeoutMillis: Long,
@@ -86,9 +87,9 @@ object ConsentWire {
         fun allowsOnce(): Boolean = options.any { it.choice == ConsentChoice.ALLOW_ONCE }
     }
 
-    data class Option(val choice: ConsentChoice, val label: String, val destructive: Boolean)
+    data class Option(val choice: ConsentChoice, val label: MessageRef, val destructive: Boolean)
 
-    data class Resolution(val end: ConsentEnd, val choice: ConsentChoice?, val notice: String?)
+    data class Resolution(val end: ConsentEnd, val choice: ConsentChoice?, val notice: MessageRef?)
 
     // ---------------------------------------------------------------- :agent 侧：编码
 
@@ -104,15 +105,15 @@ object ConsentWire {
         put("argumentsTruncated", v.argumentsTruncated)
         put("risk", v.risk.name)
         put("severity", v.severity.name)
-        put("riskLabel", v.riskLabel)
-        put("riskDescription", v.riskDescription)
+        put("riskLabel", encodeRef(v.riskLabel))
+        put("riskDescription", encodeRef(v.riskDescription))
         put(
             "options",
             JsonArray(
                 v.options.map {
                     buildJsonObject {
                         put("choice", it.choice.name)
-                        put("label", it.label)
+                        put("label", encodeRef(it.label))
                         put("destructive", it.destructive)
                     }
                 },
@@ -167,7 +168,7 @@ object ConsentWire {
     fun encodeResolution(r: ConsentResolution): String = buildJsonObject {
         put("end", r.end.name)
         put("choice", r.choice?.name)
-        put("notice", r.notice)
+        put("notice", r.notice?.let { encodeRef(it) } ?: JsonNull)
     }.toString()
 
     const val KIND_AUTH = "authorization"
@@ -216,7 +217,7 @@ object ConsentWire {
         Resolution(
             end = ConsentEnd.valueOf(str(o, "end") ?: return null),
             choice = str(o, "choice")?.let { name -> ConsentChoice.entries.firstOrNull { it.name == name } },
-            notice = str(o, "notice"),
+            notice = ref(o, "notice"),
         )
     } catch (e: Exception) {
         null
@@ -230,7 +231,7 @@ object ConsentWire {
         val options = ((o["options"] as? JsonArray) ?: return null).mapNotNull { e ->
             val eo = e as? JsonObject ?: return@mapNotNull null
             val choice = parseChoice(str(eo, "choice")) ?: return@mapNotNull null
-            Option(choice, str(eo, "label") ?: return@mapNotNull null, (eo["destructive"] as? JsonPrimitive)?.boolean == true)
+            Option(choice, ref(eo, "label") ?: return@mapNotNull null, (eo["destructive"] as? JsonPrimitive)?.boolean == true)
         }
         // 总有“允许一次”和“拒绝”（协调器保证）；缺了说明数据不对，不显示
         if (options.none { it.choice == ConsentChoice.DENY } || options.none { it.choice == ConsentChoice.ALLOW_ONCE }) return null
@@ -246,8 +247,9 @@ object ConsentWire {
             argumentsTruncated = (o["argumentsTruncated"] as? JsonPrimitive)?.boolean == true,
             risk = str(o, "risk") ?: return null,
             severity = ConsentSeverity.entries.firstOrNull { it.name == str(o, "severity") } ?: ConsentSeverity.CRITICAL, // 不认识就按最醒目的显示
-            riskLabel = str(o, "riskLabel").orEmpty(),
-            riskDescription = str(o, "riskDescription").orEmpty(),
+            // 读不懂风险文案时按最醒目的高风险显示（和 severity 一致）：不显示空白
+            riskLabel = ref(o, "riskLabel") ?: MessageRef.of(ConsentMessages.RISK_HIGH),
+            riskDescription = ref(o, "riskDescription") ?: MessageRef.of(ConsentMessages.RISK_DESC_HIGH),
             options = options,
             deadlineMillis = (o["deadlineMillis"] as? JsonPrimitive)?.long ?: return null,
             timeoutMillis = (o["timeoutMillis"] as? JsonPrimitive)?.long ?: 60_000L,
