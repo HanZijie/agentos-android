@@ -47,6 +47,8 @@ include(
     ":tests:device:acp-channel:agent",
     ":tests:device:acp-channel:client",
     ":tests:device:acp-channel:inapp",
+    // C8：共享 UID 的第三方测试客户端（复用 :client 的源码），不进 zip
+    ":tests:device:acp-channel:shared",
     // C7：测试用的插件 App（MCP over Binder，Extension Host 的设备回归），不进 zip
     ":tests:device:mcp-plugin:plugin",
 )

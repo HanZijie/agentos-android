@@ -411,7 +411,17 @@ class CallerRegistry(
 
     // ------------------------------------------------------------------ 用量
 
-    /** 一个 prompt 完成（A 的 CallerQuota 每次完成回调一次）：计数、最近使用时间。 */
+    /**
+     * 一个 prompt 完成（A 的 CallerQuota 每次完成回调一次）：计数、最近使用时间。
+     * 调用方身份里只有包名（`CallerIdentity.label`），签名摘要取注册表里现在的那条；状态不是 ALLOWED 时忽略
+     * （撤销后旧通道上的 prompt 不会算到新的记录上）。
+     */
+    fun recordPromptOf(packageName: String) {
+        val digest = synchronized(lock) { entries[packageName]?.signingDigest } ?: return
+        recordPrompt(packageName, digest)
+    }
+
+    /** 同 [recordPromptOf]，且要求签名摘要匹配。 */
     fun recordPrompt(packageName: String, signingDigest: String) {
         synchronized(lock) {
             val e = entries[packageName]?.takeIf { it.signingDigest == signingDigest && it.state == CallerState.ALLOWED } ?: return
@@ -459,7 +469,7 @@ class CallerRegistry(
     /**
      * 一项的 JSON：键固定、顺序固定、不省略（空值为 null）。[activeChannels]、[activeTasks] 来自 :agent 的连接表。
      */
-    fun toJson(e: CallerEntry, activeChannels: Int = 0, activeTasks: Int = 0): JsonObject {
+    fun toJson(e: CallerEntry, activeChannels: Int = 0, activeTasks: Int = 0, promptsLastHour: Int? = null): JsonObject {
         fun num(v: Long?) = v?.let { JsonPrimitive(it) } ?: JsonNull
         fun str(v: String?) = v?.let { JsonPrimitive(it) } ?: JsonNull
         return buildJsonObject {
@@ -475,7 +485,7 @@ class CallerRegistry(
             put("requestedAt", num(e.requestedAt))
             put("usage", buildJsonObject {
                 put("promptsTotal", e.promptsTotal)
-                put("promptsLastHour", promptsLastHour(e.packageName))
+                put("promptsLastHour", promptsLastHour ?: promptsLastHour(e.packageName))
                 put("activeChannels", activeChannels)
                 put("activeTasks", activeTasks)
             })

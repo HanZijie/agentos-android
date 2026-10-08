@@ -51,7 +51,10 @@ class AcpCallerDebugReceiver : BroadcastReceiver() {
             "list" -> {
                 val all = p.listCallersJson()
                 val arr = if (pkg == null) all else JSONArray((0 until all.length()).map { all.getJSONObject(it) }.filter { it.optString("packageName") == pkg })
-                ok(p).put("callers", arr)
+                // 生产 JSON 的键是固定的（IAgentControl v5），不含“签名变了”；设备用例要核对它，单独放在这里
+                val flags = JSONObject()
+                for (e in p.callers.entries()) if (e.state == org.agentos.app.agent.acp.CallerState.PENDING) flags.put(e.packageName, e.signatureChanged)
+                ok(p).put("callers", arr).put("signatureChanged", flags)
             }
             "allow" -> {
                 val entry = try {

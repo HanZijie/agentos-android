@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 与 :client 相同的场景执行器，但声明了 sharedUserId：和只有清单的 org.agentos.test.acp.shared.b 同一个 UID。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sharedUserId="org.agentos.test.acp.shared">
+
+    <queries>
+        <package android:name="org.agentos.app" />
+        <intent>
+            <action android:name="org.agentos.intent.action.ACP" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="ACP shared-uid test client">
+        <activity
+            android:name="org.agentos.test.acp.client.ScenarioActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection|colorMode|touchscreen|mcc|mnc"
+            android:exported="true"
+            android:launchMode="singleTask" />
+    </application>
+</manifest>

@@ -8,13 +8,15 @@
 用例（按顺序，共享设备状态；每个用例开头自己 clear 注册表）：
   unauthorized-pending   没有记录：open 立即抛 authorization_pending（不阻塞），注册表里出现一条 pending（带 requestId、包名、签名摘要、App 名）
   allow-usable           SDK connect 等待期间（Waiting 回调每秒一次）用户允许 → 连上；一轮 prompt 完成；调用方身份是 APP（会话只在它自己名下）
-  usable-no-scope        不带 toolScope 的会话能看到完整目录里的工具（工具调用事件里的 tool 是最终名字）；scope=none 的会话一个工具也没有
+  usable-no-scope        不带 toolScope 的会话和 toolScope=[]（零个工具）的会话都能连上、答完一轮（没有启用任何插件时）
+  catalog-tools          启用测试插件后：不带 toolScope 的会话调到 echo（事件里是最终名字，结果回到模型）；toolScope 只含 stats 时 echo 调不到；
+                         toolScope 含 echo 时调到，事件里是原始工具名和 ref
   denied-cooldown        用户拒绝：SDK connect 抛 DENIED；冷却内再 open 直接 denied（不再出现 pending）；冷却过后重新询问（缩短冷却参数）
   pending-timeout        没人决定：等到 ttl 按拒绝记（冷却）；卡片被撤回
   abandon                App 放弃（不再重试）：卡片被撤回，不记拒绝
   revoke-closes          已连上并有进行中的 prompt 时撤销：通道在几百毫秒内关闭，SDK 的流以 DISCONNECTED 结束；之后 open 是 denied
   signature-changed      换签名（apksigner 重签 client）后 open 又是 pending，且标了 signatureChanged；旧签名的通道被撤销；旧授权不继承
-  shared-uid             共享 UID（一个 UID 对应两个包）一律 not_open，什么也不记
+  shared-uid             共享 UID（一个 UID 对应两个包）一律 not_open，什么也不记；卸掉其中一个后同一个 App 按普通第三方走授权
   spoofed-name           clientInfo 里冒充别的 App 的包名没有用：注册表里只有真实的包名
   list-shape             listAcpCallers / AcpCallerDebugReceiver list 每项的键固定
   settings-actions       setAcpCaller 的 allowed / denied / removed、answerAuthorization 与 list 一致
@@ -95,11 +97,11 @@ class Ctx:
             extras["ttlMs"] = ttl_ms
         self.caller("config", **extras)
 
-    def scenario(self, name, args=None, timeout=150, want_phase=None):
+    def scenario(self, name, args=None, timeout=150, want_phase=None, activity=CLIENT_ACTIVITY):
         run_id = f"{name}-{int(time.time() * 1000) % 100000}"
         self.adb.run("logcat", "-c", check=False)
         payload = json.dumps(args or {}, separators=(",", ":"))
-        self.adb.sh(f"am start -W -n {CLIENT_ACTIVITY} --es scenario {name} --es run {run_id} --es args '{payload}'", timeout=60)
+        self.adb.sh(f"am start -W -n {activity} --es scenario {name} --es run {run_id} --es args '{payload}'", timeout=60)
         return acp.collect_result(self.adb, run_id, timeout, want_phase)
 
     def start_scenario(self, name, args=None):
@@ -139,6 +141,11 @@ class Ctx:
 
     def channels(self):
         return (self.caller("list").get("channels") or {})
+
+    def running_tasks(self):
+        """AgentOS :agent 里还在跑 / 排队的任务数（in-app 的 desktop-status 场景读 runtimeStatus）。"""
+        r = acp.run_one(self.adb, "tp-status", INAPP_ACTIVITY, "desktop-status", {}, 60) or {}
+        return (r.get("runtime") or {}).get("tasks")
 
 
 def verdict(checks, summary, **extra):
@@ -214,6 +221,67 @@ def case_usable_no_scope(c):
                    noScope=r, emptyScope=none)
 
 
+PLUGIN_PKG = "org.agentos.test.mcp.plugin"
+PLUGIN_APK = os.path.join(REPO, "tests", "device", "mcp-plugin", "plugin", "build", "outputs", "apk", "debug", "plugin-debug.apk")
+EXT_RECEIVER = APP_PKG + "/.ext.ExtensionDebugReceiver"
+ECHO = "mcp__mcptest__test__echo"
+STATS = "mcp__mcptest__test__stats"
+
+
+def ext(c, op, **extras):
+    parts = ["am", "broadcast", "-n", EXT_RECEIVER, "--es", "op", op]
+    for k, v in extras.items():
+        parts += (["--el", k, str(v)] if isinstance(v, int) and not isinstance(v, bool) else ["--es", k, str(v)])
+    out = c.adb.sh(" ".join(shlex.quote(p) for p in parts), timeout=90, check=False)
+    m = re.search(r'data="(.*)"\s*$', out, re.S)
+    return json.loads(m.group(1)) if m else {"ok": False, "raw": out[-200:]}
+
+
+def case_catalog_tools(c):
+    """
+    第三方 App 的会话能用目录里的工具（设计决定 2026-10-08：默认放开，toolScope 是调用方自己的选择）：
+    不带 toolScope 的会话调到 echo，经过 Broker 的确认规则；带 toolScope 只含 stats 的会话请求 echo 时，echo 对模型就像不存在。
+    """
+    if not os.path.exists(PLUGIN_APK):
+        return {"ok": True, "skipped": True, "summary": "skipped (the test plugin APK is not built)"}
+    c.hold_agent()
+    c.ensure_fake_model()
+    c.reset()
+    c.caller("allow", pkg=CLIENT_PKG)
+    acp.install(c.adb, PLUGIN_APK)
+    plugins = ext(c, "list").get("plugins") or []
+    pid = next((p["id"] for p in plugins if p.get("packageName") == PLUGIN_PKG), None)
+    if pid is None:
+        return {"ok": False, "error": "the test plugin was not discovered"}
+    ext(c, "enable", id=pid)
+    ext(c, "wait_catalog", name=ECHO, timeoutMs=20000)
+    # echo 设为 always，不需要有人点确认（确认规则本身由 A 的对照测试和 C7b 的 e2e 覆盖）
+    ext(c, "approval_by_source", plugin="mcptest", server="test", tool="echo", mode="always")
+    time.sleep(0.5)
+    script = json.dumps({"chunks": 2, "intervalMs": 0, "tool": ECHO, "toolInput": {"text": "from-a-third-party"}}, separators=(",", ":"))
+    open_scope = c.scenario("tp-connect", {"prompt": script, "promptTimeoutMs": 90000}, timeout=150) or {}
+    scoped = c.scenario("tp-connect", {"prompt": script, "scope": "mcptest:stats", "promptTimeoutMs": 90000}, timeout=150) or {}
+    exact = c.scenario("tp-connect", {"prompt": script, "scope": "mcptest:echo", "promptTimeoutMs": 90000}, timeout=150) or {}
+    ext(c, "approval_by_source", plugin="mcptest", server="test", tool="echo", mode="")
+    ext(c, "disable", id=pid)
+
+    def statuses(r):
+        return [e["status"] for e in r.get("toolEvents") or []]
+
+    def results(r):
+        return r.get("text") or ""
+    checks = {
+        "noScopeCompleted": "COMPLETED" in statuses(open_scope),
+        "noScopeShowsFinalName": any(e.get("tool") == ECHO and e.get("ref") is None for e in open_scope.get("toolEvents") or []),
+        "noScopeResultReachedModel": "from-a-third-party" in results(open_scope),
+        "scopeWithoutEchoBlocksIt": "COMPLETED" not in statuses(scoped),
+        "scopeWithEchoCompletes": "COMPLETED" in statuses(exact),
+        "scopedEventShowsOriginalName": any(e.get("tool") == "echo" and e.get("ref") == "mcptest:echo" for e in exact.get("toolEvents") or []),
+    }
+    return verdict(checks, f"noScope={statuses(open_scope)} scopedToStats={statuses(scoped)} scopedToEcho={statuses(exact)}",
+                   noScope=open_scope, scopedToStats=scoped, scopedToEcho=exact)
+
+
 def case_denied_cooldown(c):
     c.reset(cooldown_ms=8_000, ttl_ms=60_000)
     run_id = c.start_scenario("tp-connect", {"expectError": "DENIED", "timeoutMs": 60000})
@@ -268,7 +336,9 @@ def case_revoke_closes(c):
     c.ensure_fake_model()
     c.reset()
     c.caller("allow", pkg=CLIENT_PKG)
-    run_id = c.start_scenario("tp-hold", {"holdMs": 60000, "prompt": '{"chunks":1000000,"intervalMs":50}'})
+    # a long but finite prompt (20 s of model output): the runtime has no "cancel this caller's tasks" call yet, so the task
+    # outlives the revoke; the case records that and waits for it to end so the next cases start from an idle :agent
+    run_id = c.start_scenario("tp-hold", {"holdMs": 60000, "prompt": '{"chunks":400,"intervalMs":50}'})
     ready = c.result(run_id, timeout=60, want_phase="ready")
     time.sleep(2.0)
     before = c.channels().get("thirdParty")
@@ -278,6 +348,8 @@ def case_revoke_closes(c):
     server_ms = int((time.time() - t0) * 1000)
     r = c.result(run_id, timeout=60) or {}
     after = c.scenario("tp-open", {"expect": "denied"}, timeout=60) or {}
+    still_running = c.running_tasks()
+    idle = c.wait_for(lambda: c.running_tasks() == 0, timeout=60, step=2)
     checks = {
         "channelWasOpen": ready is not None and before == 1,
         "revokeAccepted": rev.get("ok") is True and (rev.get("caller") or {}).get("state") == "denied",
@@ -285,8 +357,11 @@ def case_revoke_closes(c):
         "sdkSawDisconnect": r.get("ok") is True and r.get("isConnected") is False,
         "promptEndedDisconnected": r.get("promptError") in ("DISCONNECTED", None),
         "afterRevokeDenied": bool(after.get("ok")),
+        "agentIdleAgain": bool(idle),
     }
-    return verdict(checks, f"serverClosedMs={server_ms} clientClosedMs={r.get('closedAfterMs')} promptError={r.get('promptError')}", result=r)
+    # not a check (it is a known gap, reported to A): the task of a revoked app keeps running until it ends by itself
+    return verdict(checks, f"serverClosedMs={server_ms} clientClosedMs={r.get('closedAfterMs')} promptError={r.get('promptError')} "
+                           f"tasksRightAfterRevoke={still_running}", result=r, tasksRightAfterRevoke=still_running)
 
 
 def case_signature_changed(c):
@@ -300,17 +375,23 @@ def case_signature_changed(c):
     c.result(run_id, timeout=60, want_phase="ready")
     apk, work = rotated_apk(client_apk())
     try:
-        inst = c.adb.run("install", "-r", "-t", apk, timeout=240, check=False)
+        # 换了证书的包不能覆盖安装（签名不一致）：先卸载再装。注册表按（包名，签名摘要）记，卸载不动它——
+        # 所以重装后 AgentOS 看到的是“同一个包名、另一个签名”，这正是要测的情形
+        c.adb.run("uninstall", CLIENT_PKG, check=False, timeout=60)
+        inst = c.adb.run("install", "-t", apk, timeout=240, check=False)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    # 重装会杀掉 client 的进程；旧签名的通道随之关闭。再 open：签名变了，没有继承旧授权
+    # 卸载杀掉 client 的进程，旧通道随之关闭。再 open：签名变了，没有继承旧授权
     time.sleep(2)
     r = c.scenario("tp-open", {"expect": "authorization_pending"}, timeout=60) or {}
+    listing = c.caller("list", pkg=CLIENT_PKG)
     e = c.entry() or {}
+    changed = (listing.get("signatureChanged") or {}).get(CLIENT_PKG)
     checks = {
         "installed": "Success" in inst,
         "askedAgain": bool(r.get("ok")),
         "pendingNotAllowed": e.get("state") == "pending",
+        "flaggedSignatureChanged": changed is True,
         "newDigest": bool(e.get("signingDigest")) and e.get("signingDigest") != old.get("signingDigest"),
         "oldGrantNotInherited": c.channels().get("thirdParty") == 0,
     }
@@ -336,12 +417,21 @@ def case_shared_uid(c):
         installed = "Success" in ia and "Success" in ib and len(found) == 2 and found[0] == found[1]
         if not installed:
             return {"ok": True, "skipped": True, "summary": f"skipped (the platform did not install the shared-uid pair: {ia.strip()[-80:]} {ib.strip()[-80:]})"}
-        r = c.shared_uid_open(SHARED_A) if hasattr(c, "shared_uid_open") else None
+        r = c.scenario("tp-open", {"expect": "not_open"}, timeout=60, activity=SHARED_ACTIVITY) or {}
+        remembered = c.caller("list").get("callers") or []
+        # 对照：两个包里只剩一个时（卸掉 B），同一个 App 就不再共享 UID，按普通第三方走授权
+        c.adb.run("uninstall", SHARED_B, check=False, timeout=60)
+        alone = c.scenario("tp-open", {}, timeout=60, activity=SHARED_ACTIVITY) or {}
     finally:
         for pkg in (SHARED_A, SHARED_B):
             c.adb.run("uninstall", pkg, check=False, timeout=60)
         shutil.rmtree(work, ignore_errors=True)
-    return {"ok": False, "error": "shared-uid open driver is not implemented", "result": r}
+    checks = {
+        "sharedUidRefused": bool(r.get("ok")) and r.get("outcome") == "not_open",
+        "nothingRemembered": not any(x["packageName"] in (SHARED_A, SHARED_B) for x in remembered),
+        "aloneIsAskedNormally": alone.get("outcome") == "authorization_pending",
+    }
+    return verdict(checks, f"shared={r.get('outcome')} alone={alone.get('outcome')} uid={found[0]}", shared=r, alone=alone)
 
 
 def case_spoofed_name(c):
@@ -407,8 +497,10 @@ def case_settings_actions(c):
 
 # ---------------------------------------------------------------- 重签与共享 UID 的辅助
 
-SHARED_A = "org.agentos.test.shared.a"
-SHARED_B = "org.agentos.test.shared.b"
+SHARED_A = "org.agentos.test.acp.shared.a"
+SHARED_B = "org.agentos.test.acp.shared.b"
+SHARED_UID = "org.agentos.test.acp.shared"
+SHARED_ACTIVITY = SHARED_A + "/org.agentos.test.acp.client.ScenarioActivity"
 
 
 def build_tools():
@@ -446,14 +538,44 @@ def rotated_apk(src):
     return out, work
 
 
+def shared_a_apk():
+    return os.path.join(HERE, "shared", "build", "outputs", "apk", "debug", "shared-debug.apk")
+
+
 def build_shared_uid_apks():
-    return None
+    """(临时目录, A 的 APK, B 的 APK)。A 是 :shared 模块的调试包；B 用 aapt2 现场生成：只有清单、同一个 sharedUserId，用同一把调试证书签名。"""
+    t = build_tools()
+    sdk = os.path.expanduser("~/Library/Android/sdk/platforms")
+    platforms = sorted(os.listdir(sdk)) if os.path.isdir(sdk) else []
+    android_jar = next((os.path.join(sdk, p, "android.jar") for p in reversed(platforms) if os.path.exists(os.path.join(sdk, p, "android.jar"))), None)
+    if t is None or android_jar is None or not os.path.exists(shared_a_apk()):
+        return None
+    work = tempfile.mkdtemp(prefix="c8-shared-")
+    manifest = os.path.join(work, "AndroidManifest.xml")
+    with open(manifest, "w", encoding="utf-8") as f:
+        f.write(f'''<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{SHARED_B}" android:sharedUserId="{SHARED_UID}">
+    <uses-sdk android:minSdkVersion="35" android:targetSdkVersion="36"/>
+    <application android:label="ACP shared-uid peer" android:hasCode="false"/>
+</manifest>
+''')
+    raw = os.path.join(work, "b-raw.apk")
+    aligned = os.path.join(work, "b-aligned.apk")
+    signed = os.path.join(work, "b.apk")
+    subprocess.run([t["aapt2"], "link", "-o", raw, "-I", android_jar, "--manifest", manifest, "--version-code", "1", "--version-name", "1"],
+                   check=True, capture_output=True)
+    subprocess.run([t["zipalign"], "-f", "4", raw, aligned], check=True, capture_output=True)
+    ks = os.path.expanduser("~/.android/debug.keystore")
+    subprocess.run([t["apksigner"], "sign", "--ks", ks, "--ks-key-alias", "androiddebugkey", "--ks-pass", "pass:android", "--key-pass", "pass:android",
+                    "--out", signed, aligned], check=True, capture_output=True)
+    return work, shared_a_apk(), signed
 
 
 CASES = [
     ("unauthorized-pending", case_unauthorized_pending), ("allow-usable", case_allow_usable), ("usable-no-scope", case_usable_no_scope),
     ("denied-cooldown", case_denied_cooldown), ("pending-timeout", case_pending_timeout), ("abandon", case_abandon),
     ("revoke-closes", case_revoke_closes), ("spoofed-name", case_spoofed_name), ("list-shape", case_list_shape),
+    ("catalog-tools", case_catalog_tools),
     ("settings-actions", case_settings_actions), ("shared-uid", case_shared_uid), ("signature-changed", case_signature_changed),
 ]
 
