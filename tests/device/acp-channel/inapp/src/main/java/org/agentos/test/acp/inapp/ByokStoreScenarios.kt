@@ -507,7 +507,7 @@ class ByokStoreScenarios(
                 !s1.optString("path").contains("user_de"))
             .put("heartbeatInDe", r1.optString("heartbeatPath").startsWith(de.dataDir.absolutePath + "/"))
             .put("created", !fresh || (!s1.optBoolean("existedAtStart", true) && sys1.optInt("runtimeStarted") == 1))
-            .put("persistedAfterSigkill", db1.optLong("userVersion") == 1L && db1.optBoolean("walHeader") &&
+            .put("persistedAfterSigkill", db1.optLong("userVersion") == 2L /* Schema.VERSION (internal to core:runtime): v2 added sessions.tool_scope */ && db1.optBoolean("walHeader") &&
                 first.optBoolean("exists") && second.optBoolean("exists") &&
                 first.optJSONArray("tasks")?.toString() == "[\"completed\"]" && first.optLong("completed") == 1L &&
                 first.optLong("piMessages") == 1L && second.optLong("created") == 1L &&
