@@ -1,4 +1,4 @@
-# 示例 App：闹钟、日历、备忘录（W17 的一部分，提前做）
+# 示例 App：闹钟、日历、备忘录、待办、短信（W17 的一部分，提前做；待办、短信见 [next-apps-plan.md](next-apps-plan.md)）
 
 > **目的**：三个界面精美、有完整增删改查的独立 App；每个 App 内嵌一个 Agent Plugin（`assets/agent-plugin/`）并导出 Binder MCP 服务，装在手机上后，AgentOS 能发现它们、列出工具、经 MCP 完整操作它们的数据，App 界面实时刷新。
 > **路线**：严格按 [extensions.md](extensions.md) 第 4.1、5.1 节（App 内嵌插件 + `McpBinderService` + `BIND_MCP_SERVICE`），不开回环 HTTP 端口。平台侧由 C 车道做 `sdk/plugin-sdk` 与 Extension Host，A 车道做 `core/extensions`，D 车道做确认界面与插件管理页；三个 App 各自一个 SubAgent。
@@ -11,6 +11,8 @@
 | 闹钟 | `plugins/samples/alarm` | `org.agentos.sample.alarm` | `alarm` | `alarm` |
 | 日历 | `plugins/samples/calendar` | `org.agentos.sample.calendar` | `calendar` | `calendar` |
 | 备忘录 | `plugins/samples/notes` | `org.agentos.sample.notes` | `notes` | `notes` |
+| 待办 | `plugins/samples/todo` | `org.agentos.sample.todo` | `todo` | `todo` |
+| 短信 | `plugins/samples/sms` | `org.agentos.sample.sms` | `sms` | `sms` |
 
 - 目录里有 `build.gradle.kts` 就自动成为 Gradle 模块 `:plugins:samples:<name>`（`settings.gradle.kts` 已写好）。根 `build.gradle.kts` 已统一 SDK 级别（minSdk 35、compileSdk 36）、字节码版本和签名。
 - 界面用 **Jetpack Compose + Material 3**。依赖已锁在 `gradle/libs.versions.toml`（`androidx-compose-bom` 等，Kotlin Compose 插件 `libs.plugins.kotlin.compose`）。**不要自己加别的界面库，也不要升级这几项**（BOM 2026.09 要 AGP 9.1 和 compileSdk 37，用不了）；确实需要新依赖，写进报告第 5 节，由整合人决定。数据库用平台自带的 `SQLiteOpenHelper`，不引入 Room / KSP。
@@ -84,7 +86,7 @@ class McpToolResult {
 - C7a 同时提供测试用的客户端（`McpBinderClient`，Extension Host 也用它）：给定一个 `ComponentName` 或 `IMcpService`，可以 `initialize`、`listTools`、`callTool`，方便示例 App 在 debug 构建里做“自测入口”和设备上的 androidTest。
 - 实现上用不用官方 MCP Kotlin SDK 由 C 在 S5 里定，不影响上面的公开接口。
 
-## 4. 三个 App 的工具清单（最低要求；可以多，不能少，名字和必填参数不能改）
+## 4. 五个 App 的工具清单（最低要求；可以多，不能少，名字和必填参数不能改）
 
 ### 4.1 闹钟 `alarm`
 
@@ -100,6 +102,7 @@ class McpToolResult {
 | `alarm_delete` | `id` | — | destructive |
 | `alarm_next` | — | — | 下一个会响的闹钟和时间；没有则返回 null |
 | `alarm_dismiss` | — | `id` | 关闭正在响的闹钟（没有在响则返回错误说明） |
+| `alarm_system_next` | — | — | 只读：系统范围的下一个闹钟（`AlarmManager.getNextAlarmClock()`，含其他时钟 App 设的）、时间、`owned_by_this_app`；系统里没有则返回 null。`alarm_next` 仍只看本 App（next-apps-plan.md 第 1 节 A2） |
 
 ### 4.2 日历 `calendar`
 
@@ -135,6 +138,34 @@ class McpToolResult {
 | `note_restore` | `id` | — | 从回收站或归档恢复 |
 | `note_delete` | `id` | — | destructive：永久删除；只允许删回收站里的备忘录，否则返回错误提示先 `note_trash` |
 | `tag_list` | — | — | 全部标签及各自的备忘录数 |
+
+### 4.4 待办 `todo`
+
+界面：概览卡、按“已逾期 / 今天 / 即将到来 / 无日期 / 搁置 / 已完成”分组的列表（优先级色条、状态圆圈、子任务展开）、快速添加、左滑完成 / 右滑删除（带撤销）、筛选 chips、详情 / 编辑页、空状态。数据在自己的 SQLite，仓库单例 + `StateFlow`，界面与 MCP 共用。`status`：`todo` / `doing` / `done` / `shelved`；`priority`：`high` / `medium` / `low`；`due`：带偏移的 ISO-8601 时间，或仅日期（全天）；只支持一层子任务（`parent_id`）。v1 不自带提醒（到期提醒由 Agent 经日历 `reminder_minutes` 或闹钟编排）。详见 [next-apps-plan.md](next-apps-plan.md) 第 3 节和 `plugins/samples/todo/README.md`。
+
+| 工具 | 必填参数 | 可选参数 | 说明 |
+|---|---|---|---|
+| `todo_list` | — | `status`, `priority`, `tag`, `due_before`, `due_after`, `overdue_only`, `parent_id`, `include_done`（默认 false）, `limit`（默认 50，最大 200）, `offset` | 按优先级、截止时间排序；返回 `has_more` |
+| `todo_get` | `id` | — | 含子任务 |
+| `todo_create` | `title` | `notes`, `priority`, `due`, `due_all_day`, `tags`, `parent_id`, `status` | 建子任务靠 `parent_id` |
+| `todo_update` | `id` | 同 create 的各字段 | 只改给出的；idempotent |
+| `todo_set_status` | `id`, `status` | — | 完成时写 `completed_at`；idempotent |
+| `todo_delete` | `id` | — | destructive：有子任务时连带删除并返回删除数 |
+| `todo_search` | `query` | `status`, `limit` | 标题、备注、标签的包含匹配 |
+| `todo_summary` | — | — | 各状态计数、已逾期数、今天到期、本周到期；只读 |
+
+### 4.5 短信 `sms`
+
+能力型路线：**不当默认短信应用**，`READ_SMS` 读系统短信库，`SmsManager` 发送，发送异步、自维护 `outbox`。权限被限制或未授权时进入“仅撰写”模式（只有 `sms_compose` 可用，其余工具返回明确错误，工具目录不变）。独立示例 App，不是自带插件：读也默认每次确认。安全规则（单收件人、长度上限、短号拒绝、频率限制、去重、验证码默认遮蔽）和 V1 实测结论见 [next-apps-plan.md](next-apps-plan.md) 第 4 节和 `plugins/samples/sms/README.md`。
+
+| 工具 | 必填参数 | 可选参数 | 说明 |
+|---|---|---|---|
+| `sms_thread_list` | — | `limit`, `offset` | 会话列表与摘要；返回 `has_more` |
+| `sms_message_list` | `address` | `since`, `until`, `limit`, `offset` | 某号码的消息；疑似验证码默认遮蔽 |
+| `sms_search` | `query` | `limit` | 正文包含匹配；疑似验证码默认遮蔽 |
+| `sms_send` | `to`, `text` | — | destructive（高风险，每次确认）；异步，返回本地 `id` 与 `parts`，不承诺送达 |
+| `sms_send_status` | `id` | — | 本 App 发出的某条：`queued` / `sent` / `delivered` / `failed` |
+| `sms_compose` | `to` | `text` | `ACTION_SENDTO smsto:` 打开系统短信界面预填，不需要短信权限，不发送 |
 
 ## 5. 怎么验证
 
