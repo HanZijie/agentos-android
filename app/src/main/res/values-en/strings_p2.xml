@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- P2 (docs/next-apps-plan.md 7.3): first-run guide, settings, model & key, status and security text. Key prefixes: onboarding_ settings_ status_ security_ battery_ byok_ model_ desktop_ jev_ chat_ -->
+<resources>
+    <!-- ============ Common ============ -->
+    <string name="ui_back_desc">Back</string>
+    <string name="settings_open_failed">This system setting can\'t be opened on this phone</string>
+
+    <!-- ============ Battery optimization (BatteryText) ============ -->
+    <string name="battery_action">Allow ignoring battery optimization</string>
+    <string name="battery_denied_label">Background activity</string>
+    <string name="battery_denied_exempt">The system refused the last attempt to enter the foreground; battery optimization is now ignored, so this should recover.</string>
+    <string name="battery_denied_restricted">Restricted by the system: running tasks may be paused and desktop access may stop responding. Please allow AgentOS to ignore battery optimization.</string>
+    <string name="battery_desktop_warning">Battery optimization isn\'t ignored yet: after the system restarts the runtime in the background it may not reach the foreground and get frozen, and your computer won\'t be able to connect.</string>
+    <string name="battery_desktop_dialog_title">Let AgentOS ignore battery optimization?</string>
+    <string name="battery_desktop_dialog_message">While desktop access is on, the AgentOS runtime has to stay on standby in the background. Without this exemption, the runtime may not reach the foreground after the system restarts it and get frozen, and your computer won\'t be able to connect.\n\nChoose “Allow” in the system dialog that follows. You can revoke it later in system settings.</string>
+    <string name="battery_guide_dialog_title">AgentOS isn\'t ignoring battery optimization yet</string>
+    <string name="battery_guide_dialog_message">Without it, the system restricts AgentOS in the background: running tasks may be paused and desktop access may stop responding.\n\nChoose “Allow” in the system dialog that follows. You can revoke it later in system settings.</string>
+    <string name="battery_guide_step">AgentOS can keep running in the background and with the screen off only if battery optimization is ignored. Otherwise tasks may be paused by the system and desktop access may stop responding.</string>
+    <string name="battery_dialog_allow">Allow</string>
+    <string name="battery_dialog_later">Later</string>
+    <string name="battery_dialog_not_now">Not now</string>
+
+    <!-- ============ Security text (SecurityText) ============ -->
+    <string name="security_level">best_effort (best-effort protection)</string>
+    <string name="security_what_agentos_does">What AgentOS does: the key is stored encrypted with the Android Keystore, injected only at the moment a model request is sent, and never written to logs, diagnostics or notifications; the agent\'s code doesn\'t run as root, so models and plugins can\'t reach root.</string>
+    <string name="security_settings_rooted">This phone is rooted (the AgentOS module\'s supervisor reported in this boot). Other apps that hold root can read all of AgentOS\'s data, including the key before and after encryption, conversations and logs.\n\n%1$s But it can\'t protect against apps that hold root. Only grant root to apps you trust.</string>
+    <string name="security_settings_unknown">The AgentOS module\'s supervisor hasn\'t reported in this boot, so we can\'t tell whether this phone is rooted.\n\nIf it is rooted: other apps that hold root can read all of AgentOS\'s data, including the key before and after encryption, conversations and logs. Only grant root to apps you trust. If it isn\'t rooted: AgentOS\'s data is protected by Android\'s app isolation and other apps can\'t read it.\n\n%1$s</string>
+    <string name="security_welcome_rooted">Security level: %1$s. This phone is rooted, so other apps that hold root can read AgentOS\'s data (including the key). AgentOS can only do its best to protect it; see Settings for details.\n\nNow that you\'ve opened the app, the AgentOS module\'s supervisor starts guarding the runtime: if the system kills it while a task is running, it is restarted automatically.</string>
+    <string name="security_welcome_no_module">Security level: %1$s. See Settings for details.\n\nThe AgentOS module wasn\'t detected in this boot: chat works as usual, but if the system kills the runtime it won\'t be restarted automatically. Flash the AgentOS module in your root manager and reboot, and this will show that it was detected.</string>
+    <string name="security_welcome_unknown">Security level: %1$s. See Settings for details.</string>
+
+    <!-- ============ Runtime status (StatusText) ============ -->
+    <string name="status_runtime_label">Runtime</string>
+    <string name="status_runtime_unreadable">Can\'t read status</string>
+    <string name="status_phase_starting">Starting</string>
+    <string name="status_phase_recovering">Recovering</string>
+    <string name="status_phase_ready">Ready</string>
+    <string name="status_unknown">Unknown</string>
+    <string name="status_runtime_value">%1$s (pid %2$s, up %3$s)</string>
+    <string name="status_tasks_label">Running tasks</string>
+    <string name="status_tasks_none">None</string>
+    <plurals name="status_tasks_count">
+        <item quantity="one">%1$d task</item>
+        <item quantity="other">%1$d tasks</item>
+    </plurals>
+    <plurals name="status_tasks_count_foreground">
+        <item quantity="one">%1$d task, running in the foreground</item>
+        <item quantity="other">%1$d tasks, running in the foreground</item>
+    </plurals>
+    <string name="status_hold_label">Kept in foreground</string>
+    <string name="status_hold_ok">Kept in the foreground for desktop access</string>
+    <string name="status_hold_not_foreground">Desktop access needs the runtime in the foreground, but it isn\'t there now</string>
+    <string name="status_supervisor_label">Supervisor</string>
+    <string name="status_supervisor_missing">Not running: no supervisor status was received in this boot. The AgentOS module may be disabled or not installed. The runtime still works as usual, but it won\'t be restarted automatically if it gets killed.</string>
+    <string name="status_supervisor_none_yet">No supervisor status received yet</string>
+    <string name="status_supervisor_waiting">Waiting for the supervisor status of this boot</string>
+    <string name="status_supervisor_last_label">Last status received (not from this boot)</string>
+    <string name="status_supervisor_ok">OK</string>
+    <plurals name="status_supervisor_backoff">
+        <item quantity="one">The runtime exited unexpectedly and is being restarted with backoff (%1$d time in the last 10 minutes)</item>
+        <item quantity="other">The runtime exited unexpectedly and is being restarted with backoff (%1$d times in the last 10 minutes)</item>
+    </plurals>
+    <string name="status_supervisor_safe_mode">Safe mode: %1$s. The runtime won\'t be restarted automatically and recovered tasks won\'t resume on their own; to exit, use the “Action” button of the AgentOS module in your root manager</string>
+    <string name="status_safe_reason_crash_loop">the runtime crashed repeatedly in a short time</string>
+    <string name="status_safe_reason_manual">entered manually</string>
+    <string name="status_safe_reason_unsupported_api">this Android version is outside the supported range (the system may have just been updated)</string>
+    <string name="status_supervisor_stopped">Stopped: %1$s</string>
+    <string name="status_stopped_reason_user_stopped">AgentOS was force-stopped</string>
+    <string name="status_stopped_reason_not_launched">waiting for the first launch</string>
+    <string name="status_stopped_reason_module_disabled">the module is disabled</string>
+    <string name="status_stopped_reason_supervisor_exited">the supervisor has exited</string>
+    <string name="status_stopped_reason_install_failed">the module failed to install the app</string>
+    <string name="status_module_version_label">Module version</string>
+    <string name="status_module_version_value">%1$s (%2$d)</string>
+    <string name="status_duration_seconds">%1$d s</string>
+    <string name="status_duration_minutes">%1$d min</string>
+    <string name="status_duration_hours">%1$d h %2$d min</string>
+    <string name="status_duration_days">%1$d d %2$d h</string>
+
+    <!-- ============ First-run guide (Onboarding) ============ -->
+    <string name="onboarding_title">First-run guide</string>
+    <string name="onboarding_start">Get started</string>
+    <string name="onboarding_welcome_title">Welcome to AgentOS</string>
+    <string name="onboarding_welcome_detail">AgentOS is an agent service that stays resident on this phone: this app and other apps can call it over ACP, and the model uses your own key.\n\n%1$s</string>
+    <string name="onboarding_model_title">Choose a model and enter your key</string>
+    <string name="onboarding_model_loading">Reading the current settings…</string>
+    <string name="onboarding_model_ready">Configured. You can start chatting.</string>
+    <string name="onboarding_model_saved_unusable">Saved, but not usable right now. Open it to see why.</string>
+    <string name="onboarding_model_none">For vendor presets such as MiniMax (international / China) you only need to enter a key; you can also use your own compatible endpoint. Without a model you can\'t chat.</string>
+    <string name="onboarding_model_change">Change</string>
+    <string name="onboarding_model_set">Set up</string>
+    <string name="onboarding_notifications_title">Allow notifications</string>
+    <string name="onboarding_notifications_detail">While the agent works in the background it shows an ongoing notification; actions that need your confirmation will also ask through notifications.</string>
+    <string name="onboarding_allow">Allow</string>
+    <string name="onboarding_assistant_title">Set as default assistant (optional)</string>
+    <string name="onboarding_assistant_held">AgentOS is already the default assistant.</string>
+    <string name="onboarding_assistant_detail">Once it is the default assistant, long-press the power button to invoke it. That entry comes in a later version (W13); for now you can open system settings and take a look.</string>
+    <string name="onboarding_assistant_open">Open system settings</string>
+    <string name="onboarding_battery_title">Allow ignoring battery optimization</string>
+    <string name="onboarding_plugins_title">Discovered plugins</string>
+    <string name="onboarding_plugins_none">No plugins found yet. After you install an app that embeds an AgentOS plugin, it will appear here and under Plugins in Settings (M3a).</string>
+    <plurals name="onboarding_plugins_found">
+        <item quantity="one">Found %1$d plugin. You can enable it in Settings.</item>
+        <item quantity="other">Found %1$d plugins. You can enable them in Settings.</item>
+    </plurals>
+</resources>

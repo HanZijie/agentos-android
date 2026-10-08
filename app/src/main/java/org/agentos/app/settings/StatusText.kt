@@ -7,10 +7,13 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
 
 /**
  * Human-readable runtime and supervisor status for the settings page, from IAgentControl
  * getRuntimeStatus / getSupervisorStatus / getDiagnostics (supervision contract v0.2, docs/spikes/S2.md).
+ * The words live in `strings_p2.xml` (`status_*`), read through [Strings].
  */
 object StatusText {
     data class Line(val label: String, val value: String, val warn: Boolean = false)
@@ -40,30 +43,36 @@ object StatusText {
     fun foregroundDenied(statusJson: String?): Boolean = parse(statusJson)?.b("foregroundDenied") == true
 
     /** [batteryExempt]: whether the App has the battery optimisation exemption (words the foregroundDenied line). */
-    fun runtime(statusJson: String?, batteryExempt: Boolean = false): List<Line> {
-        val o = parse(statusJson) ?: return listOf(Line("运行时", "读不到状态", warn = true))
+    fun runtime(statusJson: String?, strings: Strings, batteryExempt: Boolean = false): List<Line> {
+        val label = strings.get(R.string.status_runtime_label)
+        val o = parse(statusJson) ?: return listOf(Line(label, strings.get(R.string.status_runtime_unreadable), warn = true))
         val phase = when (o.s("phase")) {
-            "STARTING" -> "启动中"
-            "RECOVERING" -> "恢复中"
-            "READY" -> "就绪"
-            else -> o.s("phase") ?: "未知"
+            "STARTING" -> strings.get(R.string.status_phase_starting)
+            "RECOVERING" -> strings.get(R.string.status_phase_recovering)
+            "READY" -> strings.get(R.string.status_phase_ready)
+            else -> o.s("phase") ?: strings.get(R.string.status_unknown)
         }
         val tasks = o.i("tasks") ?: 0
+        val tasksValue = when {
+            tasks == 0 -> strings.get(R.string.status_tasks_none)
+            o.b("foreground") == true -> strings.plural(R.plurals.status_tasks_count_foreground, tasks, tasks)
+            else -> strings.plural(R.plurals.status_tasks_count, tasks, tasks)
+        }
         val lines = mutableListOf(
-            Line("运行时", "$phase（pid ${o.i("pid") ?: "?"}，已运行 ${duration(o.l("uptimeMs") ?: 0)}）"),
-            Line("进行中的任务", if (tasks == 0) "无" else "$tasks 个" + if (o.b("foreground") == true) "，前台运行" else ""),
+            Line(label, strings.get(R.string.status_runtime_value, phase, o.i("pid")?.toString() ?: "?", duration(o.l("uptimeMs") ?: 0, strings))),
+            Line(strings.get(R.string.status_tasks_label), tasksValue),
         )
         if (o.s("foregroundHold") == "desktop_access") {
             // no task, but kept in the foreground for desktop access (F11 item 4, RuntimeLifecycle rule 6);
             // foregroundHold is the reason, "foreground" whether the service actually is in the foreground
             lines += if (o.b("foreground") == true) {
-                Line("保持前台", "为电脑端接入保持前台")
+                Line(strings.get(R.string.status_hold_label), strings.get(R.string.status_hold_ok))
             } else {
-                Line("保持前台", "电脑端接入需要保持前台，但现在不在前台", warn = true)
+                Line(strings.get(R.string.status_hold_label), strings.get(R.string.status_hold_not_foreground), warn = true)
             }
         }
         if (o.b("foregroundDenied") == true) {
-            lines += Line(BatteryText.DENIED_LABEL, BatteryText.denied(batteryExempt), warn = !batteryExempt)
+            lines += Line(BatteryText.deniedLabel(strings), BatteryText.denied(batteryExempt, strings), warn = !batteryExempt)
         }
         return lines
     }
@@ -73,13 +82,15 @@ object StatusText {
      * (the runtime has run 30 s without a report from this boot); [currentBootCount] is
      * Settings.Global.BOOT_COUNT, used to tell a status stored in an earlier boot from the current one.
      */
-    fun supervisor(supervisorJson: String?, supervisorMissing: Boolean, currentBootCount: Int? = null): List<Line> {
+    fun supervisor(supervisorJson: String?, supervisorMissing: Boolean, strings: Strings, currentBootCount: Int? = null): List<Line> {
+        val label = strings.get(R.string.status_supervisor_label)
+        val missing = strings.get(R.string.status_supervisor_missing)
         val o = parse(supervisorJson)
         if (o == null || o.s("state") == null) {
             return listOf(
                 Line(
-                    "监督进程",
-                    if (supervisorMissing) MISSING else "还没有收到监督状态",
+                    label,
+                    if (supervisorMissing) missing else strings.get(R.string.status_supervisor_none_yet),
                     warn = supervisorMissing,
                 ),
             )
@@ -87,50 +98,58 @@ object StatusText {
         val state = o.s("state")
         val reason = o.s("reason") ?: ""
         val text = when (state) {
-            "ok" -> "正常"
-            "backoff" -> "运行时异常退出，正在按退避重新拉起（10 分钟内 ${o.i("deaths") ?: 0} 次）"
-            "safe_mode" -> "安全模式：" + when (reason) {
-                "crash_loop" -> "运行时短时间内反复崩溃"
-                "manual" -> "手动进入"
-                "unsupported_api" -> "系统版本超出支持范围（可能刚做过系统更新）"
-                else -> reason
-            } + "。运行时不会被自动拉起，恢复出来的任务不会自动继续；在 root 管理器里用 AgentOS 模块的“动作”按钮退出"
-            "stopped" -> "已停止：" + when (reason) {
-                "user_stopped" -> "AgentOS 被强行停止过"
-                "not_launched" -> "等待首次打开"
-                "module_disabled" -> "模块已禁用"
-                "supervisor_exited" -> "监督进程已退出"
-                "install_failed" -> "模块安装 App 失败"
-                else -> reason
+            "ok" -> strings.get(R.string.status_supervisor_ok)
+            "backoff" -> {
+                val deaths = o.i("deaths") ?: 0
+                strings.plural(R.plurals.status_supervisor_backoff, deaths, deaths)
             }
-            else -> state ?: "未知"
+            "safe_mode" -> strings.get(
+                R.string.status_supervisor_safe_mode,
+                when (reason) {
+                    "crash_loop" -> strings.get(R.string.status_safe_reason_crash_loop)
+                    "manual" -> strings.get(R.string.status_safe_reason_manual)
+                    "unsupported_api" -> strings.get(R.string.status_safe_reason_unsupported_api)
+                    else -> reason
+                },
+            )
+            "stopped" -> strings.get(
+                R.string.status_supervisor_stopped,
+                when (reason) {
+                    "user_stopped" -> strings.get(R.string.status_stopped_reason_user_stopped)
+                    "not_launched" -> strings.get(R.string.status_stopped_reason_not_launched)
+                    "module_disabled" -> strings.get(R.string.status_stopped_reason_module_disabled)
+                    "supervisor_exited" -> strings.get(R.string.status_stopped_reason_supervisor_exited)
+                    "install_failed" -> strings.get(R.string.status_stopped_reason_install_failed)
+                    else -> reason
+                },
+            )
+            else -> state ?: strings.get(R.string.status_unknown)
         }
         val lines = mutableListOf<Line>()
         val bootCount = o.i("boot_count")
         val stale = supervisorMissing || (currentBootCount != null && bootCount != null && bootCount != currentBootCount)
         if (stale) {
             // the stored status is from an earlier boot: do not present it as the current state
-            lines += if (supervisorMissing) Line("监督进程", MISSING, warn = true) else Line("监督进程", "等待本次开机的监督状态")
-            lines += Line("上次收到的状态（不是本次开机的）", text)
+            lines += if (supervisorMissing) Line(label, missing, warn = true) else Line(label, strings.get(R.string.status_supervisor_waiting))
+            lines += Line(strings.get(R.string.status_supervisor_last_label), text)
         } else {
-            lines += Line("监督进程", text, warn = state != "ok")
+            lines += Line(label, text, warn = state != "ok")
         }
-        o.s("module_version")?.let { v -> lines += Line("模块版本", "$v（${o.i("module_version_code") ?: 0}）") }
+        o.s("module_version")?.let { v ->
+            lines += Line(strings.get(R.string.status_module_version_label), strings.get(R.string.status_module_version_value, v, o.i("module_version_code") ?: 0))
+        }
         return lines
     }
 
-    private const val MISSING =
-        "未运行：没有收到本次开机的监督状态。AgentOS 模块可能被禁用或没有安装；运行时照常可用，但被杀后不会自动拉起"
-
     fun supervisorMissing(diagnosticsJson: String?): Boolean = parse(diagnosticsJson)?.b("supervisorMissing") == true
 
-    fun duration(ms: Long): String {
+    fun duration(ms: Long, strings: Strings): String {
         val s = ms / 1000
         return when {
-            s < 60 -> "$s 秒"
-            s < 3600 -> "${s / 60} 分钟"
-            s < 86_400 -> "${s / 3600} 小时 ${s % 3600 / 60} 分钟"
-            else -> "${s / 86_400} 天 ${s % 86_400 / 3600} 小时"
+            s < 60 -> strings.get(R.string.status_duration_seconds, s)
+            s < 3600 -> strings.get(R.string.status_duration_minutes, s / 60)
+            s < 86_400 -> strings.get(R.string.status_duration_hours, s / 3600, s % 3600 / 60)
+            else -> strings.get(R.string.status_duration_days, s / 86_400, s % 86_400 / 3600)
         }
     }
 }

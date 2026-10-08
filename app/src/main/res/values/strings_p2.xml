@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- P2（docs/next-apps-plan.md 7.3）：首次引导、设置页、模型与 key、状态与安全说明。key 前缀：onboarding_ settings_ status_ security_ battery_ byok_ model_ desktop_ jev_ chat_ -->
+<resources>
+    <!-- ============ 公共 ============ -->
+    <string name="ui_back_desc">返回</string>
+    <string name="settings_open_failed">这台手机上打不开这个系统设置</string>
+
+    <!-- ============ 电池优化（BatteryText） ============ -->
+    <string name="battery_action">允许忽略电池优化</string>
+    <string name="battery_denied_label">后台运行</string>
+    <string name="battery_denied_exempt">上一次进入前台被系统拒绝；现在已允许忽略电池优化，之后会恢复正常</string>
+    <string name="battery_denied_restricted">被系统限制：进行中的任务可能被暂停，电脑端接入可能没有响应。请允许 AgentOS 忽略电池优化</string>
+    <string name="battery_desktop_warning">还没有允许忽略电池优化：运行时在后台被重新拉起后可能进不了前台、被系统冻结，电脑端会连不上</string>
+    <string name="battery_desktop_dialog_title">允许 AgentOS 忽略电池优化？</string>
+    <string name="battery_desktop_dialog_message">电脑端接入打开期间，AgentOS 的运行时要一直在后台待命。没有这项豁免时，运行时被系统重新拉起后可能进不了前台、被系统冻结，电脑端就连不上。\n\n在接下来的系统弹窗里选择“允许”即可，以后可以在系统设置里撤销。</string>
+    <string name="battery_guide_dialog_title">还没有允许 AgentOS 忽略电池优化</string>
+    <string name="battery_guide_dialog_message">不允许的话，AgentOS 在后台运行会被系统限制：进行中的任务可能被暂停，电脑端接入可能没有响应。\n\n在接下来的系统弹窗里选择“允许”即可，以后可以在系统设置里撤销。</string>
+    <string name="battery_guide_step">忽略电池优化后，AgentOS 在后台和灭屏时才能保持运行；不允许的话，任务可能被系统暂停，电脑端接入可能没有响应。</string>
+    <string name="battery_dialog_allow">去允许</string>
+    <string name="battery_dialog_later">以后再说</string>
+    <string name="battery_dialog_not_now">暂不</string>
+
+    <!-- ============ 安全说明（SecurityText） ============ -->
+    <string name="security_level">best_effort（尽力而为）</string>
+    <string name="security_what_agentos_does">AgentOS 能做的是：key 用 Android Keystore 加密保存，只在发出模型请求的那一刻注入，不写进日志、诊断和通知；Agent 的代码不以 root 运行，模型和插件接触不到 root。</string>
+    <string name="security_settings_rooted">这台手机已经 root（本次开机收到了 AgentOS 模块监督进程的状态），其他获得 root 权限的应用可以读取 AgentOS 的全部数据，包括加密前后的 key、对话和日志。\n\n%1$s但它防不住拥有 root 权限的应用。请只给信任的应用授予 root 权限。</string>
+    <string name="security_settings_unknown">本次开机还没有收到 AgentOS 模块监督进程的状态，无法确认这台手机是否已经 root。\n\n如果已经 root：其他获得 root 权限的应用可以读取 AgentOS 的全部数据，包括加密前后的 key、对话和日志，请只给信任的应用授予 root 权限。如果没有 root：AgentOS 的数据由 Android 的应用隔离保护，其他应用读不到。\n\n%1$s</string>
+    <string name="security_welcome_rooted">安全等级：%1$s。这台手机已经 root，其他获得 root 权限的应用可以读取 AgentOS 的数据（包括 key），AgentOS 只能尽力保护，详见设置页。\n\n你现在打开了 App，AgentOS 模块的监督进程从此开始守护运行时：有任务时被系统杀掉会自动拉起。</string>
+    <string name="security_welcome_no_module">安全等级：%1$s，详见设置页。\n\n本次开机没有检测到 AgentOS 模块：对话照常可用，但运行时被系统杀掉后不会自动拉起。在 root 管理器里刷入 AgentOS 模块并重启后，这里会显示已检测到。</string>
+    <string name="security_welcome_unknown">安全等级：%1$s，详见设置页。</string>
+
+    <!-- ============ 运行状态（StatusText） ============ -->
+    <string name="status_runtime_label">运行时</string>
+    <string name="status_runtime_unreadable">读不到状态</string>
+    <string name="status_phase_starting">启动中</string>
+    <string name="status_phase_recovering">恢复中</string>
+    <string name="status_phase_ready">就绪</string>
+    <string name="status_unknown">未知</string>
+    <string name="status_runtime_value">%1$s（pid %2$s，已运行 %3$s）</string>
+    <string name="status_tasks_label">进行中的任务</string>
+    <string name="status_tasks_none">无</string>
+    <plurals name="status_tasks_count">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <plurals name="status_tasks_count_foreground">
+        <item quantity="other">%1$d 个，前台运行</item>
+    </plurals>
+    <string name="status_hold_label">保持前台</string>
+    <string name="status_hold_ok">为电脑端接入保持前台</string>
+    <string name="status_hold_not_foreground">电脑端接入需要保持前台，但现在不在前台</string>
+    <string name="status_supervisor_label">监督进程</string>
+    <string name="status_supervisor_missing">未运行：没有收到本次开机的监督状态。AgentOS 模块可能被禁用或没有安装；运行时照常可用，但被杀后不会自动拉起</string>
+    <string name="status_supervisor_none_yet">还没有收到监督状态</string>
+    <string name="status_supervisor_waiting">等待本次开机的监督状态</string>
+    <string name="status_supervisor_last_label">上次收到的状态（不是本次开机的）</string>
+    <string name="status_supervisor_ok">正常</string>
+    <plurals name="status_supervisor_backoff">
+        <item quantity="other">运行时异常退出，正在按退避重新拉起（10 分钟内 %1$d 次）</item>
+    </plurals>
+    <string name="status_supervisor_safe_mode">安全模式：%1$s。运行时不会被自动拉起，恢复出来的任务不会自动继续；在 root 管理器里用 AgentOS 模块的“动作”按钮退出</string>
+    <string name="status_safe_reason_crash_loop">运行时短时间内反复崩溃</string>
+    <string name="status_safe_reason_manual">手动进入</string>
+    <string name="status_safe_reason_unsupported_api">系统版本超出支持范围（可能刚做过系统更新）</string>
+    <string name="status_supervisor_stopped">已停止：%1$s</string>
+    <string name="status_stopped_reason_user_stopped">AgentOS 被强行停止过</string>
+    <string name="status_stopped_reason_not_launched">等待首次打开</string>
+    <string name="status_stopped_reason_module_disabled">模块已禁用</string>
+    <string name="status_stopped_reason_supervisor_exited">监督进程已退出</string>
+    <string name="status_stopped_reason_install_failed">模块安装 App 失败</string>
+    <string name="status_module_version_label">模块版本</string>
+    <string name="status_module_version_value">%1$s（%2$d）</string>
+    <string name="status_duration_seconds">%1$d 秒</string>
+    <string name="status_duration_minutes">%1$d 分钟</string>
+    <string name="status_duration_hours">%1$d 小时 %2$d 分钟</string>
+    <string name="status_duration_days">%1$d 天 %2$d 小时</string>
+
+    <!-- ============ 首次引导（Onboarding） ============ -->
+    <string name="onboarding_title">首次引导</string>
+    <string name="onboarding_start">开始使用</string>
+    <string name="onboarding_welcome_title">欢迎使用 AgentOS</string>
+    <string name="onboarding_welcome_detail">AgentOS 是常驻在这台手机上的 Agent 服务：本 App 和其他 App 都能通过 ACP 调用它，模型用你自己的 key。\n\n%1$s</string>
+    <string name="onboarding_model_title">选择模型并填写 key</string>
+    <string name="onboarding_model_loading">正在读取当前设置…</string>
+    <string name="onboarding_model_ready">已配置，可以开始对话。</string>
+    <string name="onboarding_model_saved_unusable">已保存，但暂时不可用，打开看看原因。</string>
+    <string name="onboarding_model_none">MiniMax（国际 / 国内）等厂商预设只需要填 key；也可以填自建的兼容端点。不配置就没法对话。</string>
+    <string name="onboarding_model_change">修改</string>
+    <string name="onboarding_model_set">去设置</string>
+    <string name="onboarding_notifications_title">允许通知</string>
+    <string name="onboarding_notifications_detail">Agent 在后台执行任务时会显示一条常驻通知；以后需要你确认的操作也会通过通知询问。</string>
+    <string name="onboarding_allow">允许</string>
+    <string name="onboarding_assistant_title">设为默认助理（可选）</string>
+    <string name="onboarding_assistant_held">AgentOS 已是默认助理。</string>
+    <string name="onboarding_assistant_detail">设为默认助理后，长按电源键即可唤起。这个入口由后续版本（W13）提供；现在可以先打开系统设置看看。</string>
+    <string name="onboarding_assistant_open">打开系统设置</string>
+    <string name="onboarding_battery_title">允许忽略电池优化</string>
+    <string name="onboarding_plugins_title">已发现的插件</string>
+    <string name="onboarding_plugins_none">还没有发现插件。安装了内嵌 AgentOS 插件的 App 之后，会在这里和设置页的插件管理里出现（M3a）。</string>
+    <plurals name="onboarding_plugins_found">
+        <item quantity="other">发现了 %1$d 个插件，可以在设置页里启用。</item>
+    </plurals>
+</resources>

@@ -68,23 +68,27 @@ class ResStrings private constructor(
             listOf(File("src/main/res"), File("app/src/main/res")).firstOrNull { it.isDirectory } ?: error("cannot find app/src/main/res from ${File(".").absoluteFile}")
 
         fun load(locale: Locale, dir: String): ResStrings {
-            val file = File(resDir(), "$dir/strings.xml")
-            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
+            // every strings*.xml of the directory (strings.xml, strings_p2.xml …): lanes keep their keys in separate files, aapt merges them
+            val files = File(resDir(), dir).listFiles { f -> f.name.startsWith("strings") && f.name.endsWith(".xml") }.orEmpty().sortedBy { it.name }
+            check(files.isNotEmpty()) { "no strings*.xml in $dir" }
             val strings = LinkedHashMap<String, String>()
             val plurals = LinkedHashMap<String, Map<String, String>>()
-            val root = doc.documentElement.childNodes
-            for (i in 0 until root.length) {
-                val node = root.item(i) as? Element ?: continue
-                when (node.tagName) {
-                    "string" -> if (node.getAttribute("translatable") != "false") strings[node.getAttribute("name")] = unescape(node.textContent)
-                    "plurals" -> {
-                        val forms = LinkedHashMap<String, String>()
-                        val items = node.childNodes
-                        for (j in 0 until items.length) {
-                            val item = items.item(j) as? Element ?: continue
-                            if (item.tagName == "item") forms[item.getAttribute("quantity")] = unescape(item.textContent)
+            for (file in files) {
+                val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
+                val root = doc.documentElement.childNodes
+                for (i in 0 until root.length) {
+                    val node = root.item(i) as? Element ?: continue
+                    when (node.tagName) {
+                        "string" -> if (node.getAttribute("translatable") != "false") strings[node.getAttribute("name")] = unescape(node.textContent)
+                        "plurals" -> {
+                            val forms = LinkedHashMap<String, String>()
+                            val items = node.childNodes
+                            for (j in 0 until items.length) {
+                                val item = items.item(j) as? Element ?: continue
+                                if (item.tagName == "item") forms[item.getAttribute("quantity")] = unescape(item.textContent)
+                            }
+                            plurals[node.getAttribute("name")] = forms
                         }
-                        plurals[node.getAttribute("name")] = forms
                     }
                 }
             }

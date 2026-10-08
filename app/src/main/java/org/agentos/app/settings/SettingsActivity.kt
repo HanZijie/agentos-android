@@ -13,6 +13,8 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.agentos.app.R
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.onboarding.OnboardingActivity
 import org.agentos.app.ui.Ui
 
@@ -25,6 +27,7 @@ class SettingsActivity : Activity() {
     private lateinit var column: LinearLayout
     private val control by lazy { AgentControlClient(this) }
     private var scope: CoroutineScope? = null
+    private val strings: Strings by lazy { AndroidStrings(this) }
 
     private data class Snapshot(
         val version: Int,
@@ -170,20 +173,20 @@ class SettingsActivity : Activity() {
             .takeIf { it >= 0 }
         column.addView(Ui.sectionTitle(this, "安全等级"))
         column.addView(Ui.card(this).apply {
-            addView(Ui.line(context, "等级", SecurityText.LEVEL))
-            addView(Ui.paragraph(context, SecurityText.settings(StatusText.supervisorThisBoot(s.supervisor, bootCount))))
+            addView(Ui.line(context, "等级", SecurityText.level(strings)))
+            addView(Ui.paragraph(context, SecurityText.settings(StatusText.supervisorThisBoot(s.supervisor, bootCount), strings)))
         })
 
         // ---- runtime and supervisor
         val exempt = Battery.isExempt(this)
         column.addView(Ui.sectionTitle(this, "运行与监督"))
         column.addView(Ui.card(this).apply {
-            if (s.runtime != null) StatusText.runtime(s.runtime, exempt).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
-            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), bootCount)
+            if (s.runtime != null) StatusText.runtime(s.runtime, strings, exempt).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
+            StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), strings, bootCount)
                 .forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
             val actions = mutableListOf<Pair<CharSequence, () -> Unit>>("刷新" to { reloadLater() })
             if (!exempt && StatusText.foregroundDenied(s.runtime)) {
-                actions.add(0, (BatteryText.ACTION as CharSequence) to { Battery.request(this@SettingsActivity) })
+                actions.add(0, (BatteryText.action(strings) as CharSequence) to { Battery.request(this@SettingsActivity) })
             }
             addView(Ui.buttons(context, *actions.toTypedArray()))
         })
@@ -208,7 +211,7 @@ class SettingsActivity : Activity() {
                             desktop { it.setDesktopAccessEnabled(true) }
                             // F11 item 4: without the exemption the runtime may not get back to the foreground
                             if (!Battery.isExempt(this@SettingsActivity)) {
-                                confirm(BatteryText.DESKTOP_DIALOG_TITLE, BatteryText.DESKTOP_DIALOG_MESSAGE, "去允许", cancelLabel = "暂不") {
+                                confirm(BatteryText.desktopDialogTitle(strings), BatteryText.desktopDialogMessage(strings), getString(R.string.battery_dialog_allow), cancelLabel = getString(R.string.battery_dialog_not_now)) {
                                     Battery.request(this@SettingsActivity)
                                 }
                             }
@@ -228,8 +231,8 @@ class SettingsActivity : Activity() {
             })
             addView(Ui.paragraph(context, Desktop.FOREGROUND_NOTE))
             if (Desktop.needsBatteryExemption(d.enabled, exempt)) {
-                addView(Ui.line(context, BatteryText.DENIED_LABEL, BatteryText.DESKTOP_WARNING, warn = true))
-                addView(Ui.buttons(context, BatteryText.ACTION to { Battery.request(this@SettingsActivity) }))
+                addView(Ui.line(context, BatteryText.deniedLabel(strings), BatteryText.desktopWarning(strings), warn = true))
+                addView(Ui.buttons(context, BatteryText.action(strings) to { Battery.request(this@SettingsActivity) }))
             }
             if (d.enabled) {
                 addView(Ui.paragraph(context, Desktop.HOW_TO))
