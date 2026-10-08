@@ -308,7 +308,7 @@ class SmsTools(
                     "note",
                     "The messaging screen was handed to the system with a draft. Nothing was sent; the user has to press send. " +
                         "Android can silently block a screen that a background app opens, so if the user sees nothing, " +
-                        "tell them to open the Messages app: the draft is waiting on its \"Agent sends\" tab.",
+                        "tell them to open the Messages app: the draft is waiting on its \"Agent log\" tab.",
                 )
             },
         )

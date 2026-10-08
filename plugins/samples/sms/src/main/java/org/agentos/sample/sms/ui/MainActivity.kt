@@ -16,6 +16,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Forum
@@ -36,6 +42,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -130,6 +138,7 @@ private fun SmsRoot(graph: SmsGraph, requestedTab: Int?) {
             }
         },
     ) { padding ->
+        Box {
         AnimatedContent(
             targetState = tab,
             transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(140)) },
@@ -167,6 +176,15 @@ private fun SmsRoot(graph: SmsGraph, requestedTab: Int?) {
                     onOpenLanguage = openLanguage,
                 )
             }
+        }
+        // 内容从状态栏后面滚过时，给状态栏一层底色，图标和文字不会叠在一起
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .windowInsetsTopHeight(WindowInsets.statusBars)
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.92f)),
+        )
         }
     }
 }

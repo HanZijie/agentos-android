@@ -17,7 +17,7 @@ object Recipient {
     const val MIN_DIGITS = 3
     const val MAX_DIGITS = 15
 
-    private val MULTI_SEPARATORS = charArrayOf(',', ';', '，', '；', '、', '\n', '\r', '/', '|')
+    private val MULTI_SEPARATORS = charArrayOf(',', ';', '\uFF0C', '\uFF1B', '\u3001', '\n', '\r', '/', '|')
 
     fun parse(raw: String?): Parsed {
         val text = raw?.trim().orEmpty()
@@ -31,7 +31,7 @@ object Recipient {
             when {
                 digit != null -> sb.append(digit)
                 ch == '+' && sb.isEmpty() -> sb.append('+')
-                ch == ' ' || ch == '-' || ch == '.' || ch == '(' || ch == ')' || ch == '\u00A0' || ch == '　' -> Unit
+                ch == ' ' || ch == '-' || ch == '.' || ch == '(' || ch == ')' || ch == '\u00A0' || ch == '\u3000' -> Unit
                 else -> return Parsed.Bad("Invalid recipient: use a phone number with digits only (optionally starting with +), not names or text.")
             }
         }
@@ -47,7 +47,7 @@ object Recipient {
 
     private fun toAsciiDigit(ch: Char): Char? = when (ch) {
         in '0'..'9' -> ch
-        in '０'..'９' -> '0' + (ch - '０')
+        in '\uFF10'..'\uFF19' -> '0' + (ch - '\uFF10')
         else -> null
     }
 }

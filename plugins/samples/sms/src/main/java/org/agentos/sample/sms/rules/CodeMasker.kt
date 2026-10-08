@@ -29,10 +29,11 @@ object CodeMasker {
         val masked: Boolean get() = maskedCount > 0
     }
 
-    private const val D = "[0-9０-９]"
+    // 下面的中文关键词和全角字符都写成 \uXXXX（遮蔽规则的数据，不是界面文字）；对应的词见文件头注释里的规则 1 和 2。
+    private const val D = "[0-9\uff10-\uff19]"
 
     private val KEYWORDS = Regex(
-        "验证码|校验码|动态码|动态密码|安全码|确认码|认证码|登录码|授权码|随机码|识别码|验证|校验|口令|" +
+        "\u9a8c\u8bc1\u7801|\u6821\u9a8c\u7801|\u52a8\u6001\u7801|\u52a8\u6001\u5bc6\u7801|\u5b89\u5168\u7801|\u786e\u8ba4\u7801|\u8ba4\u8bc1\u7801|\u767b\u5f55\u7801|\u6388\u6743\u7801|\u968f\u673a\u7801|\u8bc6\u522b\u7801|\u9a8c\u8bc1|\u6821\u9a8c|\u53e3\u4ee4|" +
             "(?<![A-Za-z])(?:codes?|otp|pin|passcode|password|passwd|verif(?:y|ied|ying|ication)|2fa|mfa|tokens?)(?![A-Za-z])|" +
             "(?<![A-Za-z])(?:one[- ]?time|sign[- ]?in|log[- ]?in)(?![A-Za-z])",
         RegexOption.IGNORE_CASE,
@@ -41,12 +42,12 @@ object CodeMasker {
     private val CANDIDATE = Regex("(?<!$D)($D{3}[ -]$D{3}|$D{4}[ -]$D{4}|$D{4,8})(?!$D)")
 
     private val UNIT_AFTER = Regex(
-        "^\\s?(?:元|块|万|円|年|月|日|号|点|时|分|秒|个|条|次|笔|位|人民币|%|％|rmb|cny|usd|eur|gbp|yuan|dollars?|euros?)",
+        "^\\s?(?:\u5143|\u5757|\u4e07|\u5186|\u5e74|\u6708|\u65e5|\u53f7|\u70b9|\u65f6|\u5206|\u79d2|\u4e2a|\u6761|\u6b21|\u7b14|\u4f4d|\u4eba\u6c11\u5e01|%|\uff05|rmb|cny|usd|eur|gbp|yuan|dollars?|euros?)",
         RegexOption.IGNORE_CASE,
     )
-    private val CURRENCY_BEFORE = Regex("(?:[¥￥$€£]|rmb|cny|usd|eur|gbp)\\s?$", RegexOption.IGNORE_CASE)
-    private val SEP_DIGIT_AFTER = Regex("^[-/.:：]$D")
-    private val DIGIT_SEP_BEFORE = Regex("$D[-/.:：]$")
+    private val CURRENCY_BEFORE = Regex("(?:[\u00a5\uffe5$\u20ac\u00a3]|rmb|cny|usd|eur|gbp)\\s?$", RegexOption.IGNORE_CASE)
+    private val SEP_DIGIT_AFTER = Regex("^[-/.:\uff1a]$D")
+    private val DIGIT_SEP_BEFORE = Regex("$D[-/.:\uff1a]$")
 
     fun mask(body: String): Result {
         if (body.isEmpty()) return Result(body, 0)
@@ -87,5 +88,5 @@ object CodeMasker {
         return true
     }
 
-    private fun isDigit(c: Char) = c in '0'..'9' || c in '０'..'９'
+    private fun isDigit(c: Char) = c in '0'..'9' || c in '\uFF10'..'\uFF19'
 }

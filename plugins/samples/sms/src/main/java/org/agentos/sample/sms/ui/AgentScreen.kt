@@ -19,7 +19,6 @@ import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -151,11 +150,7 @@ private fun EntryCard(entry: OutboxEntry) {
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.size(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(4.dp))
-                StatusPill(stringResource(label), container, content)
-            }
+            StatusPill(stringResource(label), container, content, icon = icon)
         }
         Spacer(Modifier.height(8.dp))
         Text(entry.text, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -178,7 +173,7 @@ private fun EntryCard(entry: OutboxEntry) {
         if (entry.state == OutboxState.FAILED && entry.error != null) {
             Spacer(Modifier.height(6.dp))
             Text(
-                stringResource(R.string.failed_reason, entry.error),
+                stringResource(R.string.failed_reason, FailureReason.res(entry.error)?.let { stringResource(it) } ?: entry.error),
                 style = MaterialTheme.typography.bodySmall,
                 color = extras.warn,
                 maxLines = 2,

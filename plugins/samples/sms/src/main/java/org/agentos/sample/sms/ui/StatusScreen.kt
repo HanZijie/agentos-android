@@ -138,9 +138,10 @@ private fun Hero(access: SmsAccess) {
                     color = extras.onHeroVariant,
                 )
                 Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PermissionChip(R.string.perm_read, a.canRead, Modifier.weight(1f))
-                    PermissionChip(R.string.perm_send, a.canSend, Modifier.weight(1f))
+                // 竖着排：英文标签更长，小屏和大字体下并排会被截断
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PermissionChip(R.string.perm_read, a.canRead, Modifier.fillMaxWidth())
+                    PermissionChip(R.string.perm_send, a.canSend, Modifier.fillMaxWidth())
                 }
             }
         }
@@ -159,15 +160,14 @@ private fun PermissionChip(label: Int, granted: Boolean, modifier: Modifier = Mo
         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (granted) Icons.Rounded.CheckCircle else Icons.Rounded.Cancel, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Column {
-                Text(stringResource(label), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    stringResource(if (granted) R.string.perm_granted else R.string.perm_missing),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = extras.onHeroVariant,
-                    maxLines = 1,
-                )
-            }
+            Text(stringResource(label), style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(if (granted) R.string.perm_granted else R.string.perm_missing),
+                style = MaterialTheme.typography.bodySmall,
+                color = extras.onHeroVariant,
+                maxLines = 1,
+            )
         }
     }
 }

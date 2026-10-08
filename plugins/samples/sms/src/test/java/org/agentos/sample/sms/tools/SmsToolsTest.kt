@@ -496,7 +496,7 @@ class SmsToolsTest {
         val r = ok("sms_compose", """{"to":"+8613800138000","text":"draft text"}""")
         assertEquals("1", r.str("draft_id"))
         assertTrue(r.str("note").contains("silently block"))
-        assertTrue(r.str("note").contains("Agent sends"))
+        assertTrue(r.str("note").contains("Agent log"))
         val kept = rig.drafts.recent.value.single()
         assertEquals("+8613800138000", kept.to)
         assertEquals("draft text", kept.text)
