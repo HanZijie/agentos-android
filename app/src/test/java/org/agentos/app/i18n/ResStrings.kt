@@ -7,7 +7,7 @@ import java.util.Locale
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
- * JVM 测试用的 [Strings]：读**真实的** `app/src/main/res/values/strings.xml`（中文）和 `values-en/strings.xml`（英文），
+ * JVM 测试用的 [Strings]：读**真实的**资源目录 `app/src/main/res/values`（中文）和 `values-en`（英文）里的全部 xml（`strings.xml` 加各期的 `strings_p1/p2/p3.xml`），
  * 按 `R.string.*` 的 id 反查资源名。所以资源改了（改错占位符、漏了英文、有人把模板改成别的引号）测试会直接发现，
  * 不是拿一份手写的假文案自我满足。
  *
@@ -67,10 +67,9 @@ class ResStrings private constructor(
         private fun resDir(): File =
             listOf(File("src/main/res"), File("app/src/main/res")).firstOrNull { it.isDirectory } ?: error("cannot find app/src/main/res from ${File(".").absoluteFile}")
 
+        /** 目录里的全部 xml 文件（`strings.xml`、`strings_p1.xml`…），和 aapt 一样合并；同名 key 出现两次是资源错误，直接失败。 */
         fun load(locale: Locale, dir: String): ResStrings {
-            // every strings*.xml of the directory (strings.xml, strings_p2.xml …): lanes keep their keys in separate files, aapt merges them
-            val files = File(resDir(), dir).listFiles { f -> f.name.startsWith("strings") && f.name.endsWith(".xml") }.orEmpty().sortedBy { it.name }
-            check(files.isNotEmpty()) { "no strings*.xml in $dir" }
+            val files = File(resDir(), dir).listFiles { f -> f.name.endsWith(".xml") }.orEmpty().sortedBy { it.name }
             val strings = LinkedHashMap<String, String>()
             val plurals = LinkedHashMap<String, Map<String, String>>()
             for (file in files) {
@@ -78,16 +77,21 @@ class ResStrings private constructor(
                 val root = doc.documentElement.childNodes
                 for (i in 0 until root.length) {
                     val node = root.item(i) as? Element ?: continue
+                    val name = node.getAttribute("name")
                     when (node.tagName) {
-                        "string" -> if (node.getAttribute("translatable") != "false") strings[node.getAttribute("name")] = unescape(node.textContent)
+                        "string" -> if (node.getAttribute("translatable") != "false") {
+                            check(name !in strings) { "string/$name is defined twice in $dir (${file.name})" }
+                            strings[name] = unescape(node.textContent)
+                        }
                         "plurals" -> {
+                            check(name !in plurals) { "plurals/$name is defined twice in $dir (${file.name})" }
                             val forms = LinkedHashMap<String, String>()
                             val items = node.childNodes
                             for (j in 0 until items.length) {
                                 val item = items.item(j) as? Element ?: continue
                                 if (item.tagName == "item") forms[item.getAttribute("quantity")] = unescape(item.textContent)
                             }
-                            plurals[node.getAttribute("name")] = forms
+                            plurals[name] = forms
                         }
                     }
                 }

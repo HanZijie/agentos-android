@@ -18,6 +18,8 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.agentos.app.R
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.ui.Ui
 
 /**
@@ -31,6 +33,7 @@ import org.agentos.app.ui.Ui
  */
 class ModelSourceActivity : Activity() {
     private val control by lazy { AgentControlClient(this) }
+    private val strings: Strings by lazy { AndroidStrings(this) }
     private var scope: CoroutineScope? = null
 
     private var catalog: Byok.Catalog? = null
@@ -56,7 +59,7 @@ class ModelSourceActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        val (root, column) = Ui.page(this, "模型与 key")
+        val (root, column) = Ui.page(this, getString(R.string.model_title))
         build(column)
         setContentView(root)
         scope = MainScope().also { it.launch { load() } }
@@ -72,22 +75,22 @@ class ModelSourceActivity : Activity() {
 
     private fun build(column: LinearLayout) {
         val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        presetTab = Ui.textButton(this, "厂商预设", R.color.ui_accent) { setMode(MODE_PRESET) }
-        customTab = Ui.textButton(this, "自定义兼容端点", R.color.ui_accent) { setMode(MODE_CUSTOM) }
+        presetTab = Ui.textButton(this, getString(R.string.model_tab_preset), R.color.ui_accent) { setMode(MODE_PRESET) }
+        customTab = Ui.textButton(this, getString(R.string.model_tab_custom), R.color.ui_accent) { setMode(MODE_CUSTOM) }
         tabs.addView(presetTab)
         tabs.addView(customTab)
         column.addView(tabs)
 
         presetPanel = Ui.card(this).apply {
-            addView(label("模型厂商"))
+            addView(label(getString(R.string.model_label_provider)))
             providerSpinner = Spinner(context)
             addView(providerSpinner)
-            addView(label("模型"))
+            addView(label(getString(R.string.model_label_model)))
             modelSpinner = Spinner(context)
             addView(modelSpinner)
             thinkingRow = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(label("思考强度"))
+                addView(label(getString(R.string.model_label_thinking)))
                 thinkingSpinner = Spinner(context)
                 addView(thinkingSpinner)
             }
@@ -96,19 +99,17 @@ class ModelSourceActivity : Activity() {
         column.addView(presetPanel)
 
         customPanel = Ui.card(this).apply {
-            addView(label("协议"))
+            addView(label(getString(R.string.model_label_api)))
             apiSpinner = Spinner(context).apply {
                 adapter = adapter(listOf(Byok.apiText(Byok.ANTHROPIC), Byok.apiText(Byok.OPENAI)))
             }
             addView(apiSpinner)
-            addView(label("API 地址"))
+            addView(label(getString(R.string.model_label_url)))
             baseUrl = field("https://api.example.com/v1", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
             addView(baseUrl)
-            addView(Ui.paragraph(context,
-                "必须是 https://；唯一的例外是本机地址（127.0.0.1、localhost、::1）可以用 http://，给手机上运行的模型服务用。" +
-                    "OpenAI Chat Completions 填到 /v1 这一级，Anthropic Messages 填 API 根地址。"))
-            addView(label("模型名"))
-            customModel = field("例如 deepseek-chat", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+            addView(Ui.paragraph(context, getString(R.string.model_url_note)))
+            addView(label(getString(R.string.model_label_model_name)))
+            customModel = field(getString(R.string.model_hint_model_name), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
             addView(customModel)
             visibility = View.GONE
         }
@@ -116,8 +117,8 @@ class ModelSourceActivity : Activity() {
 
         column.addView(Ui.card(this).apply {
             (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(12)
-            addView(label("key"))
-            key = field("粘贴 key", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD).apply {
+            addView(label(getString(R.string.model_label_key)))
+            key = field(getString(R.string.model_hint_key), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD).apply {
                 importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
             }
             addView(key)
@@ -127,8 +128,8 @@ class ModelSourceActivity : Activity() {
 
         message = Ui.text(this, 14f, R.color.ui_error).apply { setPadding(dp(4), dp(8), dp(4), 0) }
         column.addView(message)
-        column.addView(Ui.buttons(this, "保存" to { save() }))
-        column.addView(Ui.paragraph(this, "保存后从下一次模型请求起生效，不打断正在进行的这一轮。key 用 Android Keystore 加密保存，界面上只显示首尾各 4 位。"))
+        column.addView(Ui.buttons(this, getString(R.string.model_save) to { save() }))
+        column.addView(Ui.paragraph(this, getString(R.string.model_save_note)))
 
         providerSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -181,7 +182,7 @@ class ModelSourceActivity : Activity() {
             catalog = cat
             current = src
             providerSpinner.adapter = adapter(cat.providers.map { it.name })
-            thinkingSpinner.adapter = adapter(cat.thinkingLevels.map { Byok.thinkingText(it) })
+            thinkingSpinner.adapter = adapter(cat.thinkingLevels.map { Byok.thinkingText(it, strings) })
             if (src.configured && src.kind == "custom") {
                 setMode(MODE_CUSTOM)
                 apiSpinner.setSelection(if (src.api == Byok.OPENAI) 1 else 0)
@@ -195,7 +196,7 @@ class ModelSourceActivity : Activity() {
             cat.providers.getOrNull(providerIndex)?.let { loadModels(it.id, keep = src.model) }
             cat.thinkingLevels.indexOf(src.thinkingLevel ?: "off").takeIf { it >= 0 }?.let { thinkingSpinner.setSelection(it) }
         } catch (e: Exception) {
-            message.text = "读取厂商目录失败：${Byok.errorText(e.message)}"
+            message.text = getString(R.string.model_load_failed, Byok.errorText(e.message, strings))
         }
         updateKeyHint()
     }
@@ -205,12 +206,12 @@ class ModelSourceActivity : Activity() {
             val list = control.use { Byok.parseModels(it.getModelPresets(providerId)) }
             if (catalog?.providers?.getOrNull(providerSpinner.selectedItemPosition)?.id != providerId) return
             models = list
-            modelSpinner.adapter = adapter(list.map { if (it.name == it.id) it.id else "${it.name}（${it.id}）" })
+            modelSpinner.adapter = adapter(list.map { if (it.name == it.id) it.id else getString(R.string.model_option_with_id, it.name, it.id) })
             val want = keep ?: current?.model.takeIf { current?.provider == providerId }
             list.indexOfFirst { it.id == want }.takeIf { it >= 0 }?.let { modelSpinner.setSelection(it) }
             updateThinking()
         } catch (e: Exception) {
-            message.text = Byok.errorText(e.message)
+            message.text = Byok.errorText(e.message, strings)
         }
     }
 
@@ -240,8 +241,8 @@ class ModelSourceActivity : Activity() {
         val f = form()
         val src = current
         keyHint.text = when {
-            f != null && Byok.sameEndpoint(f, src) -> "留空则沿用已保存的 key（${src?.keyMasked}）"
-            src?.configured == true -> "换了厂商或地址，需要重新填写 key；key 不会被带到别的地址"
+            f != null && Byok.sameEndpoint(f, src) -> getString(R.string.model_key_keep, src?.keyMasked.orEmpty())
+            src?.configured == true -> getString(R.string.model_key_changed)
             else -> catalog?.providers?.getOrNull(providerSpinner.selectedItemPosition)?.keyLabel?.takeIf { mode == MODE_PRESET }.orEmpty()
         }
     }
@@ -249,7 +250,7 @@ class ModelSourceActivity : Activity() {
     private fun save() {
         val f = form() ?: return
         val keyText = key.text.toString().trim()
-        Byok.validate(f, keyText.isNotEmpty(), current)?.let { bad ->
+        Byok.validate(f, keyText.isNotEmpty(), current, strings)?.let { bad ->
             message.text = bad.message
             return
         }
@@ -259,12 +260,12 @@ class ModelSourceActivity : Activity() {
                 val after = Byok.parseSource(control.use { it.setModelSource(Byok.sourceJson(f), keyText.ifEmpty { null }) })
                 key.text.clear()
                 current = after
-                Toast.makeText(this@ModelSourceActivity, if (after.usable) "已保存，下一次请求起生效" else "已保存，但暂时不可用", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@ModelSourceActivity, if (after.usable) R.string.model_saved else R.string.model_saved_unusable, Toast.LENGTH_SHORT).show()
                 if (after.usable) finish() else {
-                    message.text = after.problems.joinToString("\n") { Byok.problemText(it) }.ifEmpty { "已保存，但暂时不可用" }
+                    message.text = after.problems.joinToString("\n") { Byok.problemText(it, strings) }.ifEmpty { getString(R.string.model_saved_unusable) }
                 }
             } catch (e: Exception) {
-                message.text = Byok.errorText(e.message)
+                message.text = Byok.errorText(e.message, strings)
             }
         }
     }

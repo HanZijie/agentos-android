@@ -59,14 +59,28 @@ class SettingsLogicTest {
 
     @Test
     fun emptyKeyIsOnlyAllowedForTheSameEndpoint() {
-        val src = Byok.parseSource(presetSource)
-        assertNull(Byok.validate(Byok.Form.Preset("minimax-cn", "MiniMax-M2.5"), keyEntered = false, current = src))
-        assertEquals("key", Byok.validate(Byok.Form.Preset("minimax", "MiniMax-M2.7"), keyEntered = false, current = src)?.field)
-        assertNull(Byok.validate(Byok.Form.Preset("minimax", "MiniMax-M2.7"), keyEntered = true, current = src))
-        assertEquals("key", Byok.validate(Byok.Form.Preset("minimax-cn", "MiniMax-M2.7"), keyEntered = false, current = null)?.field)
+        for (s in listOf(ResStrings.zh, ResStrings.en)) {
+            val src = Byok.parseSource(presetSource)
+            assertNull(Byok.validate(Byok.Form.Preset("minimax-cn", "MiniMax-M2.5"), keyEntered = false, current = src, strings = s))
+            assertEquals("key", Byok.validate(Byok.Form.Preset("minimax", "MiniMax-M2.7"), keyEntered = false, current = src, strings = s)?.field)
+            assertNull(Byok.validate(Byok.Form.Preset("minimax", "MiniMax-M2.7"), keyEntered = true, current = src, strings = s))
+            assertEquals("key", Byok.validate(Byok.Form.Preset("minimax-cn", "MiniMax-M2.7"), keyEntered = false, current = null, strings = s)?.field)
+            val custom = Byok.Form.Custom(Byok.OPENAI, "http://192.168.1.2/v1", "m")
+            assertEquals("baseUrl", Byok.validate(custom, keyEntered = true, current = null, strings = s)?.field)
+            assertEquals("model", Byok.validate(custom.copy(baseUrl = "https://x.example/v1", model = ""), true, null, s)?.field)
+            assertEquals("model", Byok.validate(custom.copy(baseUrl = "https://x.example/v1", model = "a b"), true, null, s)?.field)
+        }
+    }
+
+    @Test
+    fun formProblemsAreWordedInBothLanguages() {
         val custom = Byok.Form.Custom(Byok.OPENAI, "http://192.168.1.2/v1", "m")
-        assertEquals("baseUrl", Byok.validate(custom, keyEntered = true, current = null)?.field)
-        assertEquals("model", Byok.validate(custom.copy(baseUrl = "https://x.example/v1", model = ""), true, null)?.field)
+        assertEquals("地址必须以 https:// 开头（http 只允许本机），且不能带用户名、? 参数或 # 片段", Byok.validate(custom, true, null, ResStrings.zh)?.message)
+        assertEquals("The address must start with https:// (http is allowed for this phone only) and can't contain a username, ? parameters or a # fragment", Byok.validate(custom, true, null, ResStrings.en)?.message)
+        assertEquals("请选择模型厂商", Byok.validate(Byok.Form.Preset("", ""), true, null, ResStrings.zh)?.message)
+        assertEquals("Choose a model vendor", Byok.validate(Byok.Form.Preset("", ""), true, null, ResStrings.en)?.message)
+        assertEquals("换了厂商或地址，需要重新填写 key", Byok.validate(Byok.Form.Preset("minimax", "m"), false, null, ResStrings.zh)?.message)
+        assertEquals("You changed the vendor or address, so enter the key again", Byok.validate(Byok.Form.Preset("minimax", "m"), false, null, ResStrings.en)?.message)
     }
 
     @Test
@@ -82,11 +96,46 @@ class SettingsLogicTest {
     }
 
     @Test
-    fun byokErrorsNeverEchoInput() {
-        assertEquals("换了厂商或地址，需要重新填写 key", Byok.errorText("agentos.byok.key_required: endpoint changed"))
-        assertTrue(Byok.errorText("agentos.byok.invalid_endpoint: …").startsWith("API 地址不合法"))
-        assertEquals("保存失败，请重试", Byok.errorText("sk-secret-should-not-appear"))
-        assertEquals("保存失败（brand_new）", Byok.errorText("agentos.byok.brand_new: x"))
+    fun byokErrorsNeverEchoInputInChinese() {
+        val s = ResStrings.zh
+        assertEquals("换了厂商或地址，需要重新填写 key", Byok.errorText("agentos.byok.key_required: endpoint changed", s))
+        assertTrue(Byok.errorText("agentos.byok.invalid_endpoint: …", s).startsWith("API 地址不合法"))
+        assertEquals("保存失败，请重试", Byok.errorText("sk-secret-should-not-appear", s))
+        assertEquals("保存失败（brand_new）", Byok.errorText("agentos.byok.brand_new: x", s))
+    }
+
+    @Test
+    fun byokErrorsNeverEchoInputInEnglish() {
+        val s = ResStrings.en
+        assertEquals("You changed the vendor or address, so enter the key again", Byok.errorText("agentos.byok.key_required: endpoint changed", s))
+        assertTrue(Byok.errorText("agentos.byok.invalid_endpoint: …", s).startsWith("Invalid API address"))
+        assertEquals("Couldn't save. Please try again.", Byok.errorText("sk-secret-should-not-appear", s))
+        assertEquals("Couldn't save (brand_new)", Byok.errorText("agentos.byok.brand_new: x", s))
+    }
+
+    @Test
+    fun everyByokCodeAndProblemHasItsOwnSentenceInBothLanguages() {
+        val codes = listOf(
+            "invalid_source", "unknown_provider", "unknown_model", "unsupported_api", "invalid_endpoint",
+            "invalid_thinking_level", "invalid_key", "key_required", "catalog_unavailable", "storage_failed",
+        )
+        val problems = listOf("config_unreadable", "config_newer_format", "key_unreadable", "key_endpoint_mismatch", "model_not_in_catalog", "catalog_unavailable")
+        for (s in listOf(ResStrings.zh, ResStrings.en)) {
+            for (c in codes) {
+                val t = Byok.errorText("agentos.byok.$c: x", s)
+                assertFalse("$c in ${s.locale}: $t", t.contains(c) || t == Byok.errorText(null, s))
+            }
+            for (p in problems) assertFalse("$p in ${s.locale}", Byok.problemText(p, s).contains(p))
+            for (level in listOf("off", "minimal", "low", "medium", "high")) assertFalse(Byok.thinkingText(level, s) == level)
+        }
+        assertEquals(listOf("关闭", "最少", "低", "中", "高"), listOf("off", "minimal", "low", "medium", "high").map { Byok.thinkingText(it, ResStrings.zh) })
+        assertEquals(listOf("Off", "Minimal", "Low", "Medium", "High"), listOf("off", "minimal", "low", "medium", "high").map { Byok.thinkingText(it, ResStrings.en) })
+        // the key can only be decrypted on the phone that stored it: both languages say what to do
+        assertEquals("key 无法解密（例如数据被恢复到了另一台手机），请重新填写 key", Byok.problemText("key_unreadable", ResStrings.zh))
+        assertEquals("The key can't be decrypted (for example, the data was restored to another phone). Please enter the key again.", Byok.problemText("key_unreadable", ResStrings.en))
+        // unknown codes pass through; protocol names are product names
+        assertEquals("something_new", Byok.problemText("something_new", ResStrings.en))
+        assertEquals("OpenAI Chat Completions", Byok.apiText(Byok.OPENAI))
     }
 
     private val runtimeJson = """{"pid":1234,"phase":"READY","tasks":1,"foreground":true,"state":"busy","serviceRunning":true,"foregroundDenied":false,"uptimeMs":125000}"""

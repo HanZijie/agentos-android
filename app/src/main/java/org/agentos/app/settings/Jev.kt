@@ -6,10 +6,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
 
 /**
  * 设置页的“自动选择会话（Jev）”（IAgentControl v4，D5.1）：状态解析、输入校验、文案。纯 Kotlin（JevLogicTest）。
- * key 只从密码框直接进 setJevSource，这里不保存、不回显。
+ * key 只从密码框直接进 setJevSource，这里不保存、不回显。文案在 strings_p2.xml（`jev_*`），经 [Strings] 取。
  */
 object Jev {
     /** [IAgentControl.getJevSource]。 */
@@ -47,46 +49,44 @@ object Jev {
     /**
      * 填写是否可以保存。[endpoint] 留空 = 默认；[keyEntered] 为 false 时只有 endpoint 与已保存的相同才允许（沿用 key）。
      */
-    fun validate(endpoint: String, keyEntered: Boolean, current: Source?): Invalid? {
+    fun validate(endpoint: String, keyEntered: Boolean, current: Source?, strings: Strings): Invalid? {
         val ep = endpoint.trim()
         if (ep.isNotEmpty() && !Byok.isAllowedEndpoint(ep)) {
-            return Invalid("endpoint", "地址必须以 https:// 开头（http 只允许本机），且不能带用户名、? 参数或 # 片段")
+            return Invalid("endpoint", strings.get(R.string.byok_url_rule))
         }
         if (!keyEntered) {
             val effective = ep.ifEmpty { current?.defaultEndpoint.orEmpty() }
             val same = current?.keySet == true && effective == current.endpoint
-            if (!same) return Invalid("key", if (current?.keySet == true) "换了地址，需要重新填写 key" else "请填写 Jev key")
+            if (!same) return Invalid("key", strings.get(if (current?.keySet == true) R.string.jev_key_changed_address else R.string.jev_key_needed))
         }
         return null
     }
 
     /** setJevSource / clearJevSource 的错误（`agentos.jev.<code>: …`），不回显输入。 */
-    fun errorText(message: String?): String {
+    fun errorText(message: String?, strings: Strings): String {
         val code = message?.substringAfter("agentos.jev.", "")?.substringBefore(':')?.trim().orEmpty()
         return when (code) {
-            "invalid_endpoint" -> "地址不合法：必须是 https://（本机地址可以用 http://），不能带用户名、参数或片段"
-            "invalid_key" -> "key 里有空格或控制字符，请重新粘贴"
-            "key_required" -> "换了地址，需要重新填写 key"
-            "storage_failed" -> "保存失败：Android Keystore 或存储出了问题，请重试"
-            "" -> "操作失败，请重试"
-            else -> "操作失败（$code）"
+            "invalid_endpoint" -> strings.get(R.string.jev_err_invalid_endpoint)
+            "invalid_key" -> strings.get(R.string.jev_err_invalid_key)
+            "key_required" -> strings.get(R.string.jev_key_changed_address)
+            "storage_failed" -> strings.get(R.string.jev_err_storage_failed)
+            "" -> strings.get(R.string.settings_operation_failed)
+            else -> strings.get(R.string.jev_err_failed_code, code)
         }
     }
 
-    fun problemText(code: String): String = when (code) {
-        "key_unreadable" -> "已保存的 key 解不开（设备的密钥库变了），请重新填写 key"
-        "file_unreadable" -> "保存的设置读不出来，请重新填写"
+    fun problemText(code: String, strings: Strings): String = when (code) {
+        "key_unreadable" -> strings.get(R.string.jev_problem_key_unreadable)
+        "file_unreadable" -> strings.get(R.string.jev_problem_file_unreadable)
         else -> code
     }
 
-    fun statusText(s: Source): String = when {
-        !s.configured -> "未配置：同一个调用方有多个历史会话时，每次都新建会话"
-        !s.usable -> "已保存，但暂时不可用"
-        else -> "已启用"
+    fun statusText(s: Source, strings: Strings): String = when {
+        !s.configured -> strings.get(R.string.jev_status_not_configured)
+        !s.usable -> strings.get(R.string.model_saved_unusable)
+        else -> strings.get(R.string.jev_status_enabled)
     }
 
     /** What it does and what it sends (session-selection.md): said before the user enters a key. */
-    const val EXPLAIN =
-        "用户（或其他 App）不指定会话时，AgentOS 会把这次的问题和这个调用方自己最近几个会话的摘要发给 Jev 服务，由它挑出该继续哪个会话，" +
-            "挑不出来就新建。不配置也能正常使用，只是每次都新建会话。摘要含会话里的问答文字，不含模型 key。"
+    fun explain(strings: Strings): String = strings.get(R.string.jev_explain)
 }

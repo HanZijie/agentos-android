@@ -61,7 +61,7 @@ class SettingsActivity : Activity() {
 
     /**
      * Pulling down the notification shade does not pause the page, but the shade can change what it shows
-     * (the desktop-access notification's "关闭" turns the switch off): read again when the window is back.
+     * (the desktop-access notification's "Turn off" button turns the switch off): read again when the window is back.
      */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -84,7 +84,7 @@ class SettingsActivity : Activity() {
                 )
             }
         } catch (e: Exception) {
-            Snapshot(0, null, null, null, null, null, null, "连不上 AgentOS 运行时（${e.javaClass.simpleName}）")
+            Snapshot(0, null, null, null, null, null, null, getString(R.string.settings_connect_failed, e.javaClass.simpleName))
         }
         render(snap)
         // Desktop access is on but the runtime's foreground start was refused (started in the background without
@@ -103,88 +103,88 @@ class SettingsActivity : Activity() {
 
     private fun render(s: Snapshot) {
         column.removeAllViews()
-        if (s.error != null) column.addView(Ui.card(this).apply { addView(Ui.line(context, "运行时", s.error, warn = true)) })
+        if (s.error != null) column.addView(Ui.card(this).apply { addView(Ui.line(context, getString(R.string.status_runtime_label), s.error, warn = true)) })
 
         // ---- model & key
-        column.addView(Ui.sectionTitle(this, "模型与 key"))
+        column.addView(Ui.sectionTitle(this, getString(R.string.model_title)))
         column.addView(Ui.card(this).apply {
             val src = s.source
             when {
                 s.version in 1 until AgentControlClient.BYOK_VERSION ->
-                    addView(Ui.line(context, "模型", "运行时版本过旧，不支持在这里设置", warn = true))
-                src == null -> addView(Ui.line(context, "模型", "读取中…"))
-                !src.configured -> addView(Ui.line(context, "模型", "还没有配置：对话前需要选择模型厂商并填写 key", warn = true))
+                    addView(Ui.line(context, getString(R.string.model_label_model), getString(R.string.settings_model_runtime_too_old), warn = true))
+                src == null -> addView(Ui.line(context, getString(R.string.model_label_model), getString(R.string.settings_loading)))
+                !src.configured -> addView(Ui.line(context, getString(R.string.model_label_model), getString(R.string.settings_model_not_configured), warn = true))
                 else -> {
-                    val who = if (src.kind == "preset") src.providerName ?: src.provider.orEmpty() else "自定义兼容端点"
-                    addView(Ui.line(context, "来源", who))
-                    addView(Ui.line(context, "模型", listOfNotNull(src.modelName ?: src.model, src.api?.let { Byok.apiText(it) }).joinToString(" · ")))
-                    if (src.kind == "custom") addView(Ui.line(context, "地址", src.baseUrl.orEmpty()))
-                    if (src.thinkingLevel != null && src.thinkingLevel != "off") addView(Ui.line(context, "思考强度", Byok.thinkingText(src.thinkingLevel)))
-                    addView(Ui.line(context, src.keyLabel ?: "key", if (src.keySet) src.keyMasked ?: "已设置" else "未设置", warn = !src.keySet))
-                    addView(Ui.line(context, "状态", if (src.usable) "可用" else "不可用", warn = !src.usable))
-                    src.problems.forEach { addView(Ui.line(context, "注意", Byok.problemText(it), warn = true)) }
+                    val who = if (src.kind == "preset") src.providerName ?: src.provider.orEmpty() else getString(R.string.model_tab_custom)
+                    addView(Ui.line(context, getString(R.string.settings_model_source), who))
+                    addView(Ui.line(context, getString(R.string.model_label_model), listOfNotNull(src.modelName ?: src.model, src.api?.let { Byok.apiText(it) }).joinToString(" · ")))
+                    if (src.kind == "custom") addView(Ui.line(context, getString(R.string.settings_model_address), src.baseUrl.orEmpty()))
+                    if (src.thinkingLevel != null && src.thinkingLevel != "off") addView(Ui.line(context, getString(R.string.model_label_thinking), Byok.thinkingText(src.thinkingLevel, strings)))
+                    addView(Ui.line(context, src.keyLabel ?: getString(R.string.model_label_key), if (src.keySet) src.keyMasked ?: getString(R.string.settings_key_set) else getString(R.string.settings_key_not_set), warn = !src.keySet))
+                    addView(Ui.line(context, getString(R.string.settings_status), getString(if (src.usable) R.string.settings_usable else R.string.settings_not_usable), warn = !src.usable))
+                    src.problems.forEach { addView(Ui.line(context, getString(R.string.settings_note), Byok.problemText(it, strings), warn = true)) }
                 }
             }
             if (s.version >= AgentControlClient.BYOK_VERSION) {
                 val actions = mutableListOf<Pair<CharSequence, () -> Unit>>(
-                    (if (src?.configured == true) "更换" else "去设置") to {
+                    getString(if (src?.configured == true) R.string.settings_change else R.string.settings_set_up) to {
                         startActivity(Intent(context, ModelSourceActivity::class.java))
                     },
                 )
-                if (src?.configured == true) actions += ("清除" as CharSequence) to { confirmClear() }
+                if (src?.configured == true) actions += (getString(R.string.settings_clear) as CharSequence) to { confirmClear() }
                 addView(Ui.buttons(context, *actions.toTypedArray()))
             }
         })
 
         // ---- auto-select session (Jev, IAgentControl v4)
-        column.addView(Ui.sectionTitle(this, "自动选择会话（Jev）"))
+        column.addView(Ui.sectionTitle(this, getString(R.string.jev_title)))
         column.addView(Ui.card(this).apply {
             val j = s.jev
             if (j == null) {
-                addView(Ui.line(context, "Jev", if (s.version in 1 until AgentControlClient.JEV_VERSION) "运行时版本过旧，不支持" else "读取中…"))
+                addView(Ui.line(context, "Jev", getString(if (s.version in 1 until AgentControlClient.JEV_VERSION) R.string.settings_runtime_too_old else R.string.settings_loading)))
                 return@apply
             }
-            addView(Ui.line(context, "状态", Jev.statusText(j), warn = j.problems.isNotEmpty()))
+            addView(Ui.line(context, getString(R.string.settings_status), Jev.statusText(j, strings), warn = j.problems.isNotEmpty()))
             if (j.configured) {
-                addView(Ui.line(context, "服务地址", if (j.customEndpoint) j.endpoint else "默认（${j.endpoint}）"))
-                addView(Ui.line(context, "Jev key", if (j.keySet) j.keyMasked ?: "已设置" else "未设置", warn = !j.keySet))
+                addView(Ui.line(context, getString(R.string.settings_jev_endpoint), if (j.customEndpoint) j.endpoint else getString(R.string.settings_jev_default_endpoint, j.endpoint)))
+                addView(Ui.line(context, getString(R.string.jev_label_key), if (j.keySet) j.keyMasked ?: getString(R.string.settings_key_set) else getString(R.string.settings_key_not_set), warn = !j.keySet))
             }
-            j.problems.forEach { addView(Ui.line(context, "注意", Jev.problemText(it), warn = true)) }
+            j.problems.forEach { addView(Ui.line(context, getString(R.string.settings_note), Jev.problemText(it, strings), warn = true)) }
             val actions = mutableListOf<Pair<CharSequence, () -> Unit>>(
-                (if (j.configured) "更换" else "去设置") to { startActivity(Intent(context, JevSourceActivity::class.java)) },
+                getString(if (j.configured) R.string.settings_change else R.string.settings_set_up) to { startActivity(Intent(context, JevSourceActivity::class.java)) },
             )
-            if (j.configured) actions += ("清除" as CharSequence) to { confirmClearJev() }
+            if (j.configured) actions += (getString(R.string.settings_clear) as CharSequence) to { confirmClearJev() }
             addView(Ui.buttons(context, *actions.toTypedArray()))
         })
 
         // ---- plugins (D5.3): the list itself lives in PluginsActivity
-        column.addView(Ui.sectionTitle(this, "插件"))
+        column.addView(Ui.sectionTitle(this, getString(R.string.settings_plugins_section)))
         column.addView(Ui.card(this).apply {
-            addView(Ui.paragraph(context, "其他 App 提供给 AgentOS 的工具（插件管理）；以及哪些第三方 App 被允许使用 AgentOS（已授权的应用）。第三方插件默认关闭，启用前会说明风险。"))
+            addView(Ui.paragraph(context, getString(R.string.settings_plugins_note)))
             addView(Ui.buttons(
                 context,
-                "已授权的应用" to { startActivity(Intent(context, org.agentos.app.settings.callers.AuthorizedAppsActivity::class.java)) },
-                "插件管理" to { startActivity(Intent(context, org.agentos.app.settings.plugins.PluginsActivity::class.java)) },
+                getString(R.string.settings_authorized_apps) to { startActivity(Intent(context, org.agentos.app.settings.callers.AuthorizedAppsActivity::class.java)) },
+                getString(R.string.settings_plugin_manager) to { startActivity(Intent(context, org.agentos.app.settings.plugins.PluginsActivity::class.java)) },
             ))
         })
 
         // ---- security level (principle 6): "rooted" only when the root supervisor reported this boot
         val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
             .takeIf { it >= 0 }
-        column.addView(Ui.sectionTitle(this, "安全等级"))
+        column.addView(Ui.sectionTitle(this, getString(R.string.settings_security_section)))
         column.addView(Ui.card(this).apply {
-            addView(Ui.line(context, "等级", SecurityText.level(strings)))
+            addView(Ui.line(context, getString(R.string.settings_security_level), SecurityText.level(strings)))
             addView(Ui.paragraph(context, SecurityText.settings(StatusText.supervisorThisBoot(s.supervisor, bootCount), strings)))
         })
 
         // ---- runtime and supervisor
         val exempt = Battery.isExempt(this)
-        column.addView(Ui.sectionTitle(this, "运行与监督"))
+        column.addView(Ui.sectionTitle(this, getString(R.string.settings_runtime_section)))
         column.addView(Ui.card(this).apply {
             if (s.runtime != null) StatusText.runtime(s.runtime, strings, exempt).forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
             StatusText.supervisor(s.supervisor, StatusText.supervisorMissing(s.diagnostics), strings, bootCount)
                 .forEach { addView(Ui.line(context, it.label, it.value, it.warn)) }
-            val actions = mutableListOf<Pair<CharSequence, () -> Unit>>("刷新" to { reloadLater() })
+            val actions = mutableListOf<Pair<CharSequence, () -> Unit>>(getString(R.string.settings_refresh) to { reloadLater() })
             if (!exempt && StatusText.foregroundDenied(s.runtime)) {
                 actions.add(0, (BatteryText.action(strings) as CharSequence) to { Battery.request(this@SettingsActivity) })
             }
@@ -196,7 +196,7 @@ class SettingsActivity : Activity() {
         column.addView(Ui.card(this).apply {
             val d = s.desktop
             if (d == null) {
-                addView(Ui.line(context, getString(R.string.desktop_section), getString(if (s.version in 1 until AgentControlClient.DESKTOP_VERSION) R.string.desktop_runtime_too_old else R.string.settings_loading)))
+                addView(Ui.line(context, getString(R.string.desktop_section), getString(if (s.version in 1 until AgentControlClient.DESKTOP_VERSION) R.string.settings_runtime_too_old else R.string.settings_loading)))
                 return@apply
             }
             addView(LinearLayout(context).apply {
@@ -260,28 +260,30 @@ class SettingsActivity : Activity() {
         })
 
         // ---- first-run guide, about
-        column.addView(Ui.sectionTitle(this, "其他"))
+        column.addView(Ui.sectionTitle(this, getString(R.string.settings_other_section)))
         column.addView(Ui.card(this).apply {
-            addView(Ui.buttons(context, "重新查看首次引导" to {
-                startActivity(Intent(context, OnboardingActivity::class.java))
-            }))
+            addView(Ui.buttons(
+                context,
+                getString(R.string.settings_app_language) to { openAppLanguage() },
+                getString(R.string.settings_show_guide) to { startActivity(Intent(context, OnboardingActivity::class.java)) },
+            ))
             val pi = packageManager.getPackageInfo(packageName, 0)
-            addView(Ui.line(context, "版本", "AgentOS ${pi.versionName}（${pi.longVersionCode}）；运行时接口 v${s.version}"))
+            addView(Ui.line(context, getString(R.string.settings_version), getString(R.string.settings_version_value, pi.versionName, pi.longVersionCode, s.version)))
         })
     }
 
     private fun confirmClearJev() {
         confirm(
-            "清除 Jev key？",
-            "清除后立即作废：删除保存的 key 和它的加密密钥，正在进行的自动选择也会中止。之后每次都新建会话，直到重新设置。",
-            "清除",
+            getString(R.string.settings_clear_jev_title),
+            getString(R.string.settings_clear_jev_message),
+            getString(R.string.settings_clear),
         ) {
             scope?.launch {
                 try {
                     control.use { it.clearJevSource() }
-                    Toast.makeText(this@SettingsActivity, "已清除", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@SettingsActivity, R.string.settings_cleared, Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
-                    Toast.makeText(this@SettingsActivity, Jev.errorText(e.message), Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@SettingsActivity, Jev.errorText(e.message, strings), Toast.LENGTH_LONG).show()
                 }
                 reload()
             }
@@ -290,23 +292,20 @@ class SettingsActivity : Activity() {
 
     private fun confirmClear() {
         AlertDialog.Builder(this)
-            .setTitle("清除模型和 key？")
-            .setMessage(
-                "清除后立即作废：删除保存的 key 和它的加密密钥。之后的每一次模型请求都会失败，包括正在进行的这一轮里的下一次请求，" +
-                    "不会再用旧 key 跑完。\n\n如果只是想换厂商、模型或 key，用“更换”即可，那样从下一次请求起生效，不打断正在进行的这一轮。",
-            )
-            .setPositiveButton("清除") { _, _ ->
+            .setTitle(R.string.settings_clear_model_title)
+            .setMessage(R.string.settings_clear_model_message)
+            .setPositiveButton(R.string.settings_clear) { _, _ ->
                 scope?.launch {
                     try {
                         control.use { it.clearModelSource() }
-                        Toast.makeText(this@SettingsActivity, "已清除", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@SettingsActivity, R.string.settings_cleared, Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
-                        Toast.makeText(this@SettingsActivity, Byok.errorText(e.message), Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@SettingsActivity, Byok.errorText(e.message, strings), Toast.LENGTH_LONG).show()
                     }
                     reload()
                 }
             }
-            .setNegativeButton("取消", null)
+            .setNegativeButton(R.string.settings_cancel, null)
             .show()
     }
 
@@ -325,6 +324,15 @@ class SettingsActivity : Activity() {
             .setNegativeButton(cancelLabel) { _, _ -> onCancel() }
             .setOnCancelListener { onCancel() }
             .show()
+    }
+
+    /** R5: the per-app language page of the system settings (zh / en, from res/xml/locales_config.xml). */
+    private fun openAppLanguage() {
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_APP_LOCALE_SETTINGS, android.net.Uri.parse("package:$packageName")))
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.settings_open_failed, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun reloadLater() {
