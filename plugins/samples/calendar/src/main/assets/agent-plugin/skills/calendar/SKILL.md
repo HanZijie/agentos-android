@@ -62,6 +62,15 @@ Everything you change shows up in the Calendar app immediately. Reminders for ac
 
 **Custom repeat rules** (events created by other apps or synced from the cloud): an event whose rule this app cannot express (for example "every second Tuesday", every 2 weeks, a fixed number of repeats) is returned with `recurrence: "custom"` and the original `rrule`. **You cannot change such an event**: `event_update` fails and nothing is modified, because rewriting the rule could break the series. Tell the user to edit it in the calendar app that owns it, or (only if they ask) delete it and create a new one. You can still read it and delete it. `custom` is output only; never pass it as an input.
 
+## Where things belong (across the Alarm, Calendar, Notes, Todo and Messages apps)
+
+- A thing with a clear done state ("write the PRD", "renew passport") goes in the **Todo** app.
+- Something that occupies a stretch of time ("review meeting Wed 3-4 pm") is a **calendar event**; a lead-time reminder for it goes in the event's `reminder_minutes`.
+- Waking the user at a clock time ("wake me at 7") is an **alarm**. An event reminder is not an alarm.
+- Pure information to remember (an idea, a recipe, meeting minutes) is a **note**.
+- Telling someone else something ("text Wang the minutes") is a **message**; sending needs the user's approval every time.
+- **One thing = one entry.** Never record the same thing as a todo and a note, or as an event reminder and an alarm. Use only the tools that are actually in your tool list; if an app is not installed or not enabled, keep the item where it fits best among the apps you do have and tell the user.
+
 ## Permission
 
 Account and system calendars need the Calendar permission (granted by the user in this app). When it is missing, every tool that touches them fails with exactly: `Calendar permission not granted; ask the user to grant it in the Calendar app`. Do not retry; tell the user to open the Calendar app and tap "Allow" (or enable the permission in system settings). The device-only calendars keep working without it: pass their `calendar_id` (from `calendar_list`) to `event_list`, `event_search`, `agenda_today` and `free_slots`; `event_create` without `calendar_id` then falls back to the local calendar.

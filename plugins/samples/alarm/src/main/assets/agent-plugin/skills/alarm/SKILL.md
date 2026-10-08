@@ -51,6 +51,15 @@ ring. This app is the single source for alarms you create or change.
   `reminder_minutes`. Create an alarm only when the user wants something to *ring at a clock time* ("wake me at 7"). One thing
   gets one entry, never both an event reminder and an alarm.
 
+## Where things belong (across the Alarm, Calendar, Notes, Todo and Messages apps)
+
+- A thing with a clear done state ("write the PRD", "renew passport") goes in the **Todo** app.
+- Something that occupies a stretch of time ("review meeting Wed 3-4 pm") is a **calendar event**; a lead-time reminder for it goes in the event's `reminder_minutes`.
+- Waking the user at a clock time ("wake me at 7") is an **alarm**. An event reminder is not an alarm.
+- Pure information to remember (an idea, a recipe, meeting minutes) is a **note**.
+- Telling someone else something ("text Wang the minutes") is a **message**; sending needs the user's approval every time.
+- **One thing = one entry.** Never record the same thing as a todo and a note, or as an event reminder and an alarm. Use only the tools that are actually in your tool list; if an app is not installed or not enabled, keep the item where it fits best among the apps you do have and tell the user.
+
 ## Gotchas
 
 - Look before you create: `alarm_list` first when the user may already have that alarm, so you do not make duplicates.
