@@ -45,6 +45,8 @@ internal class TaskRunner(
     val taskId: String,
     val ownerKey: String,
     private val toolContextCaller: org.agentos.runtime.ports.CallerIdentity,
+    /** 这个会话的工具范围（会话创建时定下，docs/third-party-acp.md 4.5）；交给 Broker 的 [ToolContext]。 */
+    private val toolScope: org.agentos.runtime.ports.ToolScope,
     private val core: AgentCoreSession,
     private val broker: CapabilityBroker,
     private val store: Store,
@@ -81,7 +83,7 @@ internal class TaskRunner(
     /** 执行这一轮，返回 Agent core 的结局。事件在返回前全部提交。 */
     suspend fun run(input: TurnInput): TurnOutcome = coroutineScope {
         val writerJob = launch { writer() }
-        val ctx = ToolContext(sessionId, taskId, toolContextCaller, cancelSignal) { block ->
+        val ctx = ToolContext(sessionId, taskId, toolContextCaller, cancelSignal, toolScope) { block ->
             val ack = CompletableDeferred<Unit>()
             if (writes.trySend(Write.Commit(block, ack)).isSuccess) ack.await()
         }

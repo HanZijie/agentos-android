@@ -53,8 +53,8 @@ class CapabilityBrokerPolicyTest {
         val rt = TestRuntime({ calls("create_note", 2) })
         rt.host.tools.registerSimple("create_note", ToolRisk.WRITE, src) { ToolResult.text("ok") }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertEquals(2, rt.host.consent.requests.size)
             assertEquals(2, rt.host.tools.invocations.size)
@@ -69,8 +69,8 @@ class CapabilityBrokerPolicyTest {
         rt.host.tools.registerSimple("create_note", ToolRisk.WRITE, src) { ToolResult.text("ok") }
         rt.host.approvals.update { it.withApproval(PolicyScope.Server("notes", "main"), ApprovalMode.ALWAYS) }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertTrue(rt.host.consent.requests.isEmpty(), "never asked")
             assertEquals(2, rt.host.tools.invocations.size)
@@ -87,8 +87,8 @@ class CapabilityBrokerPolicyTest {
         rt.host.tools.registerSimple("wipe", ToolRisk.HIGH, ToolSource("notes", "main", "wipe")) { ToolResult.text("wiped") }
         rt.host.approvals.update { it.withApproval(PolicyScope.Plugin("notes"), ApprovalMode.ALWAYS) }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertEquals(1, rt.host.consent.requests.size, "a high risk tool is confirmed whatever the policy says")
             assertEquals(ToolRisk.HIGH, rt.host.consent.requests.single().risk)
@@ -104,8 +104,8 @@ class CapabilityBrokerPolicyTest {
         rt.host.approvals.update { it.withEnabled(PolicyScope.of(src), false) }
         run(rt) {
             assertEquals(listOf("list_notes"), rt.engine.broker.declarations().map { it.name })
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertTrue(rt.host.tools.invocations.isEmpty())
             assertTrue(rt.host.consent.requests.isEmpty(), "no confirmation for a tool that is switched off")
@@ -119,11 +119,11 @@ class CapabilityBrokerPolicyTest {
         val rt = TestRuntime()
         rt.host.tools.registerSimple("create_note", ToolRisk.WRITE, src) { ToolResult.text("ok") }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
             val broker = rt.engine.broker
-            val ctx = ToolContext(s.id, "tsk_direct", TestRuntime.APP) { block ->
+            val ctx = ToolContext(s.id, "tsk_direct", TestRuntime.SELF) { block ->
                 rt.engine.storeForTesting.write { tx ->
-                    if (tx.tasks.get("tsk_direct") == null) tx.tasks.create("tsk_direct", s.id, TestRuntime.text("x"), TestRuntime.APP, null, tx.now, null)
+                    if (tx.tasks.get("tsk_direct") == null) tx.tasks.create("tsk_direct", s.id, TestRuntime.text("x"), TestRuntime.SELF, null, tx.now, null)
                     block(tx)
                 }
             }
@@ -154,8 +154,8 @@ class CapabilityBrokerPolicyTest {
         rt.host.approvals.update { it.withApproval(PolicyScope.of(src), ApprovalMode.ALWAYS) }
         rt.host.hooks.answer = { HookOutcome(matched = 1, decision = HookDecision.ASK) }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertEquals(1, rt.host.consent.requests.size)
         }
@@ -167,8 +167,8 @@ class CapabilityBrokerPolicyTest {
         rt.host.tools.registerSimple("create_note", ToolRisk.WRITE, src) { ToolResult.text("ok") }
         rt.host.consent.answer = { ConsentDecision.Allow(rememberForSession = true) }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("go"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("go"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertEquals(1, rt.host.consent.requests.size)
             assertEquals(listOf("user", "remembered"), rt.consentReasons(s.id))
@@ -182,8 +182,8 @@ class CapabilityBrokerPolicyTest {
         rt.host.approvals.update { it.withEnabled(PolicyScope.Plugin("notes"), false) }
         run(rt) {
             assertEquals(listOf("read_skill"), rt.engine.broker.declarations().map { it.name })
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val ctx = ToolContext(s.id, "tsk_direct", TestRuntime.APP) { block -> rt.engine.storeForTesting.write { tx -> block(tx) } }
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val ctx = ToolContext(s.id, "tsk_direct", TestRuntime.SELF) { block -> rt.engine.storeForTesting.write { tx -> block(tx) } }
             assertIs<ToolCallDecision.Allow>(rt.engine.broker.authorize(ctx, ToolCall("c", "read_skill", buildJsonObject { })))
         }
     }

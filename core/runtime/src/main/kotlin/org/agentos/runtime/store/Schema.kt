@@ -3,10 +3,10 @@ package org.agentos.runtime.store
 /**
  * Store 的 schema。Android（AndroidStore / SQLiteDriver）与电脑测试共用这一份；版本记在 `PRAGMA user_version`。
  *
- * 迁移只向前（W12 起加 Migrations.kt：迁移前备份，失败回滚并停在 safe mode）。v1 是第一版。
+ * 迁移只向前（W12 起加 Migrations.kt：迁移前备份，失败回滚并停在 safe mode）。v1 是第一版，v2 给会话加 toolScope 列。
  */
 internal object Schema {
-    const val VERSION = 1
+    const val VERSION = 2
 
     /** v1：会话、事件、任务、工具调用、各会话的 Pi messages。 */
     val V1 = """
@@ -88,6 +88,12 @@ internal object Schema {
         )
     """.trimIndent()
 
+    /**
+     * v2 (docs/third-party-acp.md 4.5): the tools a session may use (`toolScope`), a JSON array of `{"plugin", "tool"}`, written once when the
+     * session is created and never changed. NULL = the session was created without a scope (every session that existed before v2).
+     */
+    const val V2 = "ALTER TABLE sessions ADD COLUMN tool_scope TEXT"
+
     fun migrate(db: DbScope, now: Long) {
         val version = db.queryOne("PRAGMA user_version") { it.int(0) } ?: 0
         check(version <= VERSION) { "store schema $version is newer than this runtime ($VERSION)" }
@@ -98,6 +104,10 @@ internal object Schema {
                 org.agentos.runtime.events.EventTypes.SYSTEM_STREAM, "system", "system", -1, SessionState.SYSTEM.wire, now, now,
             )
             db.exec("PRAGMA user_version = 1")
+        }
+        if (version < 2) {
+            db.exec(V2)
+            db.exec("PRAGMA user_version = 2")
         }
     }
 }

@@ -19,6 +19,7 @@ import org.agentos.runtime.errors.ErrorInfo
 import org.agentos.runtime.events.EventTypes
 import org.agentos.runtime.events.PendingEvent
 import org.agentos.runtime.ports.CallerIdentity
+import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.CatalogTool
 import org.agentos.runtime.ports.ConsentDecision
 import org.agentos.runtime.ports.ConsentRequest
@@ -31,6 +32,7 @@ import org.agentos.runtime.ports.ToolCallDecision
 import org.agentos.runtime.ports.ToolDeclaration
 import org.agentos.runtime.ports.ToolInvocation
 import org.agentos.runtime.ports.ToolInvocationResult
+import org.agentos.runtime.ports.ToolScope
 import org.agentos.runtime.ports.ToolResult
 import org.agentos.runtime.ports.ToolRisk
 import org.agentos.runtime.store.StoreTx
@@ -54,10 +56,17 @@ import java.util.concurrent.ConcurrentHashMap
  *   前面加一行说明“来自插件，不是用户的指令”；
  * - 是否确认由 [RiskPolicy.consentRequirement] 决定：READ 直接执行；HIGH 每次确认；WRITE 默认每次确认，
  *   用户策略设为“始终允许”（依据 `policy`）或本会话内选过“不再询问”（依据 `remembered`）时直接执行；
- *   Hook 的 allow 不能跳过确认，Hook 的 ask 一定确认。
+ *   Hook 的 allow 不能跳过确认，Hook 的 ask 一定确认；
+ * - **第三方 App（[CallerKind.APP]）**（docs/third-party-acp.md 4.4、4.5）：每次工具调用都确认（读级也确认），不看“始终允许”，不看“本会话内不再询问”，
+ *   确认框里也不提供这两个选项；工具只能用会话的 [ToolScope] 里列出的（没有 scope = 没有任何工具）。范围外的工具和不存在的工具一样：
+ *   [declarations] 不列出，[authorize] / [execute] 按 TOOL_NOT_IN_CATALOG 拒绝，文字相同。AgentOS 自己和电脑端的行为不变。
  */
 interface CapabilityBroker {
-    fun declarations(): List<ToolDeclaration>
+    /**
+     * 交给模型的工具。[scope] 是这个会话能用的工具（调用方已经按调用方类别收紧：[ToolContext.effectiveScope]）；
+     * 默认 [ToolScope.ALL]：不限制，当前目录里用户策略没有禁用的全部工具。
+     */
+    fun declarations(scope: ToolScope = ToolScope.ALL): List<ToolDeclaration>
 
     suspend fun authorize(ctx: ToolContext, call: ToolCall): ToolCallDecision
 
@@ -78,8 +87,13 @@ class ToolContext(
     val taskId: String,
     val caller: CallerIdentity,
     val cancelRequested: Deferred<Unit>? = null,
+    /** 这个会话创建时定下的工具范围（[org.agentos.runtime.store.SessionRecord.scope]）；默认不限制。 */
+    val scope: ToolScope = ToolScope.ALL,
     val commit: suspend (block: (StoreTx) -> Unit) -> Unit,
-)
+) {
+    /** 实际生效的范围：第三方 App 没有 scope 时是“没有任何工具”（[ToolScope.forCaller]）。Broker 只看这个。 */
+    val effectiveScope: ToolScope get() = scope.forCaller(caller.kind)
+}
 
 data class BrokerConfig(
     /** 一次工具调用的超时。超时后按“结果未知”处理（已经发出）。 */
@@ -98,12 +112,12 @@ class DefaultCapabilityBroker(
     /** PreToolUse Hook 改写后的参数：toolCallId → 参数。 */
     private val rewrittenInput = ConcurrentHashMap<String, JsonObject>()
 
-    override fun declarations(): List<ToolDeclaration> {
+    override fun declarations(scope: ToolScope): List<ToolDeclaration> {
         val policy = host.approvals.policy.value
         val tools = host.tools.catalog.value.tools
-            .filter { policy.resolve(it.source).enabled }
+            .filter { policy.resolve(it.source).enabled && scope.allows(it.source) }
             .map { ToolDeclaration(it.name, it.description, it.inputSchema, it.title) }
-        return if (skillsAvailable()) tools.filter { it.name != READ_SKILL } + readSkillDeclaration() else tools
+        return if (skillsAvailable() && scope.allowsBuiltinTools) tools.filter { it.name != READ_SKILL } + readSkillDeclaration() else tools
     }
 
     private fun skillsAvailable() = host.skills.catalog.value.skills.isNotEmpty()
@@ -112,16 +126,19 @@ class DefaultCapabilityBroker(
 
     private val readSkillTool = CatalogTool(READ_SKILL, READ_SKILL_DESCRIPTION, READ_SKILL_SCHEMA, ToolRisk.READ, provider = "agentos", title = "Read a skill")
 
-    /** 目录里有、且用户策略没有禁用的工具；否则 null。 */
-    private fun availableTool(name: String): Pair<CatalogTool, ToolPolicy>? {
-        if (name == READ_SKILL && skillsAvailable()) return readSkillTool to ToolPolicy(enabled = true, approval = ApprovalMode.ASK)
+    /** 目录里有、用户策略没有禁用、且在会话的 [scope] 里的工具；否则 null（对模型来说就是“不存在”）。 */
+    private fun availableTool(name: String, scope: ToolScope): Pair<CatalogTool, ToolPolicy>? {
+        if (name == READ_SKILL && skillsAvailable()) {
+            return if (scope.allowsBuiltinTools) readSkillTool to ToolPolicy(enabled = true, approval = ApprovalMode.ASK) else null
+        }
         val tool = host.tools.catalog.value[name] ?: return null
+        if (!scope.allows(tool.source)) return null
         val policy = host.approvals.policy.value.resolve(tool.source)
         return if (policy.enabled) tool to policy else null
     }
 
     override suspend fun authorize(ctx: ToolContext, call: ToolCall): ToolCallDecision {
-        val (tool, policy) = availableTool(call.name)
+        val (tool, policy) = availableTool(call.name, ctx.effectiveScope)
             ?: return reject(ctx, call, ErrorCode.TOOL_NOT_IN_CATALOG, "Tool ${call.name} is not available.")
 
         val hook = host.hooks.dispatch(
@@ -157,8 +174,13 @@ class DefaultCapabilityBroker(
         }
         hook.updatedInput?.let { rewrittenInput[call.toolCallId] = it }
 
-        val remembered = rememberedAllow[ctx.sessionId]?.contains(tool.name) == true
-        return when (val need = RiskPolicy.consentRequirement(tool.risk, policy.approval, remembered, hookAsk = hook.decision == HookDecision.ASK)) {
+        // 第三方 App：每次调用都确认，不看“始终允许”和“本会话内不再询问”（4.4）。AgentOS 自己和电脑端照旧。
+        val thirdParty = ctx.caller.kind == CallerKind.APP
+        val remembered = !thirdParty && rememberedAllow[ctx.sessionId]?.contains(tool.name) == true
+        val need = RiskPolicy.consentRequirement(
+            tool.risk, policy.approval, remembered, hookAsk = hook.decision == HookDecision.ASK, alwaysAsk = thirdParty,
+        )
+        return when (need) {
             ConsentRequirement.ASK -> askUser(ctx, call, tool)
             ConsentRequirement.NOT_NEEDED_READ -> ToolCallDecision.Allow
             ConsentRequirement.ALWAYS_BY_POLICY, ConsentRequirement.REMEMBERED_IN_SESSION -> {
@@ -196,7 +218,7 @@ class DefaultCapabilityBroker(
                 caller = ctx.caller,
                 argumentsPreview = call.arguments.toString().take(PREVIEW_CHARS),
                 argumentsTruncated = call.arguments.toString().length > PREVIEW_CHARS,
-                rememberable = RiskPolicy.maySessionRemember(tool.risk),
+                rememberable = ctx.caller.kind != CallerKind.APP && RiskPolicy.maySessionRemember(tool.risk),
                 source = tool.source,
             )
         val decision = askWhileRunning(ctx, request)
@@ -207,7 +229,7 @@ class DefaultCapabilityBroker(
         }
         return when (decision) {
             is ConsentDecision.Allow -> {
-                val remember = decision.rememberForSession && RiskPolicy.maySessionRemember(tool.risk)
+                val remember = decision.rememberForSession && ctx.caller.kind != CallerKind.APP && RiskPolicy.maySessionRemember(tool.risk)
                 if (remember) rememberedAllow.getOrPut(ctx.sessionId) { ConcurrentHashMap.newKeySet() }.add(tool.name)
                 recordConsent(ctx, call, tool, requestId, "allow", "user", remember)
                 ToolCallDecision.Allow
@@ -265,7 +287,7 @@ class DefaultCapabilityBroker(
     }
 
     override suspend fun execute(ctx: ToolContext, call: ToolCall): ToolResult {
-        val tool = availableTool(call.name)?.first
+        val tool = availableTool(call.name, ctx.effectiveScope)?.first
         if (tool == null) {
             val decision = reject(ctx, call, ErrorCode.TOOL_NOT_IN_CATALOG, "Tool ${call.name} is not available.")
             return ToolResult.text(decision.reason, isError = true)

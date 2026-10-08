@@ -3,6 +3,8 @@ package org.agentos.runtime.store
 import kotlinx.serialization.json.JsonArray
 import org.agentos.runtime.errors.ErrorInfo
 import org.agentos.runtime.ports.CallerKind
+import org.agentos.runtime.ports.ToolRef
+import org.agentos.runtime.ports.ToolScope
 
 /** 会话状态（core/contracts/session-scheduling.md 第 2 节）。 */
 enum class SessionState(val wire: String) {
@@ -72,7 +74,15 @@ data class SessionRecord(
     val lastActivityAt: Long,
     val lastSequence: Long,
     val selection: SelectionMetadata,
-)
+    /**
+     * The tools this session may use, as given to `session/new` (docs/third-party-acp.md 4.5); null = no scope was given. Fixed when the session
+     * is created; a damaged stored value reads as an empty list (= no tools), never as null.
+     */
+    val toolScope: List<ToolRef>? = null,
+) {
+    /** What the session may use, before the caller kind is taken into account ([ToolScope.forCaller]). */
+    val scope: ToolScope get() = toolScope?.let { ToolScope.only(it) } ?: ToolScope.ALL
+}
 
 /** 自动选会话（session-selection.md）用的元数据：只来自用户输入和模型的最终回答。 */
 data class SelectionMetadata(

@@ -208,11 +208,37 @@ class ConsentTextTest {
     }
 
     @Test
+    fun `allowedChoices - a third-party app gets once and decline only, in every combination of the other inputs`() {
+        val source = ToolSource("p", "s", "t")
+        for (risk in ToolRisk.entries) for (rememberable in listOf(false, true)) for (alwaysAvailable in listOf(false, true)) for (src in listOf<ToolSource?>(null, source)) {
+            val r = ConsentRequest("r", "s", "t", "c", "tool", null, risk, CallerIdentity(10001, CallerKind.APP, "com.example.app"), "{}", rememberable = rememberable, source = src)
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.DENY), ConsentText.allowedChoices(r, alwaysAvailable), "$risk $rememberable $alwaysAvailable $src")
+        }
+    }
+
+    @Test
+    fun `allowedChoices - for AgentOS itself and the desktop nothing changed`() {
+        val source = ToolSource("p", "s", "t")
+        for (kind in listOf(CallerKind.SELF, CallerKind.DESKTOP, CallerKind.SYSTEM)) {
+            val caller = CallerIdentity(10001, kind, "x")
+            fun choices(risk: ToolRisk, rememberable: Boolean, always: Boolean, src: ToolSource?) =
+                ConsentText.allowedChoices(ConsentRequest("r", "s", "t", "c", "tool", null, risk, caller, "{}", rememberable = rememberable, source = src), always)
+            val all = listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALLOW_FOR_SESSION, ConsentChoice.ALWAYS_ALLOW, ConsentChoice.DENY)
+            assertEquals(all, choices(ToolRisk.WRITE, true, true, source), "$kind")
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALLOW_FOR_SESSION, ConsentChoice.DENY), choices(ToolRisk.WRITE, true, false, source), "$kind: no write-back channel")
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALWAYS_ALLOW, ConsentChoice.DENY), choices(ToolRisk.WRITE, false, true, source), "$kind: not rememberable")
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.ALLOW_FOR_SESSION, ConsentChoice.DENY), choices(ToolRisk.WRITE, true, true, null), "$kind: no source plugin")
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.DENY), choices(ToolRisk.HIGH, true, true, source), "$kind: high risk")
+            assertEquals(listOf(ConsentChoice.ALLOW_ONCE, ConsentChoice.DENY), choices(ToolRisk.READ, true, true, source), "$kind: read")
+        }
+    }
+
+    @Test
     fun `option labels are fixed text`() = runTest {
         val writable = object : ApprovalWriter {
             override suspend fun setAlways(source: ToolSource, risk: ToolRisk) = ApprovalWriteResult.Saved
         }
-        val v = viewOf(request("r", source = ToolSource("p", "s", "t")), writer = writable)
+        val v = viewOf(request("r", source = ToolSource("p", "s", "t"), kind = CallerKind.SELF), writer = writable)
         assertEquals(listOf("允许一次", "本次对话内不再询问", "始终允许这个工具", "拒绝"), v.options.map { it.label })
         assertEquals(listOf(false, false, false, true), v.options.map { it.destructive })
     }

@@ -48,8 +48,8 @@ class CapabilityBrokerTest {
         val rt = TestRuntime({ toolScript("rm_rf") })
         rt.host.tools.registerSimple("read_notes") { ToolResult.text("notes") }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("delete everything"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("delete everything"))
             val done = rt.engine.awaitTask(t.id)
 
             assertEquals(TaskState.COMPLETED, done.state, "a rejected tool does not fail the turn")
@@ -71,14 +71,14 @@ class CapabilityBrokerTest {
         val rt = TestRuntime()
         rt.host.tools.registerSimple("flaky") { ToolResult.text("ok") }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
             val broker = rt.engine.broker
             val commits = mutableListOf<String>()
-            val ctx = ToolContext(s.id, "tsk_direct", TestRuntime.APP) { block ->
+            val ctx = ToolContext(s.id, "tsk_direct", TestRuntime.SELF) { block ->
                 rt.engine.storeForTesting.write { tx ->
                     // 直接测试时没有真实任务行：给 tool_calls 的外键准备一个任务
                     if (tx.tasks.get("tsk_direct") == null) {
-                        tx.tasks.create("tsk_direct", s.id, TestRuntime.text("x"), TestRuntime.APP, null, tx.now, null)
+                        tx.tasks.create("tsk_direct", s.id, TestRuntime.text("x"), TestRuntime.SELF, null, tx.now, null)
                     }
                     block(tx)
                 }
@@ -97,13 +97,13 @@ class CapabilityBrokerTest {
     fun `tool dispatched is committed before the provider is invoked`() {
         val rt = TestRuntime({ toolScript("save_note") })
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
             var dispatchedBeforeInvoke = false
             rt.host.tools.register("save_note", ToolRisk.READ) {
                 dispatchedBeforeInvoke = rt.engine.readEvents(s.id).any { e -> e.eventType == EventTypes.TOOL_DISPATCHED }
                 ToolInvocationResult.Completed(ToolResult.text("saved"))
             }
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("save"))
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("save"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertTrue(dispatchedBeforeInvoke)
             val types = rt.engine.readEvents(s.id).map { it.eventType }
@@ -118,11 +118,11 @@ class CapabilityBrokerTest {
         rt.host.consent.answer = { ConsentDecision.Deny(ConsentDecision.DenyReason.USER) }
         rt.host.tools.register("send_sms", ToolRisk.WRITE) { error("must not run") }
         run(rt) {
-            val s = rt.engine.createSession(TestRuntime.APP, null)
-            val t = rt.engine.submit(TestRuntime.APP, s.id, TestRuntime.text("text mom"))
+            val s = rt.engine.createSession(TestRuntime.SELF, null)
+            val t = rt.engine.submit(TestRuntime.SELF, s.id, TestRuntime.text("text mom"))
             assertEquals(TaskState.COMPLETED, rt.engine.awaitTask(t.id).state)
             assertEquals(1, rt.host.consent.requests.size)
-            assertEquals(TestRuntime.APP, rt.host.consent.requests.single().caller)
+            assertEquals(TestRuntime.SELF, rt.host.consent.requests.single().caller)
             assertTrue(rt.host.tools.invocations.isEmpty())
             val types = rt.engine.readEvents(s.id).map { it.eventType }
             assertTrue(EventTypes.CONSENT_REQUESTED in types && EventTypes.CONSENT_RESOLVED in types)
@@ -133,7 +133,7 @@ class CapabilityBrokerTest {
     fun `oversized results are truncated before they reach the model`() {
         val broker = DefaultCapabilityBroker(FakeHostPort(), BrokerConfig(maxResultChars = 10))
         val out = runBlocking {
-            broker.afterExecute(ToolContext("s", "t", TestRuntime.APP) { }, ToolCall("c", "n", buildJsonObject { }), ToolResult.text("0123456789ABCDEF"))
+            broker.afterExecute(ToolContext("s", "t", TestRuntime.SELF) { }, ToolCall("c", "n", buildJsonObject { }), ToolResult.text("0123456789ABCDEF"))
         }
         assertIs<ToolResult>(out)
         assertEquals("0123456789", (out.content[0] as org.agentos.runtime.ports.ContentPart.Text).text)
