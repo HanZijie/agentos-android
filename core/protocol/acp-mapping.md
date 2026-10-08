@@ -46,9 +46,9 @@
 | `agentCapabilities.mcpCapabilities` | `http: false`、`sse: false`：工具来自 AgentOS 的插件，客户端不能传 MCP 服务器 |
 | `agentInfo` | `{ name: "agentos", title: "AgentOS", version: <App 版本> }` |
 | `authMethods` | `[]` |
-| `_meta."org.agentos"` | `{ profile: 1, runtime, securityLevel: "best_effort", extensions: { sessionAutoSelect: { version: 1 } } }` |
+| `_meta."org.agentos"` | `{ profile: 1, runtime, securityLevel: "best_effort", extensions: { sessionAutoSelect: { version: 1 }, toolScope: { version: 1 } } }` |
 
-客户端在请求的 `_meta."org.agentos".extensions` 里声明要用的扩展（字符串数组）。
+客户端在请求的 `_meta."org.agentos".extensions` 里声明要用的扩展（字符串数组）。`toolScope` 只在这里**声明**让客户端探测，不要求协商（见第 4 节）。
 
 ## 4. `session/new`
 
@@ -57,6 +57,14 @@
 - `additionalDirectories`：忽略。
 - 返回的 `sessionId` 形如 `ses_<26 位 ULID>`，归属调用方（`ownerKey`）。
 - **自动选会话扩展**：请求带 `_meta."org.agentos".autoSelect.query` 时，运行时在调用方自己的会话里选一个或新建（session-selection.md），返回的 `sessionId` 可能是已有会话；之后发一条 `session/update`（`session_info_update`，普通字段为空），在 `_meta."org.agentos".selection` 里告知 `{ sessionId, created, method, fallbackReason? }`。没有在 `initialize` 里声明 `sessionAutoSelect` 就带上 `autoSelect`：返回 -32602（`invalid_params`）。`query` 为空同样拒绝。
+
+- **toolScope 扩展**（docs/third-party-acp.md 4.5）：请求带 `_meta."org.agentos".toolScope = [{"plugin": "alarm", "tool": "alarm_create"}, …]`，指定**这个会话**能用哪几个工具。`plugin` 是 `plugin.json` 的 `name`，`tool` 是插件自己报告的原始工具名（不是最终的 `mcp__…` 名字）。
+  - **只能缩小**：实际可用 = toolScope ∩ 当前目录（用户策略禁用、插件未启用的照样没有）。写了不存在的项**静默忽略**，不报错（调用方不能借此探测用户装了什么）。
+  - 第三方 App（`CallerKind.APP`）没带 toolScope 或为空数组 = **没有任何工具**，只能聊天（也没有 `read_skill`，系统提示里没有 Skill 目录）。AgentOS 自己和电脑端：没带 = 全部工具（不变），带了也生效。
+  - 范围外的工具：不在交给模型的工具列表里，模型按名字硬调也在 `authorize` / `execute` 被拒绝，错误码 `tool_not_in_catalog`，文字与工具真不存在时一字不差。
+  - **随会话持久化**（`sessions.tool_scope`，store schema v2），重启后不丢；会话创建后**没有任何办法改它**。`session/load` 现在没有启用（`loadSession: false`），将来启用时也只能恢复，不能改；自动选会话只会选到 toolScope 与这次请求相同的会话（session-selection.md 第 1 节）。
+  - 形状非法 → -32602（`invalid_params`），不创建会话：不是数组、元素不是对象、缺 `plugin` / `tool` 或不是非空字符串、超过 **32** 项（按客户端发来的数，重复的也算）、字符串超过 **128** 字符。元素里多出来的键忽略；重复的项合并。
+  - 不要求在 `initialize` 里协商：它只会让会话能用的工具**更少**，不改变任何标准方法的含义；没有它的第三方会话本来就没有工具。（与 `sessionAutoSelect` 不同，那个会改变 `session/new` 返回的会话。）
 
 选择这种形式而不是单独的 `_agentos/…` 方法，是因为 SDK 的 Agent 只在 `session/new`（和 load / resume / fork）里把会话登记到连接上；单独的方法返回的会话 ID 无法接着发 `session/prompt`。选择结果放在随后的通知里，是因为 SDK 0.30.1 不在 `session/new` 的响应里带 `_meta`。
 
@@ -114,6 +122,10 @@
 | `task.recovery_required`（结果未知：泵故障、取消宽限期超时） | JSON-RPC 错误 -32051，`agentosCode` 为 `agent_core_failed` 或 `tool_result_unknown`；会话进入等恢复决定，之后的 prompt 返回 `recovery_required`（-32049） |
 
 请求本身被拒绝（会话不存在或不属于调用方、正在取消、safe mode、队列满）时，`session/prompt` 立即返回对应的 JSON-RPC 错误（errors.md 3.1），不产生任务。
+
+**第三方 App 的配额**（docs/third-party-acp.md 4.6，session-scheduling.md 第 5.1 节）只对 `CallerKind.APP`：一次 prompt 的文字超过 16,000 字符 → -32602 `invalid_params`（`data.details.reason = too_large`，先于上面 200,000 字符的 `payload_too_large` 判断）；已有一个 prompt 在进行 → -32048 `quota_exceeded`（`details.reason = busy`）；一小时内超过 30 次 → -32048 `quota_exceeded`（`details.reason = hourly`，`details.retryAfterSeconds`）。数值在 `CallerQuotaConfig`。AgentOS 自己、电脑端不受影响。
+
+**确认语义**（第三方 App，docs/third-party-acp.md 4.4）：`session/prompt` 里模型发起的每个工具调用都在手机上确认，包括读级工具；用户策略里的“始终允许”和本会话的“不再询问”都不生效，确认框只给“允许一次”和“拒绝”。这是 AgentOS 一侧的行为，客户端在 ACP 上看到的只是 `tool_call` / `tool_call_update` 因用户拒绝而 `failed`。
 
 ## 8. `session/cancel`
 
@@ -221,4 +233,6 @@
 - `session/load`、持久化提交、增量恢复：W10。
 - `session/request_permission`：W16。
 - 图片输入：模型与真机验证后打开 `promptCapabilities.image`。
+- `session/load` 启用时（W10）：必须忽略请求里的 `toolScope`，用会话创建时存下的那个（4.5：scope 属于会话，加载不能改）。
+- 第三方 App 的配额计数在内存里，:agent 进程重启后清零（见 session-scheduling.md 第 5.1 节）。
 - SDK 的 Kotlin Client 会把 prompt 之前到达的会话通知并进下一轮的事件流；自带界面（W8）如果要读自动选会话的结果，应从那一轮的事件里取 `session_info_update`。

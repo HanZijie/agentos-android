@@ -89,10 +89,25 @@ paused     --用户放弃结果未知的任务----------------> queued | created
 
 1. 校验调用方能访问这个会话（不属于调用方时按 `session_not_found` 处理，不泄露其存在）。
 2. 在一个事务里写入任务（`queued`）和 `task.queued` 事件，必要时会话转为 `queued`；**提交后才开始运行**。
-3. 拒绝的情况：会话已终态（`session_terminal`）、正在取消（`invalid_state`）、有等恢复决定的任务（`recovery_required`）、队列满（`busy`）、safe mode（`safe_mode`）。
+3. 拒绝的情况：会话已终态（`session_terminal`）、正在取消（`invalid_state`）、有等恢复决定的任务（`recovery_required`）、队列满（`busy`）、safe mode（`safe_mode`）；以及**第三方 App 的配额**（第 5.1 节）：文字超限（`invalid_params`）、已有一个 prompt 在进行或一小时内用完（`quota_exceeded`）。
 4. 幂等：带提交标识（`clientRequestId`）的重复提交，内容相同返回原任务，不创建第二个；内容不同返回 `request_conflict`。ACP v1 本身没有提交标识，这个语义留给 W10 的持久化提交扩展使用。
 5. ACP v1 的 `session/prompt` 在这一轮结束后才返回：`completed` → `stopReason`；`cancelled` → `cancelled`；`failed` → JSON-RPC 错误；`unknown` → JSON-RPC 错误（`agent_core_failed` 或 `tool_result_unknown`，errors.md）。不能把“已入队”当作 prompt 的完成响应。
 6. 运行前如果没有配置模型，任务直接以 `model_not_configured` 失败，`attemptState = not_started`，不启动 Agent core。
+
+### 5.1 第三方 App 的配额（`CallerQuota`，docs/third-party-acp.md 4.6）
+
+只对 `CallerKind.APP`；AgentOS 自己、电脑端、运行时不计数、不受限。放行发生在写任务**之前**，顺序：文字长度 → 同时一个 → 每小时上限；被拒绝的 prompt 不计数、不占名额、不产生任务。
+
+| 限制 | 默认 | 拒绝 | 配置 |
+|---|---|---|---|
+| 一次 prompt 的文字（text 块 + 嵌入的文本资源，字符） | 16,000 | `invalid_params`，`details.reason = too_large` | `CallerQuotaConfig.maxPromptChars` |
+| 同时进行的 prompt | 1 | `quota_exceeded`，`details.reason = busy` | `maxConcurrentPrompts` |
+| 滑动一小时内开始的 prompt | 30 | `quota_exceeded`，`details.reason = hourly`，`details.retryAfterSeconds` | `maxPromptsPerHour`、`windowMillis` |
+
+- 按 UID（`ownerKey`）计：同一个 App 的所有连接、所有会话共用一份。
+- “进行中”从放行算到**任务结束**（`completed` / `cancelled` / `failed` / 结果未知），不是到连接断开：断开不取消任务（F7），所以重连不能绕过“同时一个”。客户端看到上一轮结束就发下一轮时，名额一定已经释放（提交前会按 Store 里任务的状态核对一次）。
+- 计数在内存里，:agent 进程重启后清零。
+- **用量回调**：每个放行过的 prompt 结束时回调一次 `CallerUsageListener.onPromptFinished(PromptUsage)`（`RuntimeEngine.quota.addListener`）；被拒绝的、没能提交的不回调。`PromptUsage` 带调用方身份、开始/结束时间、文字长度、结局（`completed` / `cancelled` / `failed` / `unknown`）和一小时内的次数。当前数字用 `RuntimeEngine.quota.usage(caller)` 读。
 
 ## 6. 取消（`session/cancel`）
 
@@ -182,3 +197,4 @@ Broker（`broker/CapabilityBroker`）处理 Pi 回到宿主层的每一次工具
 | sequence 追加写、不留空洞、重开后继续 | `StoreTest` |
 | 目录外的工具被拒绝、先落盘再调用 | `CapabilityBrokerTest` |
 | 会话隔离 | `SchedulerTest.callers cannot see or use each other's sessions…` |
+| 第三方 App 的配额：同时一个、文字上限、每小时滑动窗口、各 App 互不影响、AgentOS 自己不受限、用量只回调一次 | `CallerQuotaTest`、`ThirdPartyAcpTest`（经 SDK 客户端） |

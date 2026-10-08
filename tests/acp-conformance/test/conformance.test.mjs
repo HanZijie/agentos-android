@@ -188,6 +188,62 @@ for (const target of targets()) {
       assert.ok(text.includes("content://notes/1") && text.includes("milk, eggs"), text);
     });
 
+    test("initialize declares the toolScope extension", { skip: skipUnless(target, "scope") }, () => {
+      assert.deepEqual(init._meta[META].extensions.toolScope, { version: 1 });
+    });
+
+    test("session/new takes a toolScope without negotiation, and the scope limits the session (it applies to the desktop too)", { skip: skipUnless(target, "tools", "scope") }, async () => {
+      // 对照：没带 scope 的会话有全部工具（add 可以调用，见上面的用例）
+      const scoped = await agent.connection.newSession({
+        cwd: "/sdcard",
+        mcpServers: [],
+        _meta: { [META]: { toolScope: [{ plugin: "calc", tool: "add" }, { plugin: "no-such-plugin", tool: "ghost" }] } },
+      });
+      assert.match(scoped.sessionId, /^ses_[0-9A-Z]{26}$/);
+      // add 是测试工具，没有来源插件：任何有限制的 scope 都不包含没有来源的工具，所以被拒绝，文字与工具不存在时相同
+      const r = await agent.connection.prompt({ sessionId: scoped.sessionId, prompt: directive({ tools: [{ name: "add", arguments: { a: 2, b: 3 } }] }) });
+      assert.equal(r.stopReason, "end_turn", "a refused tool does not fail the turn");
+      const updates = agent.updatesFor(scoped.sessionId).filter((u) => u.sessionUpdate === "tool_call_update");
+      assert.deepEqual(updates.map((u) => u.status), ["failed"]);
+      assert.match(updates[0].content[0].content.text, /^\[agentos:tool_not_in_catalog\] Tool add is not available\.$/);
+
+      // 空 scope 合法，也是“没有任何工具”
+      const empty = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [], _meta: { [META]: { toolScope: [] } } });
+      const r2 = await agent.connection.prompt({ sessionId: empty.sessionId, prompt: directive({ tools: [{ name: "add", arguments: { a: 1, b: 1 } }] }) });
+      assert.equal(r2.stopReason, "end_turn");
+      assert.deepEqual(agent.updatesFor(empty.sessionId).filter((u) => u.sessionUpdate === "tool_call_update").map((u) => u.status), ["failed"]);
+    });
+
+    test("a toolScope of the wrong shape is invalid_params and creates no session", { skip: skipUnless(target, "scope") }, async () => {
+      const entry = (plugin, tool) => ({ plugin, tool });
+      const bad = {
+        "not an array": "alarm_create",
+        "an object": entry("alarm", "alarm_create"),
+        "null": null,
+        "an entry that is a string": ["alarm/alarm_create"],
+        "no tool": [{ plugin: "alarm" }],
+        "no plugin": [{ tool: "alarm_create" }],
+        "a number as plugin": [entry(1, "alarm_create")],
+        "33 entries": Array.from({ length: 33 }, (_, i) => entry(`p${i}`, "t")),
+        "a plugin of 129 characters": [entry("a".repeat(129), "t")],
+        "a tool of 129 characters": [entry("p", "t".repeat(129))],
+      };
+      for (const [what, toolScope] of Object.entries(bad)) {
+        await assert.rejects(
+          agent.connection.newSession({ cwd: "/sdcard", mcpServers: [], _meta: { [META]: { toolScope } } }),
+          (e) => e.code === -32602 && e.data.agentosCode === "invalid_params" && e.data.retryable === false,
+          what,
+        );
+      }
+      // 合法的上限：32 项、128 字符
+      const max = await agent.connection.newSession({
+        cwd: "/sdcard",
+        mcpServers: [],
+        _meta: { [META]: { toolScope: Array.from({ length: 32 }, (_, i) => entry(`p${i}`, "t".repeat(128))) } },
+      });
+      assert.match(max.sessionId, /^ses_/);
+    });
+
     test("long output is split so that every line stays under 65,536 characters", async () => {
       const { sessionId } = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [] });
       const r = await agent.connection.prompt({ sessionId, prompt: directive({ chunks: 1, chunkChars: 30000, text: '"' }) });

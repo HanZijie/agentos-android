@@ -107,7 +107,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 
 | eventType | payload | 产生者 |
 |---|---|---|
-| `session.created` | `{ ownerKey, callerKind, callerUid, via }`；`via`：`session/new` / `auto_select` | W2、W4 |
+| `session.created` | `{ ownerKey, callerKind, callerUid, via, toolScope? }`；`via`：`session/new` / `auto_select`；`toolScope`：`[{plugin, tool}]`（排序、去重），创建时带了 toolScope 才有，之后不会变（docs/third-party-acp.md 4.5）；没有这个字段 = 没带，第三方 App 的会话那就没有任何工具 | W2、W4 |
 | `session.selected` | `{ created, reason, score? }`：自动选会话（Jev）选中已有会话或新建 | W2 router |
 | `session.state_changed` | `{ from, to, reason? }`：状态见 session-scheduling.md | W2 scheduler |
 | `session.closed` | `{ reason }` | W2 |
@@ -135,7 +135,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 | `tool.dispatched` | `{ toolCallId, name, provider, risk }`：**在调用 `ToolPort.invoke` 之前提交**，用来判断“结果未知” | — | W2 broker |
 | `tool.settled` | `{ toolCallId, outcome, isError }`；`outcome`：`completed` / `not_dispatched` / `unknown` / `cancelled` / `rejected` | `outcome` 不是 `completed` 时有 | W2 broker |
 | `consent.requested` | `{ requestId, toolCallId, toolName, risk, callerUid }` | — | W16 |
-| `consent.resolved` | `{ requestId, decision, reason, remember }`；`decision`：`allow` / `deny`；`reason`：`user` / `timeout` / `unavailable` / `remembered` / `policy` / `client` | `reason=client` 也用于任务被取消时撤回确认（不等超时） | W16 |
+| `consent.resolved` | `{ requestId, decision, reason, remember }`；`decision`：`allow` / `deny`；`reason`：`user` / `timeout` / `unavailable` / `remembered` / `policy` / `client` | `reason=client` 也用于任务被取消时撤回确认（不等超时）。**第三方 App（`callerKind = app`）发起的调用，`reason` 永远不会是 `remembered` 或 `policy`，`remember` 永远是 `false`**（docs/third-party-acp.md 4.4：每次确认） | W16 |
 | `hook.dispatched` | `{ hookEvent, matched }` | — | W22 |
 | `hook.decided` | `{ hookEvent, decision, reason?, inputUpdated, contextAdded }` | — | W22 |
 | `hook.failed` | `{ hookEvent }` | 有 | W22 |
@@ -146,7 +146,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 
 | eventType | payload | error | 产生者 |
 |---|---|---|---|
-| `runtime.started` | `{ version, schemaVersion }` | — | W2 |
+| `runtime.started` | `{ version, schemaVersion }`；`schemaVersion` 现为 **2**（v2 给 `sessions` 表加 `tool_scope` 列） | — | W2 |
 | `runtime.recovered` | `{ requeued, recoveryRequired, interrupted, userStopped, cancelled, expired }`：启动恢复流程（F8）的结果——重新排队的任务数、等恢复决定的任务数（按过渡期限放弃之后剩下的）、这次启动围栏掉的执行数、上一个进程是否被用户主动停止、因此取消的排队任务数、按过渡期限放弃的任务数 | — | W2 recovery |
 | `agent_core.failed` | `{ runningTasks }`：泵故障（S8），按运行时崩溃处理 | 有 | W2 |
 | `agent_core.restarted` | `{}`：新的 Agent core 实例已启动；各会话在下次用到时按 Store 里的 messages 重建 | — | W2 |

@@ -41,7 +41,7 @@
 
 | 错误码 | 可重试 | JSON-RPC code | 含义 |
 |---|---|---|---|
-| `invalid_params` | 否 | -32602 | 参数不合法（缺字段、类型不对、内容为空） |
+| `invalid_params` | 否 | -32602 | 参数不合法（缺字段、类型不对、内容为空）。`session/new` 的 `toolScope` 形状不对（不是数组、元素缺 `plugin` / `tool`、超过 32 项、字符串超过 128 字符，第 4.5 节 third-party-acp）；第三方 App 的一次 prompt 文字超过上限（`details.reason = too_large`，`details.limit` 是上限，不可重试：缩短再发） |
 | `unsupported` | 否 | -32602 | 请求了不支持的能力，例如 `session/new` 的 `mcpServers` 非空（Profile：明确拒绝，不静默忽略） |
 | `auth_required` | 否 | -32000 | 需要认证：电脑端还没有提交有效的配对码或令牌（W9；在 ACP 之前的配对握手里返回，`details.reason` 见 core/protocol/acp-mapping.md 第 10 节，随后关闭连接） |
 | `not_open` | 否 | -32040 | 这类调用方还没有开放：M1–M3 期间第三方 App 的 ACP 通道（architecture 5.3） |
@@ -54,7 +54,7 @@
 | `cursor_too_old` | 否 | -32045 | 增量恢复的游标早于保留范围，要重新取快照（W10） |
 | `payload_too_large` | 否 | -32046 | 输入超过上限（例如单条 prompt 超过传输的单条消息上限） |
 | `busy` | 是 | -32047 | 运行时暂时不能接受（排队已满、正在停止） |
-| `quota_exceeded` | 是 | -32048 | 超过调用方的并发、频率或用量上限（W25） |
+| `quota_exceeded` | 是 | -32048 | 超过调用方的并发、频率或用量上限（W25）。**只对第三方 App**（`CallerKind.APP`）；`details.reason`：`busy`（这个 App 已经有一个 prompt 在进行，等它结束再发）、`hourly`（滑动一小时内已用完上限；`details.retryAfterSeconds` 是最早的那次移出窗口还要多久）；`details.limit` 是触发的上限。第三方 SDK 把它叫 `RATE_LIMITED`。AgentOS 自己、电脑端、运行时不受限制，不会得到这个错误 |
 | `recovery_required` | 否 | -32049 | 会话里有等用户决定的恢复任务，决定之前不接受新输入 |
 | `safe_mode` | 否 | -32050 | 运行时处于 safe mode，不执行新任务（F13） |
 
@@ -81,7 +81,7 @@
 
 | 错误码 | 可重试 | JSON-RPC code | 含义 |
 |---|---|---|---|
-| `tool_not_in_catalog` | 否 | -32051 | 工具名不在当前目录里，Broker 拒绝派发（W2） |
+| `tool_not_in_catalog` | 否 | -32051 | 工具名不在当前目录里，Broker 拒绝派发（W2）。**会话的 toolScope 之外的工具、第三方 App 没有 toolScope 的会话里的任何工具，都按这个码拒绝，文字与工具真的不存在时一字不差**：调用方（和被注入的模型）无法分辨“没装”和“不在范围内” |
 | `tool_denied` | 否 | -32051 | 用户在确认界面拒绝，或确认超时（60 秒） |
 | `tool_blocked` | 否 | -32051 | 被 Hook 或风险策略拦截 |
 | `tool_failed` | 否 | -32051 | 工具提供方返回了错误 |
