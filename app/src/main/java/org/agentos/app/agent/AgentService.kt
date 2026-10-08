@@ -10,6 +10,9 @@ import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.util.Log
+import org.agentos.app.R
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.settings.Desktop
 import org.agentos.app.settings.SettingsActivity
 
@@ -30,6 +33,7 @@ import org.agentos.app.settings.SettingsActivity
  */
 class AgentService : Service() {
     private lateinit var runtime: AgentProcess
+    private val strings: Strings by lazy { AndroidStrings(this) }
 
     override fun onCreate() {
         super.onCreate()
@@ -86,15 +90,15 @@ class AgentService : Service() {
     private fun buildNotification(desktopOn: Boolean, busy: Boolean): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (!desktopOn) {
-            ensureChannel(nm, CHANNEL, "Agent 运行时")
+            ensureChannel(nm, CHANNEL, strings.get(R.string.runtime_notification_channel))
             return Notification.Builder(this, CHANNEL)
-                .setContentTitle("AgentOS 正在运行任务")
+                .setContentTitle(strings.get(R.string.runtime_notification_title))
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
                 .setOngoing(true)
                 .build()
         }
         // 用词与设置页（D，SettingsActivity 的“电脑端接入”一节和关闭确认）一致
-        ensureChannel(nm, CHANNEL_DESKTOP, DESKTOP_CHANNEL_NAME)
+        ensureChannel(nm, CHANNEL_DESKTOP, strings.get(R.string.desktop_channel_name))
         val settings = PendingIntent.getActivity(
             this, 0, Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE,
         )
@@ -102,23 +106,23 @@ class AgentService : Service() {
             this, 0, Intent(this, DesktopAccessOffReceiver::class.java), PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_DESKTOP)
-            .setContentTitle(DESKTOP_TITLE)
-            .setContentText(DESKTOP_TEXT)
-            .setSubText(if (busy) DESKTOP_BUSY else null)
+            .setContentTitle(Desktop.notificationTitle(strings))
+            .setContentText(strings.get(R.string.desktop_notification_text))
+            .setSubText(if (busy) strings.get(R.string.desktop_notification_busy) else null)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(settings)
-            .addAction(Notification.Action.Builder(null as Icon?, DESKTOP_OFF, off).build())
+            .addAction(Notification.Action.Builder(null as Icon?, Desktop.notificationAction(strings), off).build())
             .build()
     }
 
     private fun ensureChannel(nm: NotificationManager, id: String, name: String) {
-        if (nm.getNotificationChannel(id) == null) {
-            nm.createNotificationChannel(NotificationChannel(id, name, NotificationManager.IMPORTANCE_LOW))
-        }
+        // createNotificationChannel on an existing id only updates the name (and description): the channel list in the
+        // system settings follows the app language, and the user's own importance choice is kept
+        nm.createNotificationChannel(NotificationChannel(id, name, NotificationManager.IMPORTANCE_LOW))
     }
 
     override fun onDestroy() {
@@ -143,14 +147,9 @@ class AgentService : Service() {
         private const val NOTIFICATION_ID = 1
 
         /**
-         * 电脑端接入打开期间的通知（F11 第 4 点）。标题和按钮用设置页（D，Desktop.kt）的常量，开关旁的说明引用的就是它们；
-         * 正文沿用设置页的开关文案（“允许电脑经 adb 连接”）和关闭确认框的说法。
+         * 电脑端接入打开期间的通知（F11 第 4 点）。标题和按钮用设置页（D，Desktop.kt）的文案，开关旁的说明引用的就是它们；
+         * 正文沿用设置页的开关文案（“允许电脑经 adb 连接”）和关闭确认框的说法。文字都在 strings_p2.xml（desktop_*、runtime_*）。
          */
         private const val CHANNEL_DESKTOP = "desktop_access"
-        const val DESKTOP_CHANNEL_NAME = "电脑端接入"
-        const val DESKTOP_TITLE = Desktop.NOTIFICATION_TITLE
-        const val DESKTOP_TEXT = "允许电脑经 adb 连接。关闭会断开连接，并作废已配对的电脑。"
-        const val DESKTOP_OFF = Desktop.NOTIFICATION_ACTION
-        const val DESKTOP_BUSY = "正在运行任务"
     }
 }

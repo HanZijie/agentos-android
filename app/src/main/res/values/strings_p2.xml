@@ -99,4 +99,51 @@
     <plurals name="onboarding_plugins_found">
         <item quantity="other">发现了 %1$d 个插件，可以在设置页里启用。</item>
     </plurals>
+
+    <!-- ============ 电脑端接入（Desktop，AgentService 通知，设置页“电脑端接入”一节） ============ -->
+    <string name="settings_operation_failed">操作失败，请重试</string>
+    <string name="desktop_section">电脑端接入</string>
+    <string name="desktop_switch_label">开发者功能：允许电脑经 adb 连接</string>
+    <string name="desktop_runtime_too_old">运行时版本过旧，不支持</string>
+    <string name="settings_loading">读取中…</string>
+    <string name="desktop_summary_off">关闭</string>
+    <string name="desktop_summary_listen_error">打不开监听（%1$s）：可能有别的 App 占用了 %2$s</string>
+    <string name="desktop_summary_starting">已打开，正在启动监听</string>
+    <string name="desktop_summary_on">已打开：%1$s，%2$s</string>
+    <plurals name="desktop_paired_count">
+        <item quantity="other">%1$d 台已配对</item>
+    </plurals>
+    <plurals name="desktop_connection_count">
+        <item quantity="other">%1$d 个连接</item>
+    </plurals>
+    <plurals name="desktop_computer_count">
+        <item quantity="other">%1$d 台电脑</item>
+    </plurals>
+    <plurals name="desktop_minutes">
+        <item quantity="other">%1$d 分钟</item>
+    </plurals>
+    <string name="desktop_how_to">推荐用项目提供的 acp-bridge（仓库里的 tools/acp-bridge）：电脑用 USB 连上手机，点下面的“生成配对码”，在电脑上运行 acp-bridge pair &lt;配对码&gt; 完成第一次配对；之后把 acp-bridge 设为 ACP 客户端（如 Zed）的 Agent 命令即可。只执行 adb forward tcp:8765 localabstract:agentos-acp 的话，普通 ACP 客户端不会发配对握手，连不上。手机上的确认照常出现，电脑端无法绕过。</string>
+    <string name="desktop_notification_title">电脑端接入已开启</string>
+    <string name="desktop_notification_action">关闭</string>
+    <string name="desktop_notification_text">允许电脑经 adb 连接。关闭会断开连接，并作废已配对的电脑。</string>
+    <string name="desktop_notification_busy">正在运行任务</string>
+    <string name="desktop_channel_name">电脑端接入</string>
+    <string name="desktop_foreground_note">打开期间 AgentOS 会保持在后台运行，并显示常驻通知“%1$s”。用完记得关闭：关掉这个开关，或点通知上的“%2$s”。</string>
+    <string name="desktop_error_disabled">请先打开电脑端接入</string>
+    <string name="desktop_paired_label">已配对</string>
+    <string name="desktop_default_label">电脑</string>
+    <string name="desktop_revoke">撤销</string>
+    <string name="desktop_revoke_all">全部撤销</string>
+    <string name="desktop_generate_code">生成配对码</string>
+    <string name="desktop_disable_title">关闭电脑端接入？</string>
+    <string name="desktop_disable_message">会断开 %1$s，并作废 %2$s的配对；以后再打开需要重新配对。</string>
+    <string name="desktop_disable_confirm">关闭</string>
+    <string name="desktop_revoke_all_title">撤销全部 %1$s的配对？</string>
+    <string name="desktop_revoke_all_message">它们的连接会立即断开，需要重新配对才能再连。</string>
+    <string name="desktop_code_title">配对码 %1$s</string>
+    <string name="desktop_code_message">电脑用 USB 连上手机，在 AgentOS 仓库目录里运行：\n\n%1$s\n\n约 %2$s内有效，配对成功或输错 5 次后作废。配对之后，把 acp-bridge 设为 ACP 客户端的 Agent 命令即可。</string>
+    <string name="desktop_code_ok">好</string>
+    <string name="settings_cancel">取消</string>
+    <string name="runtime_notification_channel">Agent 运行时</string>
+    <string name="runtime_notification_title">AgentOS 正在运行任务</string>
 </resources>

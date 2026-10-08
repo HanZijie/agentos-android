@@ -192,20 +192,20 @@ class SettingsActivity : Activity() {
         })
 
         // ---- desktop access (F11, W9)
-        column.addView(Ui.sectionTitle(this, "电脑端接入"))
+        column.addView(Ui.sectionTitle(this, getString(R.string.desktop_section)))
         column.addView(Ui.card(this).apply {
             val d = s.desktop
             if (d == null) {
-                addView(Ui.line(context, "电脑端接入", if (s.version in 1 until AgentControlClient.DESKTOP_VERSION) "运行时版本过旧，不支持" else "读取中…"))
+                addView(Ui.line(context, getString(R.string.desktop_section), getString(if (s.version in 1 until AgentControlClient.DESKTOP_VERSION) R.string.desktop_runtime_too_old else R.string.settings_loading)))
                 return@apply
             }
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
-                addView(Ui.line(context, "开发者功能：允许电脑经 adb 连接", Desktop.summary(d), warn = d.listenError != null),
+                addView(Ui.line(context, getString(R.string.desktop_switch_label), Desktop.summary(d, strings), warn = d.listenError != null),
                     LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(Switch(context).apply {
                     isChecked = d.enabled
-                    contentDescription = "电脑端接入"
+                    contentDescription = getString(R.string.desktop_section)
                     setOnCheckedChangeListener { sw, on ->
                         if (on) {
                             desktop { it.setDesktopAccessEnabled(true) }
@@ -220,33 +220,37 @@ class SettingsActivity : Activity() {
                         } else {
                             // turning it off disconnects every computer and voids all pairings (IAgentControl v3)
                             confirm(
-                                "关闭电脑端接入？",
-                                "会断开 ${d.connections} 个连接，并作废 ${d.pairings.size} 台电脑的配对；以后再打开需要重新配对。",
-                                "关闭",
+                                getString(R.string.desktop_disable_title),
+                                getString(R.string.desktop_disable_message, Desktop.connections(d.connections, strings), Desktop.computers(d.pairings.size, strings)),
+                                getString(R.string.desktop_disable_confirm),
                                 onCancel = { sw.setOnCheckedChangeListener(null); sw.isChecked = true; reloadLater() },
                             ) { desktop { it.setDesktopAccessEnabled(false) } }
                         }
                     }
                 })
             })
-            addView(Ui.paragraph(context, Desktop.FOREGROUND_NOTE))
+            addView(Ui.paragraph(context, Desktop.foregroundNote(strings)))
             if (Desktop.needsBatteryExemption(d.enabled, exempt)) {
                 addView(Ui.line(context, BatteryText.deniedLabel(strings), BatteryText.desktopWarning(strings), warn = true))
                 addView(Ui.buttons(context, BatteryText.action(strings) to { Battery.request(this@SettingsActivity) }))
             }
             if (d.enabled) {
-                addView(Ui.paragraph(context, Desktop.HOW_TO))
+                addView(Ui.paragraph(context, Desktop.howTo(strings)))
                 d.pairings.forEach { p ->
                     addView(LinearLayout(context).apply {
                         orientation = LinearLayout.HORIZONTAL
-                        addView(Ui.line(context, "已配对", p.label), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                        addView(Ui.textButton(context, "撤销", R.color.ui_error) { desktop { it.revokeDesktopPairing(p.id) } })
+                        addView(Ui.line(context, getString(R.string.desktop_paired_label), Desktop.pairingLabel(p, strings)), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                        addView(Ui.textButton(context, getString(R.string.desktop_revoke), R.color.ui_error) { desktop { it.revokeDesktopPairing(p.id) } })
                     })
                 }
-                val actions = mutableListOf<Pair<CharSequence, () -> Unit>>("生成配对码" to { newPairingCode() })
+                val actions = mutableListOf<Pair<CharSequence, () -> Unit>>(getString(R.string.desktop_generate_code) to { newPairingCode() })
                 if (d.pairings.size > 1) {
-                    actions += ("全部撤销" as CharSequence) to {
-                        confirm("撤销全部 ${d.pairings.size} 台电脑的配对？", "它们的连接会立即断开，需要重新配对才能再连。", "全部撤销") {
+                    actions += (getString(R.string.desktop_revoke_all) as CharSequence) to {
+                        confirm(
+                            getString(R.string.desktop_revoke_all_title, Desktop.computers(d.pairings.size, strings)),
+                            getString(R.string.desktop_revoke_all_message),
+                            getString(R.string.desktop_revoke_all),
+                        ) {
                             desktop { it.revokeDesktopPairing("") }
                         }
                     }
@@ -310,7 +314,7 @@ class SettingsActivity : Activity() {
         title: String,
         message: String,
         action: String,
-        cancelLabel: String = "取消",
+        cancelLabel: String = getString(R.string.settings_cancel),
         onCancel: () -> Unit = {},
         onConfirm: () -> Unit,
     ) {
@@ -332,7 +336,7 @@ class SettingsActivity : Activity() {
             try {
                 control.use(block = call)
             } catch (e: Exception) {
-                Toast.makeText(this@SettingsActivity, Desktop.errorText(e.message), Toast.LENGTH_LONG).show()
+                Toast.makeText(this@SettingsActivity, Desktop.errorText(e.message, strings), Toast.LENGTH_LONG).show()
             }
             reload()
         }
@@ -346,15 +350,12 @@ class SettingsActivity : Activity() {
                 val minutes = ((code.expiresAtMs - System.currentTimeMillis() + 59_999) / 60_000).coerceAtLeast(1)
                 val command = Desktop.pairCommand(code.code)
                 AlertDialog.Builder(this@SettingsActivity)
-                    .setTitle("配对码 ${code.code}")
-                    .setMessage(
-                        "电脑用 USB 连上手机，在 AgentOS 仓库目录里运行：\n\n$command\n\n" +
-                            "约 $minutes 分钟内有效，配对成功或输错 5 次后作废。配对之后，把 acp-bridge 设为 ACP 客户端的 Agent 命令即可。",
-                    )
-                    .setPositiveButton("好", null)
+                    .setTitle(getString(R.string.desktop_code_title, code.code))
+                    .setMessage(getString(R.string.desktop_code_message, command, Desktop.minutes(minutes.toInt(), strings)))
+                    .setPositiveButton(R.string.desktop_code_ok, null)
                     .show()
             } catch (e: Exception) {
-                Toast.makeText(this@SettingsActivity, Desktop.errorText(e.message), Toast.LENGTH_LONG).show()
+                Toast.makeText(this@SettingsActivity, Desktop.errorText(e.message, strings), Toast.LENGTH_LONG).show()
             }
             reload()
         }

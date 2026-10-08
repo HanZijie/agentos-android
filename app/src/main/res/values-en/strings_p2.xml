@@ -103,4 +103,55 @@
         <item quantity="one">Found %1$d plugin. You can enable it in Settings.</item>
         <item quantity="other">Found %1$d plugins. You can enable them in Settings.</item>
     </plurals>
+
+    <!-- ============ Desktop access (Desktop, AgentService notification, "Desktop access" section of Settings) ============ -->
+    <string name="settings_operation_failed">That didn\'t work. Please try again.</string>
+    <string name="desktop_section">Desktop access</string>
+    <string name="desktop_switch_label">Developer feature: allow a computer to connect over adb</string>
+    <string name="desktop_runtime_too_old">The runtime is too old to support this</string>
+    <string name="settings_loading">Loading…</string>
+    <string name="desktop_summary_off">Off</string>
+    <string name="desktop_summary_listen_error">Can\'t listen (%1$s): another app may be using %2$s</string>
+    <string name="desktop_summary_starting">On, starting to listen</string>
+    <string name="desktop_summary_on">On: %1$s, %2$s</string>
+    <plurals name="desktop_paired_count">
+        <item quantity="one">%1$d computer paired</item>
+        <item quantity="other">%1$d computers paired</item>
+    </plurals>
+    <plurals name="desktop_connection_count">
+        <item quantity="one">%1$d connection</item>
+        <item quantity="other">%1$d connections</item>
+    </plurals>
+    <plurals name="desktop_computer_count">
+        <item quantity="one">%1$d computer</item>
+        <item quantity="other">%1$d computers</item>
+    </plurals>
+    <plurals name="desktop_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <string name="desktop_how_to">We recommend the acp-bridge that ships with the project (tools/acp-bridge in the repo): connect your computer to the phone over USB, tap “Generate pairing code” below, and run acp-bridge pair &lt;pairing code&gt; on the computer to pair for the first time; after that, set acp-bridge as the Agent command of your ACP client (such as Zed). If you only run adb forward tcp:8765 localabstract:agentos-acp, an ordinary ACP client won\'t send the pairing handshake and can\'t connect. Confirmations on the phone still appear as usual; the computer can\'t bypass them.</string>
+    <string name="desktop_notification_title">Desktop access is on</string>
+    <string name="desktop_notification_action">Turn off</string>
+    <string name="desktop_notification_text">Lets a computer connect over adb. Turning it off disconnects it and voids all paired computers.</string>
+    <string name="desktop_notification_busy">Running a task</string>
+    <string name="desktop_channel_name">Desktop access</string>
+    <string name="desktop_foreground_note">While it\'s on, AgentOS keeps running in the background and shows an ongoing notification, “%1$s”. Remember to turn it off when you\'re done: switch this off, or tap “%2$s” on the notification.</string>
+    <string name="desktop_error_disabled">Turn on desktop access first</string>
+    <string name="desktop_paired_label">Paired</string>
+    <string name="desktop_default_label">Computer</string>
+    <string name="desktop_revoke">Revoke</string>
+    <string name="desktop_revoke_all">Revoke all</string>
+    <string name="desktop_generate_code">Generate pairing code</string>
+    <string name="desktop_disable_title">Turn off desktop access?</string>
+    <string name="desktop_disable_message">This will disconnect %1$s and void the pairing of %2$s. You\'ll need to pair again if you turn it on later.</string>
+    <string name="desktop_disable_confirm">Turn off</string>
+    <string name="desktop_revoke_all_title">Revoke pairing for all %1$s?</string>
+    <string name="desktop_revoke_all_message">Their connections will be dropped immediately, and they must pair again to reconnect.</string>
+    <string name="desktop_code_title">Pairing code %1$s</string>
+    <string name="desktop_code_message">Connect your computer to the phone over USB and, in the AgentOS repository directory, run:\n\n%1$s\n\nValid for about %2$s; it is voided after a successful pairing or 5 wrong attempts. After pairing, set acp-bridge as the Agent command of your ACP client.</string>
+    <string name="desktop_code_ok">OK</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="runtime_notification_channel">Agent runtime</string>
+    <string name="runtime_notification_title">AgentOS is running a task</string>
 </resources>

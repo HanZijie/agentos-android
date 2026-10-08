@@ -191,56 +191,115 @@ class SettingsLogicTest {
         assertEquals("The runtime exited unexpectedly and is being restarted with backoff (3 times in the last 10 minutes)", StatusText.supervisor("""{"state":"backoff","deaths":3}""", false, s)[0].value)
     }
 
-    @Test
-    fun desktopAccess() {
-        val a = Desktop.parseAccess("""{"enabled":true,"listening":true,"socket":"agentos-acp","listenError":null,
+    private val accessJson = """{"enabled":true,"listening":true,"socket":"agentos-acp","listenError":null,
             "code":{"expiresAtMs":99,"attemptsLeft":4},"pairings":[{"id":"dp_1","label":"mac","pairedAtMs":1,"lastSeenMs":2}],
-            "connections":[{"id":"c1","pairingId":"dp_1","label":"mac","peerUid":2000,"openedAtMs":3,"transport":{}}]}""")
-        assertEquals("已打开：1 台已配对，1 个连接", Desktop.summary(a))
+            "connections":[{"id":"c1","pairingId":"dp_1","label":"mac","peerUid":2000,"openedAtMs":3,"transport":{}}]}"""
+    private val offJson = """{"enabled":false,"listening":false,"pairings":[],"connections":[]}"""
+
+    @Test
+    fun desktopAccessLogic() {
+        val a = Desktop.parseAccess(accessJson)
         assertEquals(4, a.codeAttemptsLeft)
-        assertEquals("关闭", Desktop.summary(Desktop.parseAccess("""{"enabled":false,"listening":false,"pairings":[],"connections":[]}""")))
+        assertEquals("mac", a.pairings.single().label)
         assertEquals("482913", Desktop.parseCode("""{"code":"482913","expiresAtMs":5,"ttlMs":300000}""").code)
-        assertEquals("请先打开电脑端接入", Desktop.errorText("agentos.desktop.disabled: off"))
         // F11 item 4 (M1): ask for the battery optimisation exemption only while desktop access is on and it is missing
         assertTrue(Desktop.needsBatteryExemption(enabled = true, exempt = false))
         assertFalse(Desktop.needsBatteryExemption(enabled = true, exempt = true))
         assertFalse(Desktop.needsBatteryExemption(enabled = false, exempt = false))
-        // runtime status: held in the foreground for desktop access; a refused foreground start is flagged
-        for (s in listOf(ResStrings.zh, ResStrings.en)) {
-            val held = StatusText.runtime("""{"pid":7,"phase":"READY","tasks":0,"foreground":true,"foregroundHold":"desktop_access","foregroundDenied":false,"uptimeMs":1000}""", s)
-            val holdOk = s.get(R.string.status_hold_ok)
-            assertTrue(held.any { it.value == holdOk })
-            val plain = StatusText.runtime("""{"pid":7,"phase":"READY","tasks":0,"foreground":false,"foregroundHold":null,"foregroundDenied":true,"uptimeMs":1000}""", s)
-            assertFalse(plain.any { it.value == holdOk })
-            // the hold is a reason, not the fact: held but refused is a warning, not "kept in the foreground"
-            val heldNotForeground = StatusText.runtime("""{"tasks":0,"foreground":false,"foregroundHold":"desktop_access","foregroundDenied":true}""", s)
-            val hold = heldNotForeground.single { it.label == s.get(R.string.status_hold_label) }
-            assertTrue(hold.warn && hold.value == s.get(R.string.status_hold_not_foreground))
-            val denied = plain.single { it.label == BatteryText.deniedLabel(s) }
-            assertTrue(denied.warn)
-            assertEquals(s.get(R.string.battery_denied_restricted), denied.value)
-            val deniedButExempt = StatusText.runtime("""{"foregroundDenied":true}""", s, batteryExempt = true).single { it.label == BatteryText.deniedLabel(s) }
-            assertFalse(deniedButExempt.warn)
-            assertEquals(s.get(R.string.battery_denied_exempt), deniedButExempt.value)
-        }
-        val zh = ResStrings.zh
-        val en = ResStrings.en
-        assertEquals("为电脑端接入保持前台", zh.get(R.string.status_hold_ok))
-        assertEquals("Kept in the foreground for desktop access", en.get(R.string.status_hold_ok))
-        val deniedZh = StatusText.runtime("""{"foregroundDenied":true}""", zh).single { it.label == "后台运行" }
-        assertTrue(deniedZh.value.contains("任务可能被暂停") && deniedZh.value.contains("忽略电池优化"))
-        val deniedEn = StatusText.runtime("""{"foregroundDenied":true}""", en).single { it.label == "Background activity" }
-        assertTrue(deniedEn.value.contains("tasks may be paused") && deniedEn.value.contains("ignore battery optimization"))
         assertTrue(StatusText.foregroundDenied("""{"foregroundDenied":true}"""))
         assertFalse(StatusText.foregroundDenied("""{"foregroundDenied":false}"""))
-        // acp-bridge pair is the way to connect; a bare adb forward is explained as not enough
-        assertTrue(Desktop.HOW_TO.indexOf("acp-bridge pair") in 0 until Desktop.HOW_TO.indexOf("adb forward"))
         assertEquals("node tools/acp-bridge/acp-bridge.mjs pair 482913", Desktop.pairCommand("482913"))
-        // F11 item 4: the note next to the switch must use the same words as C's foreground notification
-        assertEquals("电脑端接入已开启", Desktop.NOTIFICATION_TITLE)
-        assertEquals("关闭", Desktop.NOTIFICATION_ACTION)
-        assertTrue(Desktop.FOREGROUND_NOTE.contains("常驻通知“电脑端接入已开启”"))
-        assertTrue(Desktop.FOREGROUND_NOTE.contains("用完记得关闭"))
+        // a computer that did not name itself gets the default name of the screen's language
+        val unnamed = Desktop.parseAccess("""{"enabled":true,"pairings":[{"id":"dp_2","pairedAtMs":1}]}""").pairings.single()
+        assertNull(unnamed.label)
+        assertEquals("电脑", Desktop.pairingLabel(unnamed, ResStrings.zh))
+        assertEquals("Computer", Desktop.pairingLabel(unnamed, ResStrings.en))
+        assertEquals("mac", Desktop.pairingLabel(a.pairings.single(), ResStrings.en))
+    }
+
+    @Test
+    fun desktopAccessTextInChinese() {
+        val s = ResStrings.zh
+        val a = Desktop.parseAccess(accessJson)
+        assertEquals("已打开：1 台已配对，1 个连接", Desktop.summary(a, s))
+        assertEquals("关闭", Desktop.summary(Desktop.parseAccess(offJson), s))
+        assertEquals("已打开，正在启动监听", Desktop.summary(a.copy(listening = false), s))
+        assertEquals("打不开监听（EADDRINUSE）：可能有别的 App 占用了 agentos-acp", Desktop.summary(a.copy(listenError = "EADDRINUSE"), s))
+        assertEquals("请先打开电脑端接入", Desktop.errorText("agentos.desktop.disabled: off", s))
+        assertEquals("操作失败，请重试", Desktop.errorText("boom", s))
+        assertEquals("电脑端接入已开启", Desktop.notificationTitle(s))
+        assertEquals("关闭", Desktop.notificationAction(s))
+        // F11 item 4: the note next to the switch must use the same words as the foreground notification
+        assertTrue(Desktop.foregroundNote(s).contains("常驻通知“电脑端接入已开启”"))
+        assertTrue(Desktop.foregroundNote(s).contains("用完记得关闭"))
+        assertTrue(Desktop.foregroundNote(s).contains("点通知上的“关闭”"))
+        assertEquals("2 台电脑", Desktop.computers(2, s))
+        assertEquals("5 分钟", Desktop.minutes(5, s))
+    }
+
+    @Test
+    fun desktopAccessTextInEnglish() {
+        val s = ResStrings.en
+        val a = Desktop.parseAccess(accessJson)
+        assertEquals("On: 1 computer paired, 1 connection", Desktop.summary(a, s))
+        assertEquals("On: 2 computers paired, 0 connections", Desktop.summary(a.copy(pairings = a.pairings + a.pairings, connections = 0), s))
+        assertEquals("Off", Desktop.summary(Desktop.parseAccess(offJson), s))
+        assertEquals("On, starting to listen", Desktop.summary(a.copy(listening = false), s))
+        assertEquals("Can't listen (EADDRINUSE): another app may be using agentos-acp", Desktop.summary(a.copy(listenError = "EADDRINUSE"), s))
+        assertEquals("Turn on desktop access first", Desktop.errorText("agentos.desktop.disabled: off", s))
+        assertEquals("That didn't work. Please try again.", Desktop.errorText("boom", s))
+        assertEquals("Desktop access is on", Desktop.notificationTitle(s))
+        assertEquals("Turn off", Desktop.notificationAction(s))
+        assertTrue(Desktop.foregroundNote(s).contains("an ongoing notification, “Desktop access is on”"))
+        assertTrue(Desktop.foregroundNote(s).contains("Remember to turn it off when you're done"))
+        assertTrue(Desktop.foregroundNote(s).contains("tap “Turn off” on the notification"))
+        assertEquals("1 computer", Desktop.computers(1, s))
+        assertEquals("2 computers", Desktop.computers(2, s))
+        assertEquals("1 minute", Desktop.minutes(1, s))
+        assertEquals("5 minutes", Desktop.minutes(5, s))
+    }
+
+    @Test
+    fun desktopHowToKeepsTheSecurityStatementInBothLanguages() {
+        for (s in listOf(ResStrings.zh, ResStrings.en)) {
+            val howTo = Desktop.howTo(s)
+            // acp-bridge pair is the way to connect; a bare adb forward is explained as not enough
+            assertTrue("${s.locale}: $howTo", howTo.indexOf("acp-bridge pair") in 0 until howTo.indexOf("adb forward"))
+            // it names the button it tells you to tap
+            assertTrue(howTo.contains(s.get(R.string.desktop_generate_code)))
+            assertTrue(howTo.contains("tcp:8765 localabstract:agentos-acp"))
+        }
+        // the last sentence: confirmations on the phone still appear and the computer cannot bypass them
+        assertTrue(Desktop.howTo(ResStrings.zh).endsWith("手机上的确认照常出现，电脑端无法绕过。"))
+        assertTrue(Desktop.howTo(ResStrings.en).endsWith("Confirmations on the phone still appear as usual; the computer can't bypass them."))
+        // the pairing dialogs: what turning off / revoking does, and that pairing has to be redone
+        val zh = ResStrings.zh
+        val en = ResStrings.en
+        assertEquals("会断开 1 个连接，并作废 2 台电脑的配对；以后再打开需要重新配对。", zh.get(R.string.desktop_disable_message, Desktop.connections(1, zh), Desktop.computers(2, zh)))
+        assertEquals("This will disconnect 1 connection and void the pairing of 2 computers. You'll need to pair again if you turn it on later.", en.get(R.string.desktop_disable_message, Desktop.connections(1, en), Desktop.computers(2, en)))
+        assertEquals("撤销全部 3 台电脑的配对？", zh.get(R.string.desktop_revoke_all_title, Desktop.computers(3, zh)))
+        assertEquals("Revoke pairing for all 3 computers?", en.get(R.string.desktop_revoke_all_title, Desktop.computers(3, en)))
+        assertEquals("它们的连接会立即断开，需要重新配对才能再连。", zh.get(R.string.desktop_revoke_all_message))
+        assertEquals("Their connections will be dropped immediately, and they must pair again to reconnect.", en.get(R.string.desktop_revoke_all_message))
+        val command = Desktop.pairCommand("482913")
+        assertTrue(zh.get(R.string.desktop_code_message, command, Desktop.minutes(5, zh)).contains("约 5 分钟内有效，配对成功或输错 5 次后作废"))
+        assertTrue(en.get(R.string.desktop_code_message, command, Desktop.minutes(5, en)).contains("Valid for about 5 minutes; it is voided after a successful pairing or 5 wrong attempts."))
+    }
+
+    @Test
+    fun batteryTextInBothLanguages() {
+        val zh = ResStrings.zh
+        val en = ResStrings.en
+        assertEquals("允许忽略电池优化", BatteryText.action(zh))
+        assertEquals("Allow ignoring battery optimization", BatteryText.action(en))
+        assertEquals("还没有允许忽略电池优化：运行时在后台被重新拉起后可能进不了前台、被系统冻结，电脑端会连不上", BatteryText.desktopWarning(zh))
+        assertTrue(BatteryText.desktopWarning(en).contains("it may not reach the foreground and get frozen, and your computer won't be able to connect."))
+        for (s in listOf(zh, en)) {
+            // the system dialog follows: both texts tell the user what to pick there and that it can be revoked
+            assertTrue(BatteryText.desktopDialogMessage(s).contains(if (s === zh) "选择“允许”" else "Choose “Allow”"))
+            assertTrue(BatteryText.guideDialogMessage(s).contains(if (s === zh) "选择“允许”" else "Choose “Allow”"))
+            assertTrue(BatteryText.desktopDialogMessage(s).contains(if (s === zh) "以后可以在系统设置里撤销" else "revoke it later in system settings"))
+        }
     }
 
     @Test
