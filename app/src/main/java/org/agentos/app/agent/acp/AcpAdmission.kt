@@ -34,7 +34,7 @@ sealed interface AcpDecision {
  *
  * - 调用方的 UID 就是 AgentOS 自己：SELF，和以前一样。
  * - 其他 UID：先解析成**恰好一个包**（共享 UID、查不到包一律 `not_open`），再查 [CallerRegistry]：已允许 → [CallerKind.APP]
- *   （label = App 名）；没记录 / 签名变了 → 记为待用户决定并**立刻**返回 `authorization_pending`；拒绝冷却内 → `denied`。
+ *   （label = **包名**，界面自己解析成 App 名；见下）；没记录 / 签名变了 → 记为待用户决定并**立刻**返回 `authorization_pending`；拒绝冷却内 → `denied`。
  * - 调用方在请求里自报的任何包名、名字都不参与（`open` 只带一个 IChannel；`initialize` 的 clientInfo 也不看）。
  */
 object AcpAccessPolicy {
@@ -43,7 +43,9 @@ object AcpAccessPolicy {
         val app = resolver.resolve(callerUid)
             ?: return reject(AcpServiceContract.REASON_NOT_OPEN, "this caller cannot be identified as exactly one app")
         return when (val a = registry.admit(app.packageName, app.signingDigest, app.label)) {
-            is Admission.Allowed -> AcpDecision.Open(CallerIdentity(uid = callerUid, kind = CallerKind.APP, label = a.label), app)
+            // label = 包名（不是 App 名）：确认框把它当 ConsentCaller.packageName，界面自己解析成“由「App 名」（包名）发起”；
+            // App 名是第三方自己起的文字，不同 App 可以重名，包名才是身份
+            is Admission.Allowed -> AcpDecision.Open(CallerIdentity(uid = callerUid, kind = CallerKind.APP, label = app.packageName), app)
             is Admission.Pending ->
                 reject(AcpServiceContract.REASON_AUTHORIZATION_PENDING, "the user has not decided yet; retry open in a second (request ${a.requestId.take(8)})")
             is Admission.Denied -> reject(AcpServiceContract.REASON_DENIED, "the user denied this app; try again after ${a.untilMillis}")
