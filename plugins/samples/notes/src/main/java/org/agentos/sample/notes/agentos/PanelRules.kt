@@ -20,10 +20,12 @@ object PanelRules {
 
     fun errorActions(error: AgentOsError, interrupted: Boolean, hasSourceText: Boolean, agentOsInstalled: Boolean): ErrorActions {
         val retryable = !interrupted && hasSourceText && when (error) {
-            AgentOsError.NOT_INSTALLED, AgentOsError.DENIED, AgentOsError.TOO_LARGE -> false
+            // 授权待决超时 AgentOS 按拒绝记，进入 10 分钟冷却：马上重试只会得到 DENIED，所以和 DENIED 一样去 AgentOS 里直接允许
+            AgentOsError.NOT_INSTALLED, AgentOsError.DENIED, AgentOsError.AUTHORIZATION_PENDING_TIMEOUT, AgentOsError.TOO_LARGE -> false
             else -> true
         }
-        val openAgentOs = agentOsInstalled && !interrupted && (error == AgentOsError.NO_MODEL || error == AgentOsError.DENIED)
+        val openAgentOs = agentOsInstalled && !interrupted &&
+            (error == AgentOsError.NO_MODEL || error == AgentOsError.DENIED || error == AgentOsError.AUTHORIZATION_PENDING_TIMEOUT)
         val learnMore = !interrupted && error == AgentOsError.NOT_INSTALLED
         val primary = when {
             openAgentOs -> Primary.OPEN_AGENTOS

@@ -121,7 +121,7 @@ Pi 以后新增的事件名，适配层原样交出（`AgentEvent.Other`），�
 | `task.queued` | `{ input, caller: { uid, kind, package? }, position }`；`input` 是 ACP 的 ContentBlock 数组（按第 5 节截断） | — | W2 |
 | `task.started` | `{ attempt }`：第几次执行，从 1 开始 | — | W2 |
 | `task.completed` | `{ stopReason, usage? }`；`stopReason`：`end_turn` / `max_tokens` / `max_turn_requests` / `refusal` | — | W2 |
-| `task.cancel_requested` | `{ by, phase }`；`by`：`client` / `timeout` / `system` / `user_stop`；`phase`：`queued` / `model` / `tool` | — | W2、W4 |
+| `task.cancel_requested` | `{ by, phase }`；`by`：`client` / `timeout` / `system` / `user_stop` / `revoked`（撤销第三方 App 的授权，`RuntimeEngine.cancelOwner`）；`phase`：`queued` / `model` / `tool` | — | W2、W4 |
 | `task.cancelled` | `{ phase, unknownToolCalls }`：取消时已发出、没拿到结果的工具调用 | — | W2 |
 | `task.failed` | `{ attempt, attemptState }`；`attemptState`：`not_started` / `failed` / `unknown` | 有 | W2 |
 | `task.recovery_required` | `{ attempt, reason, unknownToolCalls: [{ toolCallId, name }] }`；`reason`：`runtime_restarted` / `agent_core_failed` / `cancel_grace_exceeded` | — | W2 recovery |

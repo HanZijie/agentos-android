@@ -98,6 +98,13 @@
 <img src="screenshots/agent-waiting-dark.png" width="23%" alt="第一次使用（暗色）">
 <img src="screenshots/agent-error-nomodel-en-dark.png" width="23%" alt="NO_MODEL（英文，暗色）">
 </p>
+<p>
+<img src="screenshots/agent-real-running.png" width="23%" alt="真 SDK：AgentOS 在等你确认（英文）">
+<img src="screenshots/agent-real-approval-agentos.png" width="23%" alt="点「打开确认」后，AgentOS 的确认框来到前台，写明「由 Notes 发起」">
+</p>
+<p>
+<img src="screenshots/agent-running-landscape.png" width="60%" alt="横屏：运行中的面板，旋转不丢任务">
+</p>
 
 ### 用法
 
@@ -151,6 +158,9 @@ adb -s <设备> shell am broadcast -n org.agentos.sample.notes/.debug.DebugCallR
 adb -s <设备> shell am broadcast -n org.agentos.sample.notes/.debug.DebugCallReceiver --es cmd ask_agent_stop
 # 切换假网关脚本（默认 off = 真网关；名字见返回的 scripts）
 adb -s <设备> shell am broadcast -n org.agentos.sample.notes/.debug.DebugCallReceiver --es cmd fake_gateway --es script <名字|off>
+# 让发给 AgentOS 的提示词就是 --es text 本身（不加任务说明和安全说明）：只给设备上的自动化测试用，
+# 好让测试假模型的 JSON 脚本（tests/device/acp-channel/fake_model.py）驱动真 SDK 走完工具调用。默认关
+adb -s <设备> shell am broadcast -n org.agentos.sample.notes/.debug.DebugCallReceiver --es cmd raw_prompt --ez on true
 ```
 
 - 一轮在备忘录进程里跑，**硬超时 150 秒**（到点停止，汇总里 `timed_out: true`、`stopped: true`）。`ask_agent` 这条广播最多等 `wait_s` 秒（默认 45，最多 50）：Android 的后台广播 60 秒就会 ANR 并杀进程，`goAsync` 撑不到 150 秒，所以没等到结束就先返回 `pending: true`、result code `3`，再用 `ask_agent_status` 轮询。

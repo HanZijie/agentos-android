@@ -371,4 +371,34 @@ class ThirdPartyAcpTest {
         assertTrue("TOP-SECRET" !in line)
         assertTrue(TestRuntime.APP.label!! !in line)
     }
+
+    // ------------------------------------------------------------------ revoking an app: cancelOwner
+
+    @Test
+    fun `cancelOwner ends the running prompt of the app with cancelled over the wire, frees its slot, and leaves AgentOS itself alone`() = test { pair, rt ->
+        pair.initialize()
+        val session = pair.newSession()
+        val own = AcpPair(rt, TestRuntime.SELF)
+        try {
+            own.initialize()
+            val ownSession = own.newSession()
+            val ownRunning = async { own.prompt(ownSession, directive("chunks" to JsonPrimitive(1), "text" to JsonPrimitive("a"), "awaitAbort" to JsonPrimitive(true))) }
+
+            val running = async { pair.prompt(session, directive("chunks" to JsonPrimitive(1), "text" to JsonPrimitive("a"), "awaitAbort" to JsonPrimitive(true))) }
+            rt.until { rt.engine.quota.usage(TestRuntime.APP).activePrompts == 1 }
+
+            val cancelled = rt.engine.cancelOwner(TestRuntime.APP, "revoked")
+            assertEquals(1, cancelled.size)
+
+            assertEquals(StopReason.CANCELLED, running.await().response().stopReason, "the app's prompt ends as cancelled")
+            assertEquals(0, rt.engine.quota.usage(TestRuntime.APP).activePrompts)
+            assertEquals(StopReason.END_TURN, pair.prompt(session, "hello again").response().stopReason, "its slot is free")
+
+            assertTrue(ownRunning.isActive, "AgentOS's own prompt is still running")
+            ownSession.cancel()
+            assertEquals(StopReason.CANCELLED, ownRunning.await().response().stopReason)
+        } finally {
+            own.close()
+        }
+    }
 }
