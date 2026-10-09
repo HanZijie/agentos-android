@@ -12,6 +12,8 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.agentos.app.R
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.ui.Ui
 
 /**
@@ -20,6 +22,9 @@ import org.agentos.app.ui.Ui
  */
 abstract class PluginPage : Activity() {
     protected val host by lazy { ExtensionHostClient(this) }
+
+    /** 界面文字（跟随系统语言或“应用语言”）。 */
+    protected val strings: Strings by lazy { AndroidStrings(this) }
     protected var scope: CoroutineScope? = null
 
     /** 策略文件读不出来且没有副本（fail closed）：:ext 拒绝一切修改，界面不给开关，免得点了没反应。 */
@@ -39,6 +44,9 @@ abstract class PluginPage : Activity() {
 
     protected fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
 
+    /** App 的标签（随系统语言）：给 [Plugins.withAppLabels]。取不到抛异常，调用方当“没有标签”处理。在后台线程用。 */
+    protected fun appLabelOf(packageName: String): CharSequence? = packageManager.getApplicationInfo(packageName, 0).loadLabel(packageManager)
+
     /** 对话框按钮在被别的窗口遮挡时不响应（防止 tapjacking 骗到“确认新签名”）。 */
     protected fun show(builder: AlertDialog.Builder) {
         val dialog = builder.create()
@@ -52,7 +60,7 @@ abstract class PluginPage : Activity() {
             try {
                 host.use { block(it) }
             } catch (e: Exception) {
-                toast(Plugins.errorText(e.message))
+                toast(Plugins.errorText(e.message, strings))
             }
             then()
         }
@@ -67,7 +75,7 @@ abstract class PluginPage : Activity() {
             call(then) { it.setPluginEnabled(p.id, false) }
             return
         }
-        val plan = Plugins.enablePlan(p)
+        val plan = Plugins.enablePlan(p, strings)
         show(
             AlertDialog.Builder(this)
                 .setTitle(plan.title)
@@ -78,7 +86,7 @@ abstract class PluginPage : Activity() {
                         it.setPluginEnabled(p.id, true)
                     }
                 }
-                .setNegativeButton("取消") { _, _ -> then() }
+                .setNegativeButton(strings.get(R.string.plugins_cancel)) { _, _ -> then() }
                 .setOnCancelListener { then() },
         )
     }
@@ -87,9 +95,9 @@ abstract class PluginPage : Activity() {
     protected fun header(p: Plugins.Plugin, onToggle: (Boolean) -> Unit): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = android.view.Gravity.CENTER_VERTICAL
-        addView(Ui.text(context, 17f, R.color.ui_text, bold = true).apply { text = p.displayName }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(Ui.text(context, 17f, R.color.ui_text, bold = true).apply { text = p.title }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addView(Switch(context).apply {
-            contentDescription = "启用 ${p.displayName}"
+            contentDescription = strings.get(R.string.plugins_switch_cd, p.title)
             isChecked = p.switchOn
             isEnabled = p.switchEnabled && !locked
             // 用点击而不是 OnCheckedChange：程序里 setChecked 不会触发；点击后先把开关拨回，等调用结果再刷新
@@ -103,11 +111,11 @@ abstract class PluginPage : Activity() {
 
     /** 版本、来源 App、签名、状态：列表卡片和详情页相同。 */
     protected fun identity(card: LinearLayout, p: Plugins.Plugin) {
-        card.addView(Ui.paragraph(this, listOf(p.versionName.takeIf { it.isNotEmpty() }?.let { "版本 $it" }, p.packageName.takeIf { it.isNotEmpty() }?.let { "来自 $it" })
+        card.addView(Ui.paragraph(this, listOf(p.versionName.takeIf { it.isNotEmpty() }?.let { strings.get(R.string.plugins_version, it) }, p.packageName.takeIf { it.isNotEmpty() }?.let { strings.get(R.string.plugins_from_app, it) })
             .filterNotNull().joinToString(" · ")))
-        if (p.builtin) card.addView(Ui.paragraph(this, "AgentOS 自带"))
-        else card.addView(Ui.paragraph(this, "签名 ${Plugins.digestHead(p.signingDigest)}…"))
-        val (status, warn) = Plugins.statusLine(p)
+        if (p.builtin) card.addView(Ui.paragraph(this, strings.get(R.string.plugins_builtin)))
+        else card.addView(Ui.paragraph(this, strings.get(R.string.plugins_signature_line, Plugins.digestShown(p.signingDigest, strings))))
+        val (status, warn) = Plugins.statusLine(p, strings)
         card.addView(Ui.paragraph(this, status, if (warn) R.color.ui_error else R.color.ui_text_secondary))
     }
 

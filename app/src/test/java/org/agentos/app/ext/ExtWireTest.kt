@@ -6,15 +6,21 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.agentos.extensions.ExtMessages
 import org.agentos.extensions.McpServerDecl
+import org.agentos.extensions.PluginManifest
+import org.agentos.extensions.UnsupportedKind
+import org.agentos.extensions.UnsupportedPart
 import org.agentos.extensions.host.KnownTool
 import org.agentos.extensions.registry.PluginIdentity
+import org.agentos.extensions.registry.PluginProblem
 import org.agentos.extensions.registry.PluginRecord
 import org.agentos.extensions.registry.PluginStatus
 import org.agentos.runtime.broker.ApprovalMode
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.PolicyScope
 import org.agentos.runtime.errors.ErrorCode
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.CatalogTool
@@ -166,6 +172,39 @@ class ExtWireTest {
         assertEquals(JsonNull, unconfirmed["versionName"])
         assertEquals(JsonNull, unconfirmed["approval"])
         assertEquals(JsonNull, unconfirmed["unavailableReason"])
+    }
+
+    @Test
+    fun `problems, unsupported parts and skill problems travel as key and arguments with their location, never as a sentence`() {
+        val manifest = PluginManifest(
+            name = "mcptest", version = null, description = null, authorName = null, display = null, servers = emptyList(), skills = emptyList(), hooks = null,
+            unsupported = listOf(UnsupportedPart(UnsupportedKind.STDIO_SERVER, "mcp.json › mcpServers.local", MessageRef.of(ExtMessages.STDIO_UNSUPPORTED))),
+        )
+        val rec = plugin(PluginStatus.READY, signerNow).copy(
+            manifest = manifest,
+            problems = listOf(
+                PluginProblem("server_rejected", MessageRef.of(ExtMessages.SERVER_REJECTED_NOT_EXPORTED, "a", "org.x.Svc")),
+                PluginProblem("schema", MessageRef.of(ExtMessages.MUST_BE_STRING), "plugin.json › version"),
+            ),
+        )
+        val skill = listOf(PluginProblem("skill_problem", MessageRef.of(ExtMessages.SKILL_NO_FRONTMATTER), "broken"))
+        val j = ExtWire.pluginJson(rec, ApprovalPolicy.DEFAULT, null, emptyMap(), 0, skill)
+        val problems = (j["problems"] as JsonArray).map { it as JsonObject }
+        assertEquals("server_rejected", problems[0].str("code"))
+        val message = problems[0]["message"] as JsonObject
+        assertEquals(ExtMessages.SERVER_REJECTED_NOT_EXPORTED, message.str("key"))
+        assertEquals(listOf("a", "org.x.Svc"), (message["args"] as JsonArray).map { (it as JsonPrimitive).content })
+        assertEquals(JsonNull, problems[0]["location"])
+        assertEquals("plugin.json › version", problems[1].str("location"))
+        val unsupported = ((j["unsupported"] as JsonArray)[0] as JsonObject)
+        assertEquals("stdio_server", unsupported.str("kind"))
+        assertEquals("mcp.json › mcpServers.local", unsupported.str("location"))
+        assertEquals(ExtMessages.STDIO_UNSUPPORTED, (unsupported["detail"] as JsonObject).str("key"))
+        val skillJson = ((j["skillProblems"] as JsonArray)[0] as JsonObject)
+        assertEquals("broken", skillJson.str("location"))
+        assertEquals(ExtMessages.SKILL_NO_FRONTMATTER, (skillJson["message"] as JsonObject).str("key"))
+        // no sentence anywhere in the encoded problems
+        assertTrue(j.toString().none { it in '一'..'鿿' })
     }
 
     @Test

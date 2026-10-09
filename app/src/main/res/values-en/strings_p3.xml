@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P3 (plugin management, authorized apps and usage, validation messages of core/extensions). English; the default (Chinese) is values/strings_p3.xml, keys correspond one to one.
+  Third-party text (plugin / server / app names) only enters through %1$s and is sanitised first (Plugins.frame: quotes become '); templates frame it with quotes only.
+-->
+<resources>
+    <!-- ================= Plugin list ================= -->
+    <string name="plugins_title">Plugins</string>
+    <string name="plugins_intro">Plugins are tools that other apps offer to the AgentOS model. Third-party plugins are off by default; once enabled, every write action still asks you first.</string>
+    <string name="plugins_service_label">Plugin service</string>
+    <string name="plugins_policy_section">Policy file</string>
+    <string name="plugins_state_label">Status</string>
+    <string name="plugins_reason_label">Reason</string>
+    <string name="plugins_reset_policy">Reset policy</string>
+    <string name="plugins_discovered_section">Discovered plugins</string>
+    <string name="plugins_empty">No plugins found yet. After installing an app that provides AgentOS plugins, tap “Rescan”.</string>
+    <string name="plugins_rescan">Rescan</string>
+    <string name="plugins_more_issues">%1$d more, tap to view</string>
+    <string name="plugins_details">Details</string>
+    <string name="plugins_card_cd">%1$s, view details</string>
+    <string name="plugins_reset_title">Reset plugin policy?</string>
+    <string name="plugins_reset_message">This discards the current user policy file and restores all defaults: third-party plugins will be turned off and every “Always allow” will be cleared. You will need to enable the plugins you use again.</string>
+    <string name="plugins_reset_confirm">Reset</string>
+    <string name="plugins_cancel">Cancel</string>
+
+    <string name="plugins_switch_cd">Enable %1$s</string>
+    <string name="plugins_version">Version %1$s</string>
+    <string name="plugins_from_app">From %1$s</string>
+    <string name="plugins_builtin">Built into AgentOS</string>
+    <string name="plugins_signature_line">Signature %1$s</string>
+    <string name="plugins_none">(none)</string>
+    <string name="plugins_package_hidden">%1$s (the package name has invalid characters, hidden)</string>
+
+    <string name="plugins_status_found_disabled">Found, not enabled</string>
+    <string name="plugins_status_unreachable">Enabled, but the plugin service cannot be reached</string>
+    <string name="plugins_status_enabled">Enabled</string>
+    <string name="plugins_status_sig_changed">Needs reconfirmation: this app\'s signature changed, so the plugin was turned off</string>
+    <string name="plugins_status_sig_unconfirmed">Needs reconfirmation: AgentOS has no reliable record of this app\'s earlier signature, so the plugin was turned off</string>
+    <string name="plugins_status_unavailable">Unavailable: %1$s</string>
+    <string name="plugins_unavailable_assets_missing">No plugin package found in the app</string>
+    <string name="plugins_unavailable_manifest_rejected">The plugin manifest does not meet the requirements</string>
+    <string name="plugins_unavailable_no_usable_server">No usable plugin service</string>
+    <string name="plugins_unavailable_name_conflict">The plugin name duplicates another plugin</string>
+    <string name="plugins_unavailable_unknown">Reason unknown</string>
+    <string name="plugins_rejected_not_in_package">The service is not in this app; ignored</string>
+    <string name="plugins_rejected_not_exported">The service is not open to AgentOS; ignored</string>
+    <string name="plugins_rejected_missing_permission">The service does not require the AgentOS bind permission; ignored</string>
+    <string name="plugins_rejected_unknown">Service unavailable: %1$s</string>
+    <string name="plugins_server_connected">Connected</string>
+    <string name="plugins_server_idle">Idle (connects when used)</string>
+    <string name="plugins_server_unreachable">Unreachable</string>
+    <string name="plugins_server_unreachable_reason">Unreachable: %1$s</string>
+    <string name="plugins_server_disabled">Turned off</string>
+
+    <string name="plugins_summary_enable_to_view">Enable to see tools</string>
+    <string name="plugins_summary_after_connect">Tools show up after the first connection; tap Details to check</string>
+    <plurals name="plugins_tools_count">
+        <item quantity="one">%1$d tool</item>
+        <item quantity="other">%1$d tools</item>
+    </plurals>
+    <plurals name="plugins_skills_count">
+        <item quantity="one">%1$d Skill</item>
+        <item quantity="other">%1$d Skills</item>
+    </plurals>
+    <string name="plugins_summary_join">%1$s, %2$s</string>
+
+    <string name="plugins_risk_read">Read-only</string>
+    <string name="plugins_risk_write">Write</string>
+    <string name="plugins_risk_high">High risk (may be irreversible)</string>
+    <string name="plugins_approval_high">Asks every time (high risk, cannot be set to Always allow)</string>
+    <string name="plugins_approval_read">No confirmation needed (read-only)</string>
+    <string name="plugins_approval_always">Always allow</string>
+    <string name="plugins_approval_ask">Asks every time</string>
+
+    <string name="plugins_issue_problem">Problem: %1$s</string>
+    <string name="plugins_issue_unsupported">Not supported: %1$s</string>
+    <string name="plugins_issue_skill">Skill problem: %1$s</string>
+    <string name="plugins_issue_rejected_server">Ignored service “%1$s”: %2$s</string>
+    <string name="plugins_unsupported_body">%1$s (%2$s)</string>
+    <string name="plugins_located">%1$s: %2$s</string>
+
+    <string name="plugins_policy_fail_closed">The user policy file cannot be read and there is no usable copy: all third-party plugins are treated as off and settings cannot be changed. After you confirm a reset, everything returns to defaults (all existing third-party plugins will be turned off).</string>
+    <string name="plugins_policy_previous">The user policy file is corrupted; using the last valid policy.</string>
+    <string name="plugins_policy_backup">The user policy file is corrupted; using the backup.</string>
+    <string name="plugins_policy_other">There is a problem with the user policy file.</string>
+
+    <string name="plugins_error_not_found">Cannot find this plugin or tool (it may have just been uninstalled). Please refresh.</string>
+    <string name="plugins_error_not_ready">The plugin service is not ready yet. Try again shortly.</string>
+    <string name="plugins_error_not_needed">This plugin\'s signature does not need reconfirmation</string>
+    <string name="plugins_error_high_risk">High-risk tools cannot be set to “Always allow”</string>
+    <string name="plugins_error_bad_mode">Unsupported approval mode</string>
+    <string name="plugins_error_generic">Action failed. Please try again later.</string>
+
+    <string name="plugins_who">“%1$s” (%2$s)</string>
+    <string name="plugins_enable_risk">A plugin\'s tool names, descriptions and results all come from a third party, and AgentOS cannot guarantee they can be trusted. AgentOS asks you before every write action, and high-risk actions are confirmed every time.</string>
+    <string name="plugins_enable_changed_title">Reconfirm and enable?</string>
+    <string name="plugins_enable_changed_message">The signature of %1$s differs from before. The developer may have changed their signing key, or someone may have swapped the installed package.\n\nPackage: %2$s\nCurrent signature: %3$s\n%4$s\n\nContinue only if you are sure this app comes from a source you trust.\n\n%5$s</string>
+    <string name="plugins_enable_prev_digest">Previous signature: %1$s</string>
+    <string name="plugins_enable_prev_never">Previous signature: never confirmed</string>
+    <string name="plugins_enable_changed_confirm">Confirm new signature and enable</string>
+    <string name="plugins_enable_unconfirmed_message">AgentOS cannot recall the signature of %1$s that you confirmed before (the record is lost or damaged), so you need to confirm it again.\n\nPackage: %2$s\nCurrent signature: %3$s\n\nContinue only if you are sure this app comes from a source you trust.\n\n%4$s</string>
+    <string name="plugins_enable_unconfirmed_confirm">Confirm signature and enable</string>
+    <string name="plugins_enable_builtin_title">Enable plugin?</string>
+    <string name="plugins_enable_builtin_message">Enable %1$s? This plugin is built into AgentOS.</string>
+    <string name="plugins_enable_confirm">Enable</string>
+    <string name="plugins_enable_third_title">Enable third-party plugin?</string>
+    <string name="plugins_enable_third_message">%1$s comes from another app and is off by default. Once enabled, the model can call the tools it provides.\n\nSignature: %2$s\n\n%3$s</string>
+
+    <!-- ================= Plugin details ================= -->
+    <string name="plugin_detail_title">Plugin details</string>
+    <string name="plugin_detail_gone">This plugin no longer exists (it may have just been uninstalled).</string>
+    <string name="plugin_detail_id">Plugin ID: %1$s</string>
+    <string name="plugin_detail_locked">There is a problem with the user policy file, so settings cannot be changed for now. Reset the policy on the “Plugins” page and try again.</string>
+    <string name="plugin_detail_issues_section">Problems and unsupported items</string>
+    <string name="plugin_detail_servers_section">Services</string>
+    <string name="plugin_detail_no_servers">No usable services.</string>
+    <string name="plugin_detail_unnamed_server">(unnamed)</string>
+    <string name="plugin_detail_tools_section">Tools</string>
+    <string name="plugin_detail_tools_after_enable">Enable the plugin to see its tools.</string>
+    <string name="plugin_detail_tools_none">No tools available right now.</string>
+    <string name="plugin_detail_refresh">Refresh</string>
+    <string name="plugin_detail_tool_switch_cd">Enable tool %1$s</string>
+    <string name="plugin_detail_risk_label">Risk</string>
+    <string name="plugin_detail_approval_label">Approval</string>
+    <string name="plugin_detail_set_always">Set to Always allow</string>
+    <string name="plugin_detail_set_ask">Back to asking every time</string>
+    <string name="plugin_detail_always_title">Set to Always allow?</string>
+    <string name="plugin_detail_always_message">From now on the model will call “%1$s” without asking you each time, and this tool will modify data directly. What a tool does is up to the third-party app, and AgentOS cannot guarantee it can be trusted. You can switch back to asking every time at any time.</string>
+    <string name="plugin_detail_always_confirm">Always allow</string>
+
+    <!-- ================= Authorized apps ================= -->
+    <string name="callers_title">Authorized apps</string>
+    <string name="callers_intro">Third-party apps need your permission before they can ask questions through AgentOS. Any tool they use still asks you every time.</string>
+    <string name="callers_runtime_label">Runtime</string>
+    <string name="callers_load_failed">Could not load, or this runtime version is too old to support it.</string>
+    <string name="callers_apps_section">Apps</string>
+    <string name="callers_empty">No third-party app has made a request yet.</string>
+    <string name="callers_refresh">Refresh</string>
+    <string name="callers_cancel">Cancel</string>
+    <string name="callers_package_line">Package: %1$s</string>
+    <string name="callers_package_hidden">%1$s (the package name has invalid characters, hidden)</string>
+    <string name="callers_package_empty">(empty)</string>
+    <string name="callers_digest_line">Signature: %1$s</string>
+    <string name="callers_digest_unreadable">(unreadable)</string>
+    <string name="callers_error">Action failed. Please try again later.</string>
+
+    <string name="callers_state_allowed">Allowed</string>
+    <string name="callers_state_pending">Waiting for your decision (it is waiting for the AgentOS authorization prompt)</string>
+    <string name="callers_state_denied">Denied</string>
+    <plurals name="callers_state_denied_cooldown">
+        <item quantity="one">Denied (if it asks again within %1$d minute, it will be refused right away)</item>
+        <item quantity="other">Denied (if it asks again within %1$d minutes, it will be refused right away)</item>
+    </plurals>
+
+    <string name="callers_last_used">Last used: %1$s</string>
+    <string name="callers_last_used_never">Last used: never</string>
+    <string name="callers_ago_just_now">just now</string>
+    <plurals name="callers_ago_minutes">
+        <item quantity="one">%1$d minute ago</item>
+        <item quantity="other">%1$d minutes ago</item>
+    </plurals>
+    <plurals name="callers_ago_hours">
+        <item quantity="one">%1$d hour ago</item>
+        <item quantity="other">%1$d hours ago</item>
+    </plurals>
+    <plurals name="callers_ago_days">
+        <item quantity="one">%1$d day ago</item>
+        <item quantity="other">%1$d days ago</item>
+    </plurals>
+    <plurals name="callers_usage_total">
+        <item quantity="one">Usage: %1$d prompt in total</item>
+        <item quantity="other">Usage: %1$d prompts in total</item>
+    </plurals>
+    <plurals name="callers_usage_total_hour">
+        <item quantity="one">Usage: %1$d prompt in total, %2$d in the last hour</item>
+        <item quantity="other">Usage: %1$d prompts in total, %2$d in the last hour</item>
+    </plurals>
+
+    <string name="callers_action_revoke">Revoke access</string>
+    <string name="callers_action_allow">Allow</string>
+    <string name="callers_action_allow_denied">Change to Allow</string>
+    <string name="callers_action_deny">Deny</string>
+    <string name="callers_action_remove">Remove record</string>
+
+    <string name="callers_who">“%1$s”\n%2$s\n%3$s</string>
+    <string name="callers_allow_explanation">It can have AgentOS answer questions for you; any tool it uses still asks you every time.</string>
+    <string name="callers_revoke_title">Revoke access?</string>
+    <string name="callers_revoke_message">%1$s\n\nIts current connections will be closed immediately and tasks in progress will be cancelled. If it asks again within 10 minutes it will be refused right away; after that you will be asked again.</string>
+    <string name="callers_revoke_confirm">Revoke</string>
+    <string name="callers_deny_title">Deny?</string>
+    <string name="callers_deny_message">%1$s\n\nIf it asks again within 10 minutes it will be refused right away; after that you will be asked again.</string>
+    <string name="callers_deny_confirm">Deny</string>
+    <string name="callers_allow_title">Change to Allow?</string>
+    <string name="callers_allow_message">%1$s\n\n%2$s\n\nAllow only if you are sure this app comes from a source you trust.</string>
+    <string name="callers_allow_confirm">Allow</string>
+    <string name="callers_remove_title">Remove record?</string>
+    <string name="callers_remove_message">%1$s\n\nAfter removal, it will ask you again the next time it requests to use AgentOS.</string>
+    <string name="callers_remove_confirm">Remove</string>
+
+    <!-- ================= core/extensions validation messages (same keys as ExtMessages; arguments are sanitised third-party text) ================= -->
+    <string name="ext_msg_not_json">Not valid JSON</string>
+    <string name="ext_msg_root_not_object">The root must be a JSON object</string>
+    <string name="ext_msg_missing_required">Missing required field %1$s</string>
+    <string name="ext_msg_must_be_value">Must be %1$s</string>
+    <string name="ext_msg_must_be_string">Must be a string</string>
+    <string name="ext_msg_must_be_object">Must be an object</string>
+    <string name="ext_msg_must_be_string_array">Must be an array of strings</string>
+    <string name="ext_msg_must_be_nonempty_string">Must be a non-empty string</string>
+    <string name="ext_msg_must_be_string_map">Must be an object of string → string</string>
+    <string name="ext_msg_field_not_allowed">Field not allowed</string>
+    <string name="ext_msg_plugin_field_not_allowed">Field not allowed (the plugin.json of Agent Plugins 1.0 has only a fixed set of top-level fields; client-specific content goes under extensions)</string>
+    <string name="ext_msg_stdio_field_not_allowed">Field not allowed for a stdio server</string>
+    <string name="ext_msg_name_length">The length must be between 1 and %1$s characters</string>
+    <string name="ext_msg_name_pattern">Only lowercase letters, digits, `.` and `-` are allowed; it must start and end with a letter or digit and must not contain `--` or `..`</string>
+    <string name="ext_msg_section_must_be_object">Each section must be an object</string>
+    <string name="ext_msg_binder_not_allowed">An imported plugin package cannot declare Binder services of a local app (only plugins embedded in an installed app can)</string>
+    <string name="ext_msg_org_servers_shape">Must be an object: server name → { \"service\": \"&lt;full Service class name&gt;\" }</string>
+    <string name="ext_msg_org_server_shape">Must be an object { \"service\": \"&lt;full Service class name&gt;\" }</string>
+    <string name="ext_msg_server_name_empty">The server name cannot be empty</string>
+    <string name="ext_msg_service_class_name">Must be the full class name of a Service (non-empty, no whitespace)</string>
+    <string name="ext_msg_duplicate_server">The server name “%1$s” appears more than once in the same plugin</string>
+    <string name="ext_msg_server_type_missing">Missing type (one of stdio, streamable-http, sse)</string>
+    <string name="ext_msg_server_type_unknown">Unknown server type “%1$s” (only stdio, streamable-http, sse)</string>
+    <string name="ext_msg_env_reserved">PLUGIN_ROOT and PLUGIN_DATA are reserved environment variable names</string>
+    <string name="ext_msg_cwd_prefix">Must start with ./, ${PLUGIN_ROOT} or ${PLUGIN_DATA}</string>
+    <string name="ext_msg_icon_path_unsafe">The icon path “%1$s” must start with ./ and must not leave the plugin root directory</string>
+    <string name="ext_msg_stdio_unsupported">A stdio server needs a process and an interpreter started on the phone; AgentOS does not support it</string>
+    <string name="ext_msg_sse_unsupported">The old HTTP+SSE transport; AgentOS supports Streamable HTTP only</string>
+    <string name="ext_msg_url_invalid">Not a valid address</string>
+    <string name="ext_msg_url_not_https">Only https:// addresses are supported</string>
+    <string name="ext_msg_url_no_host">The address has no host name</string>
+    <string name="ext_msg_url_userinfo">The address must not contain a user name or password</string>
+
+    <string name="ext_msg_assets_not_declared">The plugin\'s Service does not declare org.agentos.plugin.assets, so the plugin package cannot be found</string>
+    <string name="ext_msg_assets_no_plugin_json">There is no plugin.json in assets/%1$s</string>
+    <string name="ext_msg_server_rejected_not_in_package">Server “%1$s” (Service class “%2$s”) was rejected: this Service does not belong to this app</string>
+    <string name="ext_msg_server_rejected_not_exported">Server “%1$s” (Service class “%2$s”) was rejected: this Service is not exported</string>
+    <string name="ext_msg_server_rejected_missing_permission">Server “%1$s” (Service class “%2$s”) was rejected: this Service does not require %3$s</string>
+    <string name="ext_msg_signature_changed">This app\'s signature changed: the plugin was turned off and must be reconfirmed before it can be enabled</string>
+    <string name="ext_msg_signature_unconfirmed">There is no signature record for this app (memory lost): the plugin was turned off and must be reconfirmed before it can be enabled</string>
+    <string name="ext_msg_no_usable_server">None of the declared servers can be used, so the plugin has nothing usable</string>
+    <string name="ext_msg_name_conflict">The plugin name “%1$s” is already taken or is a reserved name</string>
+
+    <string name="ext_msg_skill_no_frontmatter">SKILL.md has no frontmatter (the file must start with --- and define name and description)</string>
+    <string name="ext_msg_skill_frontmatter_unclosed">The frontmatter of SKILL.md does not end (the second --- is missing) or is too long</string>
+    <string name="ext_msg_skill_key_duplicate">%1$s is repeated in the frontmatter; only the first one is used</string>
+    <string name="ext_msg_skill_name_missing">The frontmatter has no name</string>
+    <string name="ext_msg_skill_description_missing">The frontmatter has no description</string>
+    <string name="ext_msg_skill_double_quote_unclosed">The double quote of %1$s in the frontmatter is not closed</string>
+    <string name="ext_msg_skill_single_quote_unclosed">The single quote of %1$s in the frontmatter is not closed</string>
+    <string name="ext_msg_skill_file_unreadable">Cannot read SKILL.md</string>
+    <string name="ext_msg_skill_file_error">Error while reading SKILL.md</string>
+    <string name="ext_msg_skill_file_missing">There is no SKILL.md in the plugin package</string>
+    <string name="ext_msg_skill_file_not_text">SKILL.md is not a text file</string>
+    <string name="ext_msg_skill_name_invalid">The name “%1$s” is not valid (only letters, digits, `.`, `_` and `-`, at most 64 characters, starting with a letter or digit); using the directory name instead</string>
+    <string name="ext_msg_skill_dir_invalid">The directory name “%1$s” cannot be used as a Skill name either; this Skill is skipped</string>
+</resources>
