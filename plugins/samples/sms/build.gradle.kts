@@ -56,6 +56,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     // MCP 服务：McpBinderService（工具注册）；debug 自测入口用 McpBinderClient。R8 规则由 SDK 的 consumer-rules.pro 带过来
     implementation(project(":sdk:plugin-sdk"))
+    // “让 AgentOS 安排”：agentos/RealAgentOsGateway 是 AgentOs（ACP）的薄适配层，让 AgentOS 把短信里的安排建成日程 / 待办 / 闹钟
+    implementation(project(":sdk:acp-android"))
 
     testImplementation(libs.junit4)
     testImplementation(libs.kotlinx.coroutines.test)

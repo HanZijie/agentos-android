@@ -5,7 +5,7 @@
       只申请两个短信权限（都是运行时权限；Android 15 起对非应用商店安装的 App 属于“受限设置”，用户要在应用信息里先点“允许受限制的设置”）：
       READ_SMS 读系统短信库，SEND_SMS 用 SmsManager 发送。不是默认短信应用，所以没有 RECEIVE_SMS / SEND_RESPOND_VIA_MESSAGE / WRITE_SMS，
       也没有 SMS_DELIVER 一类接收器。sent / delivered 回调是 PendingIntent 发给自己的显式广播，不需要接收权限。
-      本 App 不联网。
+      本 App 不联网（“让 AgentOS 安排”经本机的 AgentOS 进程完成，不走网络）。
     -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
@@ -14,6 +14,14 @@
     <uses-feature
         android:name="android.hardware.telephony"
         android:required="false" />
+
+    <!-- “让 AgentOS 安排”完成后的“在日历 / 待办 / 闹钟中查看”和“打开 AgentOS”要知道对应 App 装没装（包可见性，只看启动入口） -->
+    <queries>
+        <package android:name="org.agentos.sample.calendar" />
+        <package android:name="org.agentos.sample.todo" />
+        <package android:name="org.agentos.sample.alarm" />
+        <package android:name="org.agentos.app" />
+    </queries>
 
     <application
         android:name=".SmsApp"
