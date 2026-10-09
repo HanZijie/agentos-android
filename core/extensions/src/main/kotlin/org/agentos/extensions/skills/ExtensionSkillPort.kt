@@ -12,11 +12,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import org.agentos.extensions.ExtMessages
 import org.agentos.extensions.registry.PluginProblem
 import org.agentos.extensions.registry.PluginRecord
 import org.agentos.extensions.registry.PluginRegistry
 import org.agentos.extensions.registry.PluginStatus
 import org.agentos.runtime.broker.ApprovalPolicy
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.ApprovalPolicyPort
 import org.agentos.runtime.ports.SkillCatalog
 import org.agentos.runtime.ports.SkillContent
@@ -46,7 +48,7 @@ data class SkillConfig(
  *   它的 Skill 立刻从目录消失，也读不到（[read] 每次都再检查一次）。服务器、工具级的禁用不影响 Skill。
  * - 来源是 [PluginRecord.manifest] 的 `skills/<目录>/SKILL.md` 清单；名字和描述从 SKILL.md 的 frontmatter 读（[SkillFrontmatter]，只读前
  *   [SkillConfig.maxFrontmatterBytes] 字节）。**每个 Skill 的问题都不影响别的 Skill**：frontmatter 缺失、没结束、非法、SKILL.md 读不到，
- *   原因记在 [problems]（按插件，给插件页显示）。没有合法 name 时用目录名；目录名也不合法（不是 `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`）时这个 Skill 跳过。
+ *   原因记在 [problems]（按插件，给插件页显示；文案 key + 参数，位置是 Skill 的目录名，界面按自己的语言渲染）。没有合法 name 时用目录名；目录名也不合法（不是 `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`）时这个 Skill 跳过。
  *   description 缺失时仍然列出（描述为空）。
  * - **标识**（[SkillSummary.id]，`read_skill` 用）：名字在整个目录里唯一就用名字；冲突的**全部**改用 `<插件名>:<Skill 名>`；
  *   同一个插件里还重名的，改用 `<插件名>:<目录名>`。目录按“自带插件在前，然后按插件 ID，再按目录名”排序（确定的顺序；系统提示截断时按这个顺序保留）。
@@ -67,7 +69,7 @@ class ExtensionSkillPort(
 
     private class Entry(val plugin: PluginRecord, val directory: String, val summary: SkillSummary)
 
-    private class Header(val name: String?, val description: String, val problems: List<String>)
+    private class Header(val name: String?, val description: String, val problems: List<MessageRef>)
 
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]) + CoroutineName("extension-skills"))
     private val entries = AtomicReference<Map<String, Entry>>(emptyMap())
@@ -129,7 +131,7 @@ class ExtensionSkillPort(
                 live += key // 被禁用的插件也保留缓存：重新启用时不用再读文件
                 if (!enabled) continue
                 val header = headers[key] ?: loadHeader(plugin, ref.directory, ref.path).also { headers[key] = it }
-                for (p in header.problems) problems.getOrPut(plugin.id) { ArrayList() } += PluginProblem("skill_problem", "Skill ${ref.directory}：$p")
+                for (p in header.problems) problems.getOrPut(plugin.id) { ArrayList() } += PluginProblem("skill_problem", p, ref.directory)
                 val name = header.name ?: continue
                 candidates += Candidate(plugin, ref.directory, name, header.description)
             }
@@ -152,25 +154,25 @@ class ExtensionSkillPort(
         val file = try {
             files.read(plugin, path, config.maxFrontmatterBytes)
         } catch (e: IOException) {
-            return Header(null, "", listOf("读不了 SKILL.md"))
+            return Header(null, "", listOf(MessageRef.of(ExtMessages.SKILL_FILE_UNREADABLE)))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            return Header(null, "", listOf("读 SKILL.md 时出错"))
-        } ?: return Header(null, "", listOf("插件包里没有 SKILL.md"))
-        if (file.bytes.any { it == 0.toByte() }) return Header(null, "", listOf("SKILL.md 不是文本文件"))
+            return Header(null, "", listOf(MessageRef.of(ExtMessages.SKILL_FILE_ERROR)))
+        } ?: return Header(null, "", listOf(MessageRef.of(ExtMessages.SKILL_FILE_MISSING)))
+        if (file.bytes.any { it == 0.toByte() }) return Header(null, "", listOf(MessageRef.of(ExtMessages.SKILL_FILE_NOT_TEXT)))
         val parsed = SkillFrontmatter.parse(String(file.bytes, Charsets.UTF_8))
-        val problems = ArrayList(parsed.problems)
+        val problems = ArrayList<MessageRef>(parsed.problems)
         var name = parsed.name?.let(::cleanLine)
         if (name != null && !NAME_REGEX.matches(name)) {
-            problems += "name \"${name.take(40)}\" 不合法（只能用字母、数字、`.`、`_`、`-`，最长 64 个字符，以字母或数字开头），改用目录名"
+            problems += MessageRef.of(ExtMessages.SKILL_NAME_INVALID, name.take(40))
             name = null
         }
         if (name == null) {
             if (NAME_REGEX.matches(directory)) {
                 name = directory
             } else {
-                problems += "目录名 \"${directory.take(40)}\" 也不能当 Skill 名，这个 Skill 被跳过"
+                problems += MessageRef.of(ExtMessages.SKILL_DIR_INVALID, directory.take(40))
                 return Header(null, "", problems)
             }
         }

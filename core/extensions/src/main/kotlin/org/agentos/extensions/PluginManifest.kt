@@ -1,6 +1,7 @@
 package org.agentos.extensions
 
 import kotlinx.serialization.json.JsonElement
+import org.agentos.runtime.i18n.MessageRef
 
 /** 插件包的来源，决定校验规则（docs/extensions.md 4.1、4.2）。 */
 enum class PluginOrigin {
@@ -82,8 +83,8 @@ data class UnsupportedPart(
     val kind: UnsupportedKind,
     /** 位置，给人看：例如 `mcp.json › mcpServers.docs`。 */
     val location: String,
-    /** 原因，给人看（中文）。 */
-    val reason: String,
+    /** 原因，给人看：文案 key + 参数（[ExtMessages]），界面按自己的语言渲染。 */
+    val reason: MessageRef,
 )
 
 enum class UnsupportedKind {
@@ -100,8 +101,10 @@ enum class UnsupportedKind {
     UNSAFE_PATH,
 }
 
-/** 校验失败的一项。[code] 给程序判断，[location] 与 [message] 给人看。 */
-data class ManifestError(val code: ManifestErrorCode, val location: String, val message: String)
+/**
+ * 校验失败的一项。[code] 给程序判断；[location]（文件 + 字段路径，如 `plugin.json › name`，不是自然语言）与 [message]（文案 key + 参数，[ExtMessages]）给人看。
+ */
+data class ManifestError(val code: ManifestErrorCode, val location: String, val message: MessageRef)
 
 enum class ManifestErrorCode {
     /** 不是合法的 JSON，或根不是对象。 */

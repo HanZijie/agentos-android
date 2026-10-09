@@ -3,6 +3,7 @@ package org.agentos.extensions.registry
 import org.agentos.extensions.ManifestError
 import org.agentos.extensions.McpServerDecl
 import org.agentos.extensions.PluginManifest
+import org.agentos.runtime.i18n.MessageRef
 
 /**
  * 插件身份（docs/extensions.md 4.1）：已安装 App 内嵌的插件记录为“包名 + 签名证书摘要 + versionCode”。
@@ -101,8 +102,11 @@ enum class ServerRejection {
 
 data class RejectedServer(val name: String, val service: String, val reason: ServerRejection)
 
-/** 给插件页显示的一条问题（中文，已带位置）。 */
-data class PluginProblem(val code: String, val message: String)
+/**
+ * 给插件页显示的一条问题：[message] 是文案 key + 参数（[org.agentos.extensions.ExtMessages]），界面按自己的语言渲染；
+ * [location] 是问题的位置（`plugin.json › name`、Skill 的目录名…，不是自然语言），没有时为 null。
+ */
+data class PluginProblem(val code: String, val message: MessageRef, val location: String? = null)
 
 /**
  * 注册表里的一个插件。**由扫描结果推导出来，不持久化**（持久化的只有 [PersistedPlugin]）。

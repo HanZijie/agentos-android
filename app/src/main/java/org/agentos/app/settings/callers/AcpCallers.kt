@@ -7,12 +7,15 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
-import org.agentos.app.ui.consent.AuthorizationLabels
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
+import org.agentos.app.settings.plugins.Digest
 import org.agentos.app.ui.consent.ConsentLabels
 
 /**
  * “已授权的应用”页的数据和文案（纯 Kotlin，AcpCallersLogicTest）：`IAgentControl.listAcpCallers()` 的 JSON（C，docs/third-party-acp.md 4.3）。
- * App 名、包名来自第三方，是不可信输入：App 名清理成安全单行，**包名总是同时显示**，界面只用 `setText(String)`。
+ * App 名、包名来自第三方，是不可信输入：App 名清理成安全单行（所有语言的引号去掉），**包名总是同时显示**，界面只用 `setText(String)`。
+ * 文案来自 [Strings]（`values/strings_p3.xml` 的 `callers_*`），所以产生文字的函数都带一个 [Strings]。
  */
 object AcpCallers {
     private val json = Json { ignoreUnknownKeys = true }
@@ -37,7 +40,7 @@ object AcpCallers {
         /** pending 时授权提示的 ID（`answerAuthorization` 用）；设置页用 `setAcpCaller`，不需要它。 */
         val requestId: String? = null,
     ) {
-        val displayName: String get() = ConsentLabels.cleanLabel(label)?.takeIf { it != packageName } ?: AuthorizationLabels.safePackage(packageName)
+        val displayName: String get() = ConsentLabels.cleanLabel(label)?.takeIf { it != packageName } ?: safePackage(packageName)
     }
 
     private fun str(o: JsonObject, k: String): String? = (o[k] as? JsonPrimitive)?.takeIf { it !is JsonNull && it.isString }?.contentOrNull
@@ -75,25 +78,47 @@ object AcpCallers {
 
     // ---------------------------------------------------------------- 文案
 
-    fun stateText(c: Caller, now: Long): String = when (c.state) {
-        State.ALLOWED -> "已允许"
-        State.PENDING -> "等待你决定（它在等 AgentOS 的授权提示）"
-        State.DENIED -> if (c.deniedUntil != null && c.deniedUntil > now) "已拒绝（${(c.deniedUntil - now + 59_999) / 60_000} 分钟内它再请求会直接被拒绝）" else "已拒绝"
+    /** 包名里只留 Android 包名允许的字符 `[A-Za-z0-9_.]`（不依赖语言，用作名字的退路）。不截断：截断的包名会让人认错 App。 */
+    fun safePackage(pkg: String): String = pkg.filter { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '_' || it == '.' }
+
+    /** 包名那一行；有字符被隐藏（或为空）时写明，别的字符一律不显示。 */
+    fun packageLine(pkg: String, strings: Strings): String {
+        val ok = safePackage(pkg)
+        val shown = if (ok == pkg && ok.isNotEmpty()) ok else strings.get(R.string.callers_package_hidden, ok.ifEmpty { strings.get(R.string.callers_package_empty) })
+        return strings.get(R.string.callers_package_line, shown)
     }
 
-    fun lastUsedText(c: Caller, now: Long): String {
-        val at = c.lastUsedAt ?: return "最近使用：从未使用"
+    /** 签名那一行：前 12 位，四位一组；没有摘要写明，不留空。 */
+    fun digestLine(digest: String?, strings: Strings): String =
+        strings.get(R.string.callers_digest_line, Digest.head(digest) ?: strings.get(R.string.callers_digest_unreadable))
+
+    fun stateText(c: Caller, now: Long, strings: Strings): String = when (c.state) {
+        State.ALLOWED -> strings.get(R.string.callers_state_allowed)
+        State.PENDING -> strings.get(R.string.callers_state_pending)
+        State.DENIED ->
+            if (c.deniedUntil != null && c.deniedUntil > now) {
+                val minutes = ((c.deniedUntil - now + 59_999) / 60_000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                strings.plural(R.plurals.callers_state_denied_cooldown, minutes, minutes)
+            } else {
+                strings.get(R.string.callers_state_denied)
+            }
+    }
+
+    fun lastUsedText(c: Caller, now: Long, strings: Strings): String {
+        val at = c.lastUsedAt ?: return strings.get(R.string.callers_last_used_never)
         val ago = (now - at).coerceAtLeast(0)
         val text = when {
-            ago < 60_000 -> "刚刚"
-            ago < 3_600_000 -> "${ago / 60_000} 分钟前"
-            ago < 86_400_000 -> "${ago / 3_600_000} 小时前"
-            else -> "${ago / 86_400_000} 天前"
+            ago < 60_000 -> strings.get(R.string.callers_ago_just_now)
+            ago < 3_600_000 -> (ago / 60_000).toInt().let { strings.plural(R.plurals.callers_ago_minutes, it, it) }
+            ago < 86_400_000 -> (ago / 3_600_000).toInt().let { strings.plural(R.plurals.callers_ago_hours, it, it) }
+            else -> (ago / 86_400_000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt().let { strings.plural(R.plurals.callers_ago_days, it, it) }
         }
-        return "最近使用：$text"
+        return strings.get(R.string.callers_last_used, text)
     }
 
-    fun usageText(c: Caller): String = "用量：共 ${c.promptCount} 次" + if (c.promptCount > 0) "，最近一小时 ${c.promptsLastHour} 次" else ""
+    fun usageText(c: Caller, strings: Strings): String =
+        if (c.promptCount > 0) strings.plural(R.plurals.callers_usage_total_hour, c.promptCount, c.promptCount, c.promptsLastHour)
+        else strings.plural(R.plurals.callers_usage_total, c.promptCount, c.promptCount)
 
     /**
      * 能做什么：已允许的可以撤销（改成拒绝：通道立即关闭，10 分钟内它再请求直接被拒）；已拒绝的可以改成允许、或移除记录（下次再请求
@@ -108,12 +133,14 @@ object AcpCallers {
     }
 
     /** [c] 为已拒绝时写“改为允许”，等你决定时写“允许”。 */
-    fun actionLabel(a: Action, c: Caller? = null): String = when (a) {
-        Action.REVOKE -> "撤销授权"
-        Action.ALLOW -> if (c?.state == State.DENIED) "改为允许" else "允许"
-        Action.DENY -> "拒绝"
-        Action.REMOVE -> "移除记录"
-    }
+    fun actionLabel(a: Action, c: Caller? = null, strings: Strings): String = strings.get(
+        when (a) {
+            Action.REVOKE -> R.string.callers_action_revoke
+            Action.ALLOW -> if (c?.state == State.DENIED) R.string.callers_action_allow_denied else R.string.callers_action_allow
+            Action.DENY -> R.string.callers_action_deny
+            Action.REMOVE -> R.string.callers_action_remove
+        },
+    )
 
     /** `setAcpCaller` 的 state 参数。 */
     fun wireState(a: Action): String = when (a) {
@@ -125,20 +152,18 @@ object AcpCallers {
     data class Confirm(val title: String, val message: String, val confirmLabel: String)
 
     /** 点操作后的确认对话框：写明名字、包名、签名摘要前 12 位，和后果。 */
-    fun confirm(c: Caller, a: Action): Confirm {
-        // P1 换了 AuthorizationLabels 的签名（文字带 Strings）：这里只把调用点换成不带语言的助手，输出和以前一字不差；整个页面的中英文是 P3
-        val who = "「${c.displayName}」\n包名：${AuthorizationLabels.safePackage(c.packageName)}\n签名：${AuthorizationLabels.digestHex(c.signingDigest) ?: "（无法读取）"}"
+    fun confirm(c: Caller, a: Action, strings: Strings): Confirm {
+        val who = strings.get(R.string.callers_who, c.displayName, packageLine(c.packageName, strings), digestLine(c.signingDigest, strings))
         return when (a) {
-            Action.REVOKE -> Confirm(
-                "撤销授权？", "$who\n\n它现有的连接会立即断开，进行中的任务会取消。10 分钟内它再请求会直接被拒绝，之后会重新询问你。", "撤销",
-            )
-            Action.DENY -> Confirm("拒绝？", "$who\n\n10 分钟内它再请求会直接被拒绝，之后会重新询问你。", "拒绝")
+            Action.REVOKE -> Confirm(strings.get(R.string.callers_revoke_title), strings.get(R.string.callers_revoke_message, who), strings.get(R.string.callers_revoke_confirm))
+            Action.DENY -> Confirm(strings.get(R.string.callers_deny_title), strings.get(R.string.callers_deny_message, who), strings.get(R.string.callers_deny_confirm))
             Action.ALLOW -> Confirm(
-                "改为允许？", "$who\n\n它可以让 AgentOS 替你回答问题；它用到的工具，每次都会再问你。\n\n只有确认这个 App 来自你信任的来源时才允许。", "允许",
+                strings.get(R.string.callers_allow_title), strings.get(R.string.callers_allow_message, who, strings.get(R.string.callers_allow_explanation)), strings.get(R.string.callers_allow_confirm),
             )
-            Action.REMOVE -> Confirm("移除记录？", "$who\n\n移除后，它下次请求使用 AgentOS 时会重新询问你。", "移除")
+            Action.REMOVE -> Confirm(strings.get(R.string.callers_remove_title), strings.get(R.string.callers_remove_message, who), strings.get(R.string.callers_remove_confirm))
         }
     }
 
-    fun errorText(message: String?): String = "操作失败，请稍后再试"
+    /** 固定文案，不回显原始异常文字。 */
+    fun errorText(strings: Strings): String = strings.get(R.string.callers_error)
 }
