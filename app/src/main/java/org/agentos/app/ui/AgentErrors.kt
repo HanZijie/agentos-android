@@ -1,5 +1,7 @@
 package org.agentos.app.ui
 
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
 import org.agentos.channel.CloseCause
 
 /**
@@ -7,6 +9,11 @@ import org.agentos.channel.CloseCause
  * Built from AgentOS error codes (core/contracts/errors.md: JSON-RPC -32040…-32059 with
  * `data.agentosCode`), from the Binder channel's close cause, or from connection failures.
  * Never contains a key, a prompt, or tool arguments.
+ *
+ * [title] and [hint] are already text in the language of the screen at the moment of the failure (an error notice is
+ * transient, it is not re-rendered when the language changes): every function here takes the [Strings] to render with
+ * (`AndroidStrings(context)` at run time, `ResStrings.zh / .en` in tests). The wording lives in `values/strings_p1.xml`
+ * and `values-en/strings_p1.xml` as `error_<code>_title` / `error_<code>_hint`.
  */
 data class AgentError(
     val title: String,
@@ -17,56 +24,55 @@ data class AgentError(
 )
 
 object AgentErrors {
-    private class Text(val title: String, val hint: String? = null)
+    private class Text(val title: Int, val hint: Int? = null)
 
     private val byCode: Map<String, Text> = mapOf(
-        // request (errors.md 3.1)
-        "invalid_params" to Text("请求参数不合法"),
-        "unsupported" to Text("请求了 AgentOS 不支持的能力"),
-        "auth_required" to Text("需要先完成认证"),
-        "not_open" to Text("AgentOS 还没有对这个调用方开放"),
-        "forbidden" to Text("没有权限执行这个操作"),
-        "session_not_found" to Text("会话不存在了", "运行时可能重启过；再发一次会自动开始新会话"),
-        "task_not_found" to Text("任务不存在了"),
-        "invalid_state" to Text("当前状态不允许这个操作", "等上一轮结束或取消完成后再试"),
-        "request_conflict" to Text("提交内容与之前的请求冲突"),
-        "session_terminal" to Text("这个会话已经结束", "点“新对话”开始新的会话"),
-        "cursor_too_old" to Text("恢复位置太旧，需要重新加载"),
-        "payload_too_large" to Text("输入太长", "把内容拆成几段发送"),
-        "busy" to Text("运行时正忙", "稍后再试"),
-        "quota_exceeded" to Text("超过了用量上限", "稍后再试"),
-        "recovery_required" to Text("这个会话有等你处理的恢复任务", "处理之前不能发新消息"),
-        "safe_mode" to Text("AgentOS 处于安全模式，不执行新任务", "在 root 管理器里用 AgentOS 模块的“动作”按钮退出安全模式"),
-        // model (3.2)
-        "model_not_configured" to Text("还没有配置模型", "到设置页选择模型厂商并填写 key"),
-        "model_auth_failed" to Text("模型服务拒绝了 key", "到设置页检查 key 是否正确、是否有这个模型的权限"),
-        "model_quota_exhausted" to Text("模型账户的余额或额度用完了", "到模型厂商的控制台充值后再试"),
-        "model_bad_request" to Text("模型服务拒绝了这个请求", "模型名或参数可能不对，或者对话太长；可以点“新对话”再试"),
-        "model_request_too_large" to Text("请求太大，模型服务不接受", "点“新对话”，或缩短输入"),
-        "model_rate_limited" to Text("被模型服务限流了", "稍等一会儿再发"),
-        "model_unavailable" to Text("模型服务暂时不可用", "稍后再试"),
-        "model_network" to Text("连不上模型服务", "检查网络后再试"),
-        "model_timeout" to Text("模型服务响应超时", "检查网络后再试"),
-        "model_stream_interrupted" to Text("回复中途断开了", "检查网络后再试"),
-        "model_tls_failed" to Text("与模型服务的安全连接校验失败", "当前网络可能被劫持，换一个网络再试"),
-        "model_protocol" to Text("模型服务返回了无法识别的内容", "检查设置页里的地址和协议是否匹配"),
-        // tool (3.3): normally tool errors do not fail a turn
-        "tool_not_in_catalog" to Text("模型请求了一个不存在的工具"),
-        "tool_denied" to Text("工具调用被拒绝"),
-        "tool_blocked" to Text("工具调用被拦截"),
-        "tool_failed" to Text("工具调用失败"),
-        "tool_timeout" to Text("工具调用超时"),
-        "tool_unavailable" to Text("工具暂时不可用"),
-        "tool_result_unknown" to Text("工具调用的结果未知"),
-        "tool_result_too_large" to Text("工具返回的结果太大"),
-        // task (3.4)
-        "queue_timeout" to Text("排队超时，任务没有开始", "稍后再试"),
-        "execution_timeout" to Text("任务超过时限，已取消"),
-        "agent_core_failed" to Text("Agent 内核出错，这一轮需要恢复"),
-        "abandoned" to Text("任务已放弃"),
-        "store_failed" to Text("AgentOS 读写存储失败", "检查手机剩余空间"),
-        "internal" to Text("AgentOS 内部错误"),
+        "invalid_params" to Text(R.string.error_invalid_params_title),
+        "unsupported" to Text(R.string.error_unsupported_title),
+        "auth_required" to Text(R.string.error_auth_required_title),
+        "not_open" to Text(R.string.error_not_open_title),
+        "forbidden" to Text(R.string.error_forbidden_title),
+        "session_not_found" to Text(R.string.error_session_not_found_title, R.string.error_session_not_found_hint),
+        "task_not_found" to Text(R.string.error_task_not_found_title),
+        "invalid_state" to Text(R.string.error_invalid_state_title, R.string.error_invalid_state_hint),
+        "request_conflict" to Text(R.string.error_request_conflict_title),
+        "session_terminal" to Text(R.string.error_session_terminal_title, R.string.error_session_terminal_hint),
+        "cursor_too_old" to Text(R.string.error_cursor_too_old_title),
+        "payload_too_large" to Text(R.string.error_payload_too_large_title, R.string.error_payload_too_large_hint),
+        "busy" to Text(R.string.error_busy_title, R.string.error_busy_hint),
+        "quota_exceeded" to Text(R.string.error_quota_exceeded_title, R.string.error_quota_exceeded_hint),
+        "recovery_required" to Text(R.string.error_recovery_required_title, R.string.error_recovery_required_hint),
+        "safe_mode" to Text(R.string.error_safe_mode_title, R.string.error_safe_mode_hint),
+        "model_not_configured" to Text(R.string.error_model_not_configured_title, R.string.error_model_not_configured_hint),
+        "model_auth_failed" to Text(R.string.error_model_auth_failed_title, R.string.error_model_auth_failed_hint),
+        "model_quota_exhausted" to Text(R.string.error_model_quota_exhausted_title, R.string.error_model_quota_exhausted_hint),
+        "model_bad_request" to Text(R.string.error_model_bad_request_title, R.string.error_model_bad_request_hint),
+        "model_request_too_large" to Text(R.string.error_model_request_too_large_title, R.string.error_model_request_too_large_hint),
+        "model_rate_limited" to Text(R.string.error_model_rate_limited_title, R.string.error_model_rate_limited_hint),
+        "model_unavailable" to Text(R.string.error_model_unavailable_title, R.string.error_model_unavailable_hint),
+        "model_network" to Text(R.string.error_model_network_title, R.string.error_model_network_hint),
+        "model_timeout" to Text(R.string.error_model_timeout_title, R.string.error_model_timeout_hint),
+        "model_stream_interrupted" to Text(R.string.error_model_stream_interrupted_title, R.string.error_model_stream_interrupted_hint),
+        "model_tls_failed" to Text(R.string.error_model_tls_failed_title, R.string.error_model_tls_failed_hint),
+        "model_protocol" to Text(R.string.error_model_protocol_title, R.string.error_model_protocol_hint),
+        "tool_not_in_catalog" to Text(R.string.error_tool_not_in_catalog_title),
+        "tool_denied" to Text(R.string.error_tool_denied_title),
+        "tool_blocked" to Text(R.string.error_tool_blocked_title),
+        "tool_failed" to Text(R.string.error_tool_failed_title),
+        "tool_timeout" to Text(R.string.error_tool_timeout_title),
+        "tool_unavailable" to Text(R.string.error_tool_unavailable_title),
+        "tool_result_unknown" to Text(R.string.error_tool_result_unknown_title),
+        "tool_result_too_large" to Text(R.string.error_tool_result_too_large_title),
+        "queue_timeout" to Text(R.string.error_queue_timeout_title, R.string.error_queue_timeout_hint),
+        "execution_timeout" to Text(R.string.error_execution_timeout_title),
+        "agent_core_failed" to Text(R.string.error_agent_core_failed_title),
+        "abandoned" to Text(R.string.error_abandoned_title),
+        "store_failed" to Text(R.string.error_store_failed_title, R.string.error_store_failed_hint),
+        "internal" to Text(R.string.error_internal_title),
     )
+
+    /** The AgentOS error codes this screen has wording for (tests check each one has both languages). */
+    val knownCodes: Set<String> get() = byCode.keys
 
     /**
      * From a JSON-RPC error of `session/prompt` or another request. [reason] is `data.details.reason`
@@ -75,6 +81,7 @@ object AgentErrors {
      * (errors.md, B6); more than one attempt is added to the hint so "try again later" is not a surprise.
      */
     fun fromRpc(
+        strings: Strings,
         rpcCode: Int,
         message: String?,
         agentosCode: String?,
@@ -83,13 +90,14 @@ object AgentErrors {
         reason: String? = null,
         attempts: Int? = null,
     ): AgentError {
-        val e = fromRpcCode(rpcCode, message, agentosCode, retryable, retryAfterSeconds, reason)
+        val e = fromRpcCode(strings, rpcCode, message, agentosCode, retryable, retryAfterSeconds, reason)
         if (attempts == null || attempts <= 1) return e
-        val tried = "已自动重试，共尝试 $attempts 次"
-        return e.copy(hint = e.hint?.let { "$it（$tried）" } ?: tried)
+        val tried = strings.get(R.string.error_attempts, attempts)
+        return e.copy(hint = e.hint?.let { strings.get(R.string.error_hint_with_attempts, it, tried) } ?: tried)
     }
 
     private fun fromRpcCode(
+        strings: Strings,
         rpcCode: Int,
         message: String?,
         agentosCode: String?,
@@ -98,53 +106,61 @@ object AgentErrors {
         reason: String?,
     ): AgentError {
         if (agentosCode == "model_not_configured" && reason == "key_revoked") {
-            return AgentError("模型 key 已在设置中清除，这一轮已停止", "到设置页重新选择模型厂商并填写 key", false, agentosCode)
+            return AgentError(strings.get(R.string.error_key_revoked_title), strings.get(R.string.error_key_revoked_hint), false, agentosCode)
         }
         val known = agentosCode?.let { byCode[it] }
         if (known != null) {
             val hint = if (agentosCode == "model_rate_limited" && retryAfterSeconds != null && retryAfterSeconds > 0) {
-                "约 $retryAfterSeconds 秒后再发"
+                strings.plural(R.plurals.error_retry_after, retryAfterSeconds.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), retryAfterSeconds)
             } else {
-                known.hint
+                known.hint?.let { strings.get(it) }
             }
-            return AgentError(known.title, hint, retryable ?: false, agentosCode)
+            return AgentError(strings.get(known.title), hint, retryable ?: false, agentosCode)
         }
-        val title = when (rpcCode) {
-            -32601 -> "运行时不支持这个请求"
-            -32602 -> "请求参数不合法"
-            -32700, -32600 -> "协议错误"
-            -32000 -> "需要先完成认证"
-            -32002 -> "请求的对象不存在"
-            -32800 -> "请求被取消了"
-            else -> "请求失败"
-        }
+        val title = strings.get(
+            when (rpcCode) {
+                -32601 -> R.string.error_rpc_unsupported_title
+                -32602 -> R.string.error_invalid_params_title
+                -32700, -32600 -> R.string.error_rpc_protocol_title
+                -32000 -> R.string.error_auth_required_title
+                -32002 -> R.string.error_rpc_not_found_title
+                -32800 -> R.string.error_rpc_cancelled_title
+                else -> R.string.error_rpc_failed_title
+            },
+        )
+        // the detail is the runtime's own English diagnostic line (never translated, never a secret): first line, cut
         val detail = message?.substringBefore('\n')?.take(120)?.takeIf { it.isNotBlank() }
         return AgentError(title, detail, retryable ?: false, agentosCode ?: "rpc_$rpcCode")
     }
 
     /** The Binder channel closed while a request was in flight (prompt ends with "Protocol closed"). */
-    fun fromClose(cause: CloseCause?): AgentError = when (cause) {
-        is CloseCause.PeerDied -> AgentError(
-            "运行时进程重启了",
-            "可能是被系统回收了；运行时恢复后，这一轮的结果以运行时为准。可以再发一次",
-            true, "channel_peer_died",
+    fun fromClose(strings: Strings, cause: CloseCause?): AgentError {
+        val reconnect = strings.get(R.string.error_close_reconnect_hint)
+        return when (cause) {
+            is CloseCause.PeerDied -> AgentError(
+                strings.get(R.string.error_close_peer_died_title), strings.get(R.string.error_close_peer_died_hint), true, "channel_peer_died",
+            )
+            is CloseCause.Remote -> AgentError(strings.get(R.string.error_close_remote_title), reconnect, true, "channel_remote")
+            is CloseCause.Violation -> AgentError(strings.get(R.string.error_close_violation_title, cause.reason), reconnect, true, "channel_violation")
+            is CloseCause.Failure -> AgentError(strings.get(R.string.error_close_failure_title), reconnect, true, "channel_failure")
+            is CloseCause.Local -> AgentError(strings.get(R.string.error_close_local_title), null, true, "channel_local")
+            null -> AgentError(strings.get(R.string.error_close_unknown_title), reconnect, true, "channel_unknown")
+        }
+    }
+
+    fun connectFailed(strings: Strings, reason: String?): AgentError = when (reason) {
+        "agentos.acp.not_open" -> AgentError(
+            strings.get(R.string.error_connect_not_open_title), strings.get(R.string.error_connect_not_open_hint), false, "connect_not_open",
         )
-        is CloseCause.Remote -> AgentError("运行时关闭了连接", "再发一次会重新连接", true, "channel_remote")
-        is CloseCause.Violation -> AgentError("连接出现异常（${cause.reason}）", "再发一次会重新连接", true, "channel_violation")
-        is CloseCause.Failure -> AgentError("连接出现异常", "再发一次会重新连接", true, "channel_failure")
-        is CloseCause.Local -> AgentError("连接已关闭", null, true, "channel_local")
-        null -> AgentError("连接已断开", "再发一次会重新连接", true, "channel_unknown")
+        null -> AgentError(
+            strings.get(R.string.error_connect_failed_title), strings.get(R.string.error_connect_failed_hint), true, "connect_failed",
+        )
+        else -> AgentError(strings.get(R.string.error_connect_rejected_title, reason), null, false, "connect_rejected")
     }
 
-    fun connectFailed(reason: String?): AgentError = when (reason) {
-        "agentos.acp.not_open" -> AgentError("AgentOS 拒绝了连接", "这个版本只接受 AgentOS 自己的界面", false, "connect_not_open")
-        null -> AgentError("连不上 AgentOS 运行时", "稍后再试；如果一直这样，打开设置页查看运行状态", true, "connect_failed")
-        else -> AgentError("AgentOS 拒绝了连接（$reason）", null, false, "connect_rejected")
-    }
+    fun serviceMissing(strings: Strings): AgentError =
+        AgentError(strings.get(R.string.error_no_service_title), strings.get(R.string.error_no_service_hint), false, "connect_no_service")
 
-    fun serviceMissing(): AgentError =
-        AgentError("找不到 AgentOS 运行时服务", "请重新安装 AgentOS", false, "connect_no_service")
-
-    fun unexpected(t: Throwable): AgentError =
-        AgentError("出现意外错误（${t.javaClass.simpleName}）", null, true, "client_exception")
+    fun unexpected(strings: Strings, t: Throwable): AgentError =
+        AgentError(strings.get(R.string.error_unexpected_title, t.javaClass.simpleName), null, true, "client_exception")
 }

@@ -260,6 +260,79 @@ class AlarmRepositoryTest {
         assertEquals(60, a.snoozeMinutes)
     }
 
+    // ---- createOrReuse：系统 Intent 的去重 ----
+
+    @Test
+    fun createOrReuseCreatesWhenNothingMatches() {
+        val r = repo.createOrReuse(AlarmDraft(7, 30, label = "Run"))
+        assertEquals(Reuse.CREATED, r.status)
+        assertEquals(1, repo.alarms.value.size)
+        assertEquals(env.millis(at(7, 30, day = 8)), env.scheduler.scheduled[r.alarm.id])
+    }
+
+    @Test
+    fun createOrReuseReturnsTheEnabledTwinInsteadOfCreatingAnother() {
+        val first = repo.create(AlarmDraft(7, 30, label = "Run", days = setOf(DayOfWeek.MONDAY, DayOfWeek.FRIDAY)))
+        // 标签两端的空白不算差异；vibrate 等其他字段不参与判重，复用时保持原样
+        val r = repo.createOrReuse(AlarmDraft(7, 30, label = " Run ", days = setOf(DayOfWeek.FRIDAY, DayOfWeek.MONDAY), vibrate = false))
+        assertEquals(Reuse.EXISTING, r.status)
+        assertEquals(first, r.alarm)
+        assertTrue(r.alarm.vibrate)
+        assertEquals(1, repo.alarms.value.size)
+    }
+
+    @Test
+    fun createOrReuseTurnsADisabledTwinBackOn() {
+        val off = repo.create(AlarmDraft(7, 30, enabled = false))
+        val r = repo.createOrReuse(AlarmDraft(7, 30))
+        assertEquals(Reuse.REENABLED, r.status)
+        assertEquals(off.id, r.alarm.id)
+        assertTrue(r.alarm.enabled)
+        assertEquals(env.millis(at(7, 30, day = 8)), env.scheduler.scheduled[off.id])
+        assertEquals(1, repo.alarms.value.size)
+    }
+
+    @Test
+    fun createOrReusePrefersTheEnabledOneWhenSeveralMatch() {
+        repo.create(AlarmDraft(7, 30, enabled = false))
+        val on = repo.create(AlarmDraft(7, 30))
+        val r = repo.createOrReuse(AlarmDraft(7, 30))
+        assertEquals(Reuse.EXISTING, r.status)
+        assertEquals(on.id, r.alarm.id)
+        assertEquals(2, repo.alarms.value.size)
+    }
+
+    @Test
+    fun createOrReuseTreatsDifferentTimeLabelOrDaysAsDifferentAlarms() {
+        repo.create(AlarmDraft(7, 30, label = "Run", days = setOf(DayOfWeek.MONDAY)))
+        assertEquals(Reuse.CREATED, repo.createOrReuse(AlarmDraft(7, 31, label = "Run", days = setOf(DayOfWeek.MONDAY))).status)
+        assertEquals(Reuse.CREATED, repo.createOrReuse(AlarmDraft(7, 30, label = "Gym", days = setOf(DayOfWeek.MONDAY))).status)
+        assertEquals(Reuse.CREATED, repo.createOrReuse(AlarmDraft(7, 30, label = "Run", days = setOf(DayOfWeek.TUESDAY))).status)
+        assertEquals(Reuse.CREATED, repo.createOrReuse(AlarmDraft(7, 30, label = "Run")).status) // 一次性 ≠ 周一
+        assertEquals(5, repo.alarms.value.size)
+    }
+
+    @Test
+    fun createOrReuseStillValidates() {
+        assertThrows(AlarmException::class.java) { repo.createOrReuse(AlarmDraft(24, 0)) }
+        assertThrows(AlarmException::class.java) { repo.createOrReuse(AlarmDraft(7, 0, label = "x".repeat(61))) }
+        assertTrue(repo.alarms.value.isEmpty())
+    }
+
+    // ---- snooze(minutes) ----
+
+    @Test
+    fun snoozeWithExplicitMinutesOnlyAppliesOnceAndDoesNotChangeTheAlarm() {
+        val a = repo.create(AlarmDraft(8, 30, snoozeMinutes = 10))
+        env.time.current = at(8, 30)
+        repo.onFired(a.id)
+        val snoozed = repo.snooze(a.id, minutes = 3)
+        assertEquals(env.millis(at(8, 33)), snoozed.snoozedUntil)
+        assertEquals(10, repo.get(a.id)!!.snoozeMinutes)
+        assertThrows(AlarmException::class.java) { repo.snooze(a.id, minutes = 0) }
+        assertThrows(AlarmException::class.java) { repo.snooze(a.id, minutes = 61) }
+    }
+
     @Test
     fun clearAllRemovesEverythingAndCancelsSystemAlarms() {
         val a = repo.create(AlarmDraft(9, 0))

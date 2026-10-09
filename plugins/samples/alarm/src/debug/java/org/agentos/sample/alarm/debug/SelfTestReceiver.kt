@@ -114,7 +114,7 @@ class SelfTestReceiver : BroadcastReceiver() {
         fun McpToolResult.obj(): JsonObject = structuredContent ?: JsonObject(emptyMap())
         fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 
-        // tools/list：契约里的 8 个工具、必填参数、注解
+        // tools/list：契约里的 8 个工具（加上本 App 额外的 alarm_system_next）、必填参数、注解
         val tools = client.listTools()
         out.put("tools", JSONArray(tools.map { it.name }))
         val byName = tools.associateBy { it.name }
@@ -127,6 +127,7 @@ class SelfTestReceiver : BroadcastReceiver() {
             "alarm_delete" to listOf("id"),
             "alarm_next" to emptyList(),
             "alarm_dismiss" to emptyList(),
+            "alarm_system_next" to emptyList(),
         )
         check("contract_tools", contract.all { (name, required) ->
             val t = byName[name]
@@ -137,6 +138,7 @@ class SelfTestReceiver : BroadcastReceiver() {
             byName["alarm_list"]?.annotations?.readOnlyHint == true &&
                 byName["alarm_get"]?.annotations?.readOnlyHint == true &&
                 byName["alarm_next"]?.annotations?.readOnlyHint == true &&
+                byName["alarm_system_next"]?.annotations?.readOnlyHint == true &&
                 byName["alarm_delete"]?.annotations?.destructiveHint == true &&
                 byName["alarm_update"]?.annotations?.idempotentHint == true &&
                 byName["alarm_set_enabled"]?.annotations?.idempotentHint == true,
@@ -180,6 +182,18 @@ class SelfTestReceiver : BroadcastReceiver() {
 
             val next = call("alarm_next")
             check("next", !next.isError && next.text != "null" && next.obj().str("next_fire_at") != null)
+
+            // alarm_system_next：系统范围的下一个闹钟。刚建了本 App 的闹钟，所以不会是 null；
+            // 归属取决于系统里有没有比它更早的别家闹钟，所以只检查字段齐全、类型对
+            val systemNext = call("alarm_system_next")
+            val sn = systemNext.obj()
+            check(
+                "system_next",
+                !systemNext.isError && systemNext.text != "null" &&
+                    runCatching { OffsetDateTime.parse(sn.str("next_fire_at")!!) }.isSuccess &&
+                    (sn["fires_in_minutes"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() != null &&
+                    (sn["owned_by_this_app"] as? JsonPrimitive)?.booleanOrNull != null,
+            )
 
             // 错误路径：isError + 一句话原因
             check("err_get_unknown", call("alarm_get", "id" to JsonPrimitive("no-such-id")).isError)

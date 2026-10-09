@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 构建的设备自测入口（release 包里没有）。两个接收器都要求 DUMP 权限：只有 adb shell 和系统持有，其他 App 调不了。
+  - DebugToolReceiver：dump（权限状态、模式、设置、outbox）/ reset（只清 outbox）/ set（改设置）/ 进程内调工具（结果写 logcat，tag SmsDebug）
+  - SelfTestReceiver：独立的 :selftest 进程里经 McpBinderClient 绑自己的 MCP 服务，走真实的跨进程 Binder（tag SmsSelfTest）
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".debug.DebugToolReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+        <receiver
+            android:name=".debug.SelfTestReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:process=":selftest" />
+    </application>
+</manifest>

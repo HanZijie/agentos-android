@@ -10,10 +10,13 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import org.agentos.sample.calendar.R
 import org.agentos.sample.calendar.data.CalendarInfo
+import org.agentos.sample.calendar.data.CalendarSource
 import org.agentos.sample.calendar.data.EventSeries
+import org.agentos.sample.calendar.data.MonthGrid
 import org.agentos.sample.calendar.data.Occurrence
 import org.agentos.sample.calendar.data.Occurrences
 import org.agentos.sample.calendar.data.Recurrence
+import org.agentos.sample.calendar.data.WindowSnapshot
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -24,14 +27,20 @@ import java.time.format.TextStyle
 import java.time.temporal.WeekFields
 import java.util.Locale
 
-/** 界面一次渲染用的数据快照：仓库的两个 StateFlow 的当前值 + 时区 + 今天。 */
+/**
+ * 界面一次渲染用的数据快照：仓库的日历列表 + 当前视窗里的出现（[WindowSnapshot]）+ 时区 + 今天。
+ * 视窗只覆盖界面报告过的区间（见 [WindowRange]）；区间外的日期此刻没有数据，不代表那天没有日程——用 [covers] 判断。
+ */
 @Immutable
 class CalendarData(
     val calendars: List<CalendarInfo>,
-    val events: List<EventSeries>,
+    val snapshot: WindowSnapshot,
     val zone: ZoneId,
     val today: LocalDate,
     val firstDayOfWeek: DayOfWeek,
+    val systemAccess: Boolean,
+    /** 当前生效的默认写入日历 id。 */
+    val defaultWriteId: String = "",
 ) {
     private val byId: Map<String, CalendarInfo> = calendars.associateBy { it.id }
 
@@ -39,31 +48,47 @@ class CalendarData(
 
     fun colorOf(s: EventSeries): Color = Color(s.color ?: byId[s.calendarId]?.color ?: 0xFFE4572E.toInt())
 
-    /** [from, to]（含）范围内、可见日历里的日程，按设备时区的日期归并；跨日日程出现在占据的每一天。 */
-    fun byDay(from: LocalDate, to: LocalDate): Map<LocalDate, List<Occurrence>> {
+    /** 视窗是否已经包含 [from, to]（含）这些日期。 */
+    fun covers(from: LocalDate, to: LocalDate): Boolean {
         val fromMs = from.atStartOfDay(zone).toInstant().toEpochMilli()
         val toMs = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val list = Occurrences.query(events, fromMs, toMs, zone) { byId[it.calendarId]?.visible == true }
-        return Occurrences.bucketByDay(list, from, to)
+        return snapshot.fromMs <= fromMs && snapshot.toMs >= toMs
     }
 
-    fun search(query: String, now: Long): List<Occurrence> {
-        val q = query.trim()
-        if (q.isEmpty()) return emptyList()
-        val upcoming = ArrayList<Occurrence>()
-        val past = ArrayList<Occurrence>()
-        for (s in events) {
-            if (byId[s.calendarId]?.visible == false) continue
-            if (!(s.title.contains(q, true) || s.location.contains(q, true) || s.description.contains(q, true))) continue
-            val next = Occurrences.nextAtOrAfter(s, now, zone)
-            if (next != null) upcoming += next else past += (Occurrences.lastBefore(s, now, zone) ?: Occurrences.first(s, zone))
-        }
-        return upcoming.sortedBy { it.startMs } + past.sortedByDescending { it.startMs }
+    /** 视窗里是否有本机日历的日程带提醒（只有这些由本 App 发通知，系统日历的提醒归系统日历 App）。 */
+    val hasLocalReminders: Boolean
+        get() = snapshot.occurrences.any { it.series.reminders.isNotEmpty() && byId[it.series.calendarId]?.system == false }
+
+    /** [from, to]（含）范围内、可见日历里的日程，按设备时区的日期归并；跨日日程出现在占据的每一天。 */
+    fun byDay(from: LocalDate, to: LocalDate): Map<LocalDate, List<Occurrence>> {
+        val list = snapshot.occurrences
+            .filter { !it.firstDay.isAfter(to) && !it.lastDay.isBefore(from) && byId[it.series.calendarId]?.visible == true }
+            .sortedWith(Occurrences.displayOrder)
+        return Occurrences.bucketByDay(list, from, to)
     }
 
     companion object {
         fun systemFirstDayOfWeek(): DayOfWeek = WeekFields.of(Locale.getDefault()).firstDayOfWeek
     }
+}
+
+/** 各个首页标签页需要的视窗区间（纯函数）：当前页前后各留一页，滑动时邻页不会是空的。 */
+object WindowRange {
+    /** [from, to]（含）的日期范围。 */
+    fun dates(tab: HomeTab, selected: LocalDate, today: LocalDate, agendaDays: Int, firstDayOfWeek: DayOfWeek): Pair<LocalDate, LocalDate> = when (tab) {
+        HomeTab.Month -> {
+            val m = YearMonth.from(selected)
+            MonthGrid.firstCell(m.minusMonths(1), firstDayOfWeek) to MonthGrid.firstCell(m.plusMonths(1), firstDayOfWeek).plusDays(41)
+        }
+        HomeTab.Week -> {
+            val w = weekStartOf(selected, firstDayOfWeek)
+            w.minusWeeks(2) to w.plusWeeks(3).minusDays(1)
+        }
+        HomeTab.Agenda -> today to today.plusDays(agendaDays.toLong() - 1)
+    }
+
+    fun millis(range: Pair<LocalDate, LocalDate>, zone: ZoneId): Pair<Long, Long> =
+        range.first.atStartOfDay(zone).toInstant().toEpochMilli() to range.second.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
 }
 
 /** 本地化的日期、时间文字。模式由系统按区域生成（中文“10月8日 周四”，英文“Thu, Oct 8”）。 */
@@ -92,9 +117,15 @@ class Fmt(val context: Context, val locale: Locale, private val is24: Boolean) {
     fun time(ms: Long, zone: ZoneId): String = timeF.format(Instant.ofEpochMilli(ms).atZone(zone))
     fun time(t: java.time.LocalTime): String = timeF.format(t)
 
+    /**
+     * 周范围（“10月5日至11日” / “Oct 5 – 11”）：交给 ICU 的 [android.icu.text.DateIntervalFormat] 按区域决定怎么写
+     * （同月只写一次月份、日期的单位字），不在代码里按语言拼（R4）。
+     */
     fun weekRange(start: LocalDate): String {
-        val end = start.plusDays(6)
-        return "${monthDay(start)} – ${if (start.month == end.month) end.dayOfMonth.toString() + (if (locale.language == "zh" || locale.language == "ja") "日" else "") else monthDay(end)}"
+        val ulocale = android.icu.util.ULocale.forLocale(locale)
+        fun cal(d: LocalDate) = android.icu.util.Calendar.getInstance(ulocale).apply { clear(); set(d.year, d.monthValue - 1, d.dayOfMonth) }
+        return android.icu.text.DateIntervalFormat.getInstance("MMMd", ulocale)
+            .format(cal(start), cal(start.plusDays(6)), StringBuffer(), java.text.FieldPosition(0)).toString()
     }
 
     fun relativeDay(d: LocalDate, today: LocalDate): String? = when (d) {
@@ -153,8 +184,23 @@ class Fmt(val context: Context, val locale: Locale, private val is24: Boolean) {
             Recurrence.WEEKLY -> R.string.repeat_weekly
             Recurrence.MONTHLY -> R.string.repeat_monthly
             Recurrence.YEARLY -> R.string.repeat_yearly
+            Recurrence.CUSTOM -> R.string.repeat_custom
         },
     )
+
+    /** 日历的来源标签（“Google”“CalDAV”“其他账号”“本机”）。 */
+    fun sourceLabel(c: CalendarInfo): String = context.getString(
+        when (c.source) {
+            CalendarSource.GOOGLE -> R.string.source_google
+            CalendarSource.CALDAV -> R.string.source_caldav
+            CalendarSource.OTHER -> R.string.source_other
+            CalendarSource.LOCAL -> R.string.source_local
+        },
+    )
+
+    /** 日历的出处一行：账号日历 “Google · name@example.com”；本机（含系统库里的 LOCAL 账号）只写“本机”。 */
+    fun originLabel(c: CalendarInfo): String =
+        if (c.isAccountCalendar) listOf(sourceLabel(c), c.account).filter { it.isNotBlank() }.joinToString(" · ") else context.getString(R.string.source_local)
 }
 
 @Composable

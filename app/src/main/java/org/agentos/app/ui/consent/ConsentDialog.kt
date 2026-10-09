@@ -16,6 +16,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.agentos.app.R
 import org.agentos.app.agent.consent.ConsentWire.Card
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.ui.Ui
 import org.agentos.runtime.consent.ConsentChoice
 import org.agentos.runtime.consent.ConsentSeverity
@@ -39,6 +41,7 @@ class ConsentDialog private constructor(
     private val onChoice: (ConsentChoice) -> Unit,
 ) {
     private val handler = Handler(Looper.getMainLooper())
+    private val strings: Strings = AndroidStrings(activity)
     private var dialog: AlertDialog? = null
     private lateinit var countdown: TextView
     private val buttons = ArrayList<Button>()
@@ -80,7 +83,7 @@ class ConsentDialog private constructor(
     private var lastCountdown = ""
 
     private fun tick() {
-        val text = ConsentLabels.countdown(card.deadlineMillis, System.currentTimeMillis())
+        val text = ConsentLabels.countdown(card.deadlineMillis, System.currentTimeMillis(), strings)
         if (text != lastCountdown) {
             lastCountdown = text
             countdown.text = text
@@ -105,23 +108,23 @@ class ConsentDialog private constructor(
         // 风险标签：色块 + 文字（不只靠颜色）
         column.addView(
             Ui.text(activity, 12f, R.color.ui_user_text, bold = true).apply {
-                text = card.riskLabel.ifEmpty { card.risk }
+                text = strings.get(card.riskLabel).ifEmpty { card.risk }
                 setPadding(dp(10), dp(3), dp(10), dp(3))
                 background = Ui.rounded(accent, dp(10).toFloat())
             },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
         column.addView(Ui.text(activity, 19f, R.color.ui_text, bold = true).apply {
-            text = card.title
+            text = strings.get(card.title)
             setPadding(0, dp(10), 0, dp(4))
         })
-        column.addView(line(ConsentLabels.initiator(card, appLabel), R.color.ui_text))
-        card.sourceLine?.let { column.addView(line(it, R.color.ui_text_secondary)) }
-        ConsentLabels.queueNote(queueSize)?.let { column.addView(line(it, R.color.ui_text_secondary)) }
+        column.addView(line(ConsentLabels.initiator(card, appLabel, strings), R.color.ui_text))
+        card.sourceLine?.let { column.addView(line(strings.get(it), R.color.ui_text_secondary)) }
+        ConsentLabels.queueNote(queueSize, strings)?.let { column.addView(line(it, R.color.ui_text_secondary)) }
 
         if (card.argumentsPreview.isNotEmpty()) {
             column.addView(Ui.text(activity, 12f, R.color.ui_text_secondary).apply {
-                text = "参数"
+                text = strings.get(R.string.consent_arguments)
                 setPadding(0, dp(12), 0, dp(4))
             })
             val scroll = ScrollView(activity).apply {
@@ -141,11 +144,12 @@ class ConsentDialog private constructor(
                 height = ViewGroup.LayoutParams.WRAP_CONTENT
             })
             scroll.post { if (scroll.height > dp(160)) scroll.layoutParams = scroll.layoutParams.apply { height = dp(160) } }
-            if (card.argumentsTruncated) column.addView(line("参数过长，已截断显示", R.color.ui_text_secondary))
+            if (card.argumentsTruncated) column.addView(line(strings.get(R.string.consent_arguments_truncated), R.color.ui_text_secondary))
         }
-        if (card.riskDescription.isNotEmpty()) {
+        val riskDescription = strings.get(card.riskDescription)
+        if (riskDescription.isNotEmpty()) {
             column.addView(Ui.text(activity, 14f, if (critical) R.color.ui_error else R.color.ui_text_secondary, bold = critical).apply {
-                text = card.riskDescription
+                text = riskDescription
                 setPadding(0, dp(12), 0, dp(2))
             })
         }
@@ -162,7 +166,7 @@ class ConsentDialog private constructor(
             val isDeny = o.choice == ConsentChoice.DENY
             val primary = if (critical) isDeny else !isDeny && o.choice == ConsentChoice.ALLOW_ONCE
             val b = Button(activity).apply {
-                text = o.label
+                text = strings.get(o.label)
                 isAllCaps = false
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 setTextColor(activity.getColor(if (primary) R.color.ui_user_text else R.color.ui_text))
@@ -196,7 +200,7 @@ class ConsentDialog private constructor(
         if (answered) return
         answered = true
         buttons.forEach { it.isEnabled = false; it.alpha = 0.5f }
-        countdown.text = "已提交…"
+        countdown.text = strings.get(R.string.consent_submitted)
         onChoice(choice)
     }
 

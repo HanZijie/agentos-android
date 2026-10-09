@@ -74,6 +74,9 @@ fun RingScreen(alarm: Alarm, onSnooze: () -> Unit, onDismiss: () -> Unit) {
             PulsingBell()
             Spacer(Modifier.height(28.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                parts.prefix?.let {
+                    Text(it, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Text(
                     text = parts.main,
                     style = MaterialTheme.typography.displayLarge,

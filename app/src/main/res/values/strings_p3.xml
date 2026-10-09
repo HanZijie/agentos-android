@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P3（插件管理页、已授权 App 与用量、core/extensions 的校验信息）。中文是默认资源，英文在 values-en/strings_p3.xml，key 一一对应。
+  key 前缀：plugins_*（插件列表和公共）、plugin_detail_*（插件详情）、callers_*（已授权 App）、ext_msg_*（core/extensions 的校验信息，key 与 ExtMessages 同名）。
+  第三方文字（插件名、服务器名、App 名…）只经 %1$s 填进来，填之前已清理（Plugins.frame：引号换成 '）；模板只用引号把它们框起来，
+  不用括号框第三方文字（括号里只放包名，包名只剩 [A-Za-z0-9_.]）。PluginFramingTest 检查。
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- ================= 插件列表页 ================= -->
+    <string name="plugins_title">插件管理</string>
+    <string name="plugins_intro">插件是别的 App 提供给 AgentOS 模型调用的工具。第三方插件默认关闭；启用后，写操作每次都会先向你确认。</string>
+    <string name="plugins_service_label">插件服务</string>
+    <string name="plugins_policy_section">策略文件</string>
+    <string name="plugins_state_label">状态</string>
+    <string name="plugins_reason_label">原因</string>
+    <string name="plugins_reset_policy">重置策略</string>
+    <string name="plugins_discovered_section">已发现的插件</string>
+    <string name="plugins_empty">还没有发现插件。安装了支持 AgentOS 插件的 App 后点“重新扫描”。</string>
+    <string name="plugins_rescan">重新扫描</string>
+    <plurals name="plugins_more_issues">
+        <item quantity="other">另有 %1$d 项，点开查看</item>
+    </plurals>
+    <string name="plugins_details">详情</string>
+    <string name="plugins_card_cd">%1$s，查看详情</string>
+    <string name="plugins_reset_title">重置插件策略？</string>
+    <string name="plugins_reset_message">会丢弃现在的用户策略文件，全部恢复默认：第三方插件都会停用，所有“始终允许”都会取消。之后需要重新启用你要用的插件。</string>
+    <string name="plugins_reset_confirm">重置</string>
+    <string name="plugins_cancel">取消</string>
+
+    <!-- 公共：标题行、身份行 -->
+    <string name="plugins_switch_cd">启用 %1$s</string>
+    <string name="plugins_version">版本 %1$s</string>
+    <string name="plugins_from_app">来自 %1$s</string>
+    <string name="plugins_builtin">AgentOS 自带</string>
+    <string name="plugins_signature_line">签名 %1$s</string>
+    <string name="plugins_none">（无）</string>
+
+    <!-- 状态 -->
+    <string name="plugins_status_found_disabled">已发现，未启用</string>
+    <string name="plugins_status_unreachable">已启用，但连不上插件服务</string>
+    <string name="plugins_status_enabled">已启用</string>
+    <string name="plugins_status_sig_changed">需要重新确认：这个 App 的签名变了，已停用</string>
+    <string name="plugins_status_sig_unconfirmed">需要重新确认：AgentOS 记不清这个 App 之前的签名，已停用</string>
+    <string name="plugins_status_unavailable">不可用：%1$s</string>
+    <string name="plugins_unavailable_assets_missing">App 里没有找到插件包</string>
+    <string name="plugins_unavailable_manifest_rejected">插件清单不符合要求</string>
+    <string name="plugins_unavailable_no_usable_server">没有可用的插件服务</string>
+    <string name="plugins_unavailable_name_conflict">插件名与另一个插件重复</string>
+    <string name="plugins_unavailable_unknown">原因未知</string>
+    <string name="plugins_rejected_not_in_package">服务不在这个 App 里，已忽略</string>
+    <string name="plugins_rejected_not_exported">服务没有对 AgentOS 开放，已忽略</string>
+    <string name="plugins_rejected_missing_permission">服务没有要求 AgentOS 的绑定权限，已忽略</string>
+    <string name="plugins_rejected_unknown">服务不可用：%1$s</string>
+    <string name="plugins_server_connected">已连接</string>
+    <string name="plugins_server_idle">空闲（用到时连接）</string>
+    <string name="plugins_server_unreachable">连不上</string>
+    <string name="plugins_server_unreachable_reason">连不上：%1$s</string>
+    <string name="plugins_server_disabled">已停用</string>
+
+    <!-- 列表里的摘要 -->
+    <string name="plugins_summary_enable_to_view">启用后可查看工具</string>
+    <string name="plugins_summary_after_connect">工具在第一次连接后显示，点详情查看</string>
+    <plurals name="plugins_tools_count">
+        <item quantity="other">%1$d 个工具</item>
+    </plurals>
+    <plurals name="plugins_skills_count">
+        <item quantity="other">%1$d 个 Skill</item>
+    </plurals>
+    <string name="plugins_summary_join">%1$s，%2$s</string>
+
+    <!-- 风险与审批 -->
+    <string name="plugins_risk_read">只读</string>
+    <string name="plugins_risk_write">写操作</string>
+    <string name="plugins_risk_high">高风险（可能不可恢复）</string>
+    <string name="plugins_approval_high">每次确认（高风险，不能设为始终允许）</string>
+    <string name="plugins_approval_read">不需要确认（只读）</string>
+    <string name="plugins_approval_always">始终允许</string>
+    <string name="plugins_approval_ask">每次确认</string>
+
+    <!-- 问题行 -->
+    <string name="plugins_issue_problem">问题：%1$s</string>
+    <string name="plugins_issue_unsupported">不支持：%1$s</string>
+    <string name="plugins_issue_skill">Skill 问题：%1$s</string>
+    <string name="plugins_issue_rejected_server">已忽略服务「%1$s」：%2$s</string>
+    <string name="plugins_unsupported_body">%1$s（%2$s）</string>
+    <string name="plugins_located">%1$s：%2$s</string>
+
+    <!-- 策略文件 -->
+    <string name="plugins_policy_fail_closed">用户策略文件读不出来，也没有可用的副本：第三方插件一律按停用处理，不能修改设置。确认重置后全部恢复默认（现有第三方插件都会停用）。</string>
+    <string name="plugins_policy_previous">用户策略文件损坏，正在使用上一份有效的策略。</string>
+    <string name="plugins_policy_backup">用户策略文件损坏，正在使用备份。</string>
+    <string name="plugins_policy_other">用户策略文件有问题。</string>
+
+    <!-- 错误提示 -->
+    <string name="plugins_error_not_found">找不到这个插件或工具（可能刚被卸载），请刷新</string>
+    <string name="plugins_error_not_ready">插件服务还没准备好，稍后再试</string>
+    <string name="plugins_error_not_needed">这个插件的签名不需要重新确认</string>
+    <string name="plugins_error_high_risk">高风险工具不能设为“始终允许”</string>
+    <string name="plugins_error_bad_mode">不支持的审批方式</string>
+    <string name="plugins_error_generic">操作失败，请稍后再试</string>
+
+    <!-- 启用对话框 -->
+    <string name="plugins_who">「%1$s」（%2$s）</string>
+    <string name="plugins_enable_risk">插件的工具名称、描述和返回的结果都来自第三方，AgentOS 不能保证它们可信。AgentOS 会在每个写操作之前向你确认，高风险操作每次都要确认。</string>
+    <string name="plugins_enable_changed_title">重新确认并启用？</string>
+    <string name="plugins_enable_changed_message">%1$s 的签名与之前不同，可能是开发者换了签名，也可能是被别人换了安装包。\n\n包名：%2$s\n现在的签名：%3$s\n%4$s\n\n只有确认这个 App 来自你信任的来源时才继续。\n\n%5$s</string>
+    <string name="plugins_enable_prev_digest">之前的签名：%1$s</string>
+    <string name="plugins_enable_prev_never">之前的签名：从未确认过</string>
+    <string name="plugins_enable_changed_confirm">确认新签名并启用</string>
+    <string name="plugins_enable_unconfirmed_message">AgentOS 记不清 %1$s 之前确认过的签名（记录丢失或损坏），需要你重新确认。\n\n包名：%2$s\n现在的签名：%3$s\n\n只有确认这个 App 来自你信任的来源时才继续。\n\n%4$s</string>
+    <string name="plugins_enable_unconfirmed_confirm">确认签名并启用</string>
+    <string name="plugins_enable_builtin_title">启用插件？</string>
+    <string name="plugins_enable_builtin_message">启用 %1$s？这是 AgentOS 自带的插件。</string>
+    <string name="plugins_enable_confirm">启用</string>
+    <string name="plugins_enable_third_title">启用第三方插件？</string>
+    <string name="plugins_enable_third_message">%1$s 来自另一个 App，默认关闭。启用后，模型可以调用它提供的工具。\n\n签名：%2$s\n\n%3$s</string>
+
+    <!-- ================= 插件详情页 ================= -->
+    <string name="plugin_detail_title">插件详情</string>
+    <string name="plugin_detail_gone">这个插件已经不存在（可能刚被卸载）。</string>
+    <string name="plugin_detail_id">插件 ID：%1$s</string>
+    <string name="plugin_detail_locked">用户策略文件有问题，暂时不能修改设置。到“插件管理”页重置策略后再试。</string>
+    <string name="plugin_detail_issues_section">问题与不支持的项</string>
+    <string name="plugin_detail_servers_section">服务</string>
+    <string name="plugin_detail_no_servers">没有可用的服务。</string>
+    <string name="plugin_detail_unnamed_server">（未命名）</string>
+    <string name="plugin_detail_tools_section">工具</string>
+    <string name="plugin_detail_tools_after_enable">启用后可查看工具。</string>
+    <string name="plugin_detail_tools_none">现在没有可用的工具。</string>
+    <string name="plugin_detail_refresh">刷新</string>
+    <string name="plugin_detail_tool_switch_cd">启用工具 %1$s</string>
+    <string name="plugin_detail_risk_label">风险</string>
+    <string name="plugin_detail_approval_label">审批</string>
+    <string name="plugin_detail_set_always">设为始终允许</string>
+    <string name="plugin_detail_set_ask">改回每次确认</string>
+    <string name="plugin_detail_always_title">设为始终允许？</string>
+    <string name="plugin_detail_always_message">以后模型调用「%1$s」时不再逐次向你确认，这个工具会直接修改数据。工具的行为由第三方 App 决定，AgentOS 不能保证它可信。随时可以改回“每次确认”。</string>
+    <string name="plugin_detail_always_confirm">始终允许</string>
+
+    <!-- ================= 已授权的应用 ================= -->
+    <string name="callers_title">已授权的应用</string>
+    <string name="callers_intro">第三方 App 经 AgentOS 提问之前需要你允许。它用到的工具，每次都会再问你。</string>
+    <string name="callers_runtime_label">运行时</string>
+    <string name="callers_load_failed">读取失败，或运行时版本过旧不支持这一项。</string>
+    <string name="callers_apps_section">应用</string>
+    <string name="callers_empty">还没有第三方 App 请求过。</string>
+    <string name="callers_refresh">刷新</string>
+    <string name="callers_cancel">取消</string>
+    <string name="callers_package_line">包名：%1$s</string>
+    <string name="callers_package_hidden">%1$s（包名里有不合法的字符，已隐藏）</string>
+    <string name="callers_package_empty">（空）</string>
+    <string name="callers_digest_line">签名：%1$s</string>
+    <string name="callers_digest_unreadable">（无法读取）</string>
+    <string name="callers_error">操作失败，请稍后再试</string>
+
+    <string name="callers_state_allowed">已允许</string>
+    <string name="callers_state_pending">等待你决定（它在等 AgentOS 的授权提示）</string>
+    <string name="callers_state_denied">已拒绝</string>
+    <plurals name="callers_state_denied_cooldown">
+        <item quantity="other">已拒绝（%1$d 分钟内它再请求会直接被拒绝）</item>
+    </plurals>
+
+    <string name="callers_last_used">最近使用：%1$s</string>
+    <string name="callers_last_used_never">最近使用：从未使用</string>
+    <string name="callers_ago_just_now">刚刚</string>
+    <plurals name="callers_ago_minutes">
+        <item quantity="other">%1$d 分钟前</item>
+    </plurals>
+    <plurals name="callers_ago_hours">
+        <item quantity="other">%1$d 小时前</item>
+    </plurals>
+    <plurals name="callers_ago_days">
+        <item quantity="other">%1$d 天前</item>
+    </plurals>
+    <plurals name="callers_usage_total">
+        <item quantity="other">用量：共 %1$d 次</item>
+    </plurals>
+    <plurals name="callers_usage_total_hour">
+        <item quantity="other">用量：共 %1$d 次，最近一小时 %2$d 次</item>
+    </plurals>
+
+    <string name="callers_action_revoke">撤销授权</string>
+    <string name="callers_action_allow">允许</string>
+    <string name="callers_action_allow_denied">改为允许</string>
+    <string name="callers_action_deny">拒绝</string>
+    <string name="callers_action_remove">移除记录</string>
+
+    <string name="callers_who">「%1$s」\n%2$s\n%3$s</string>
+    <string name="callers_allow_explanation">它可以让 AgentOS 替你回答问题；它用到的工具，每次都会再问你。</string>
+    <string name="callers_revoke_title">撤销授权？</string>
+    <string name="callers_revoke_message">%1$s\n\n它现有的连接会立即断开，进行中的任务会取消。10 分钟内它再请求会直接被拒绝，之后会重新询问你。</string>
+    <string name="callers_revoke_confirm">撤销</string>
+    <string name="callers_deny_title">拒绝？</string>
+    <string name="callers_deny_message">%1$s\n\n10 分钟内它再请求会直接被拒绝，之后会重新询问你。</string>
+    <string name="callers_deny_confirm">拒绝</string>
+    <string name="callers_allow_title">改为允许？</string>
+    <string name="callers_allow_message">%1$s\n\n%2$s\n\n只有确认这个 App 来自你信任的来源时才允许。</string>
+    <string name="callers_allow_confirm">允许</string>
+    <string name="callers_remove_title">移除记录？</string>
+    <string name="callers_remove_message">%1$s\n\n移除后，它下次请求使用 AgentOS 时会重新询问你。</string>
+    <string name="callers_remove_confirm">移除</string>
+
+    <!-- ================= core/extensions 的校验信息（key 与 ExtMessages 同名；参数是第三方文字，已清理） ================= -->
+    <string name="ext_msg_not_json">不是合法的 JSON</string>
+    <string name="ext_msg_root_not_object">根必须是 JSON 对象</string>
+    <string name="ext_msg_missing_required">缺少必填项 %1$s</string>
+    <string name="ext_msg_must_be_value">必须是 %1$s</string>
+    <string name="ext_msg_must_be_string">必须是字符串</string>
+    <string name="ext_msg_must_be_object">必须是对象</string>
+    <string name="ext_msg_must_be_string_array">必须是字符串数组</string>
+    <string name="ext_msg_must_be_nonempty_string">必须是非空字符串</string>
+    <string name="ext_msg_must_be_string_map">必须是 字符串 → 字符串 的对象</string>
+    <string name="ext_msg_field_not_allowed">不允许的字段</string>
+    <string name="ext_msg_plugin_field_not_allowed">不允许的字段（Agent Plugins 1.0 的 plugin.json 只有固定的几个顶层字段，客户端专属内容放在 extensions 下）</string>
+    <string name="ext_msg_stdio_field_not_allowed">stdio 服务器不允许的字段</string>
+    <string name="ext_msg_name_length">长度必须在 1 到 %1$s 个字符之间</string>
+    <string name="ext_msg_name_pattern" tools:ignore="TypographyDashes">只能用小写字母、数字、`.`、`-`，首尾必须是字母或数字，不能出现 `--` 或 `..`</string>
+    <string name="ext_msg_section_must_be_object">每个分区必须是对象</string>
+    <string name="ext_msg_binder_not_allowed">导入的插件包不能声明本地 App 的 Binder 服务（只有已安装 App 内嵌的插件可以）</string>
+    <string name="ext_msg_org_servers_shape">必须是对象：服务器名 → { \"service\": \"&lt;Service 完整类名&gt;\" }</string>
+    <string name="ext_msg_org_server_shape">必须是对象 { \"service\": \"&lt;Service 完整类名&gt;\" }</string>
+    <string name="ext_msg_server_name_empty">服务器名不能为空</string>
+    <string name="ext_msg_service_class_name">必须是 Service 的完整类名（非空、不含空白）</string>
+    <string name="ext_msg_duplicate_server">服务器名「%1$s」在同一个插件里出现了不止一次</string>
+    <string name="ext_msg_server_type_missing">缺少 type（stdio、streamable-http、sse 之一）</string>
+    <string name="ext_msg_server_type_unknown">未知的服务器类型「%1$s」（只有 stdio、streamable-http、sse）</string>
+    <string name="ext_msg_env_reserved">PLUGIN_ROOT、PLUGIN_DATA 是保留的环境变量名</string>
+    <string name="ext_msg_cwd_prefix">必须以 ./、${PLUGIN_ROOT} 或 ${PLUGIN_DATA} 开头</string>
+    <string name="ext_msg_icon_path_unsafe">图标路径「%1$s」必须以 ./ 开头，并且不能跑出插件根目录</string>
+    <string name="ext_msg_stdio_unsupported">stdio 服务器需要在手机上启动进程和解释器，AgentOS 不支持</string>
+    <string name="ext_msg_sse_unsupported">旧的 HTTP+SSE 传输，AgentOS 只支持 Streamable HTTP</string>
+    <string name="ext_msg_url_invalid">不是合法的地址</string>
+    <string name="ext_msg_url_not_https">只支持 https:// 地址</string>
+    <string name="ext_msg_url_no_host">地址里没有主机名</string>
+    <string name="ext_msg_url_userinfo">地址里不能带用户名和密码</string>
+
+    <string name="ext_msg_assets_not_declared">插件的 Service 没有声明 org.agentos.plugin.assets，找不到插件包</string>
+    <string name="ext_msg_assets_no_plugin_json">assets/%1$s 里没有 plugin.json</string>
+    <string name="ext_msg_server_rejected_not_in_package">服务器「%1$s」（Service 类「%2$s」）被拒绝：这个 Service 不属于这个 App</string>
+    <string name="ext_msg_server_rejected_not_exported">服务器「%1$s」（Service 类「%2$s」）被拒绝：这个 Service 没有导出</string>
+    <string name="ext_msg_server_rejected_missing_permission">服务器「%1$s」（Service 类「%2$s」）被拒绝：这个 Service 没有要求 %3$s</string>
+    <string name="ext_msg_signature_changed">这个 App 的签名变了：已停用，需要重新确认后才能启用</string>
+    <string name="ext_msg_signature_unconfirmed">没有这个 App 的签名记录（记忆丢失）：已停用，需要重新确认后才能启用</string>
+    <string name="ext_msg_no_usable_server">声明的服务器都不能用，插件没有可用的内容</string>
+    <string name="ext_msg_name_conflict">插件名「%1$s」已被占用或是保留的名字</string>
+
+    <string name="ext_msg_skill_no_frontmatter" tools:ignore="TypographyDashes">SKILL.md 没有 frontmatter（文件要以 --- 开头，写上 name 和 description）</string>
+    <string name="ext_msg_skill_frontmatter_unclosed" tools:ignore="TypographyDashes">SKILL.md 的 frontmatter 没有结束（缺少第二个 ---），或者太长</string>
+    <string name="ext_msg_skill_key_duplicate">frontmatter 里的 %1$s 重复了，只用第一个</string>
+    <string name="ext_msg_skill_name_missing">frontmatter 里没有 name</string>
+    <string name="ext_msg_skill_description_missing">frontmatter 里没有 description</string>
+    <string name="ext_msg_skill_double_quote_unclosed">frontmatter 里 %1$s 的双引号没有闭合</string>
+    <string name="ext_msg_skill_single_quote_unclosed">frontmatter 里 %1$s 的单引号没有闭合</string>
+    <string name="ext_msg_skill_file_unreadable">读不了 SKILL.md</string>
+    <string name="ext_msg_skill_file_error">读 SKILL.md 时出错</string>
+    <string name="ext_msg_skill_file_missing">插件包里没有 SKILL.md</string>
+    <string name="ext_msg_skill_file_not_text">SKILL.md 不是文本文件</string>
+    <string name="ext_msg_skill_name_invalid">name「%1$s」不合法（只能用字母、数字、`.`、`_`、`-`，最长 64 个字符，以字母或数字开头），改用目录名</string>
+    <string name="ext_msg_skill_dir_invalid">目录名「%1$s」也不能当 Skill 名，这个 Skill 被跳过</string>
+</resources>

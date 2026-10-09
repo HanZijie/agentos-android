@@ -2,6 +2,7 @@ package org.agentos.app.agent.consent
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -13,15 +14,20 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import org.agentos.runtime.consent.ConsentChoice
 import org.agentos.runtime.consent.ConsentEnd
+import org.agentos.runtime.consent.ConsentMessages
 import org.agentos.runtime.consent.ConsentResolution
 import org.agentos.runtime.consent.ConsentSeverity
 import org.agentos.runtime.consent.ConsentView
+import org.agentos.runtime.i18n.MessageRef
 
 /**
  * `:agent` ↔ 主进程之间的确认数据（[org.agentos.internal.IConsentListener]）：纯 Kotlin，可在电脑上单测（ConsentWireTest）。
  *
  * [ConsentView] 里所有第三方文字已由协调器清理；这里只搬运，不再解释。主进程收到的 JSON 当不可信输入读：缺字段、类型不对、
  * 选项名不认识都按“这条请求不显示”处理（[parseCard] 返回 null），不会崩。
+ *
+ * 核心层给的文案是 [MessageRef]（key + 参数），原样过 IPC（`{"key":"…","args":["…"]}`），主进程按自己的界面语言渲染（`Strings.get(ref)`）；
+ * 这里不生成任何自然语言。
  */
 object ConsentWire {
     private val json = Json { ignoreUnknownKeys = true }
@@ -57,18 +63,18 @@ object ConsentWire {
     /** 主进程显示用的一条待确认请求。和 [ConsentView] 一一对应，只保留界面要的字段。 */
     data class Card(
         override val requestId: String,
-        val title: String,
-        val initiatorLine: String,
+        val title: MessageRef,
+        val initiatorLine: MessageRef,
         val callerKind: String,
         val callerPackage: String?,
-        val sourceLine: String?,
+        val sourceLine: MessageRef?,
         val toolDisplayName: String,
         val argumentsPreview: String,
         val argumentsTruncated: Boolean,
         val risk: String,
         val severity: ConsentSeverity,
-        val riskLabel: String,
-        val riskDescription: String,
+        val riskLabel: MessageRef,
+        val riskDescription: MessageRef,
         val options: List<Option>,
         override val deadlineMillis: Long,
         val timeoutMillis: Long,
@@ -81,33 +87,33 @@ object ConsentWire {
         fun allowsOnce(): Boolean = options.any { it.choice == ConsentChoice.ALLOW_ONCE }
     }
 
-    data class Option(val choice: ConsentChoice, val label: String, val destructive: Boolean)
+    data class Option(val choice: ConsentChoice, val label: MessageRef, val destructive: Boolean)
 
-    data class Resolution(val end: ConsentEnd, val choice: ConsentChoice?, val notice: String?)
+    data class Resolution(val end: ConsentEnd, val choice: ConsentChoice?, val notice: MessageRef?)
 
     // ---------------------------------------------------------------- :agent 侧：编码
 
     fun encodeView(v: ConsentView): JsonObject = buildJsonObject {
         put("requestId", v.requestId)
-        put("title", v.title)
-        put("initiatorLine", v.initiatorLine)
+        put("title", encodeRef(v.title))
+        put("initiatorLine", encodeRef(v.initiatorLine))
         put("callerKind", v.caller.kind.name)
         put("callerPackage", v.caller.packageName)
-        put("sourceLine", v.sourceLine)
+        put("sourceLine", v.sourceLine?.let { encodeRef(it) } ?: JsonNull)
         put("toolDisplayName", v.toolDisplayName)
         put("argumentsPreview", v.argumentsPreview)
         put("argumentsTruncated", v.argumentsTruncated)
         put("risk", v.risk.name)
         put("severity", v.severity.name)
-        put("riskLabel", v.riskLabel)
-        put("riskDescription", v.riskDescription)
+        put("riskLabel", encodeRef(v.riskLabel))
+        put("riskDescription", encodeRef(v.riskDescription))
         put(
             "options",
             JsonArray(
                 v.options.map {
                     buildJsonObject {
                         put("choice", it.choice.name)
-                        put("label", it.label)
+                        put("label", encodeRef(it.label))
                         put("destructive", it.destructive)
                     }
                 },
@@ -117,6 +123,22 @@ object ConsentWire {
         put("timeoutMillis", v.timeoutMillis)
         put("queuePosition", v.queuePosition)
         put("queueSize", v.queueSize)
+    }
+
+    /** 一句核心层文案：key 和参数。 */
+    fun encodeRef(r: MessageRef): JsonObject = buildJsonObject {
+        put("key", r.key)
+        put("args", JsonArray(r.args.map { JsonPrimitive(it) }))
+    }
+
+    private fun ref(o: JsonObject, k: String): MessageRef? = refOf(o[k])
+
+    /** 读不懂（不是对象、没有 key、参数里有非字符串）返回 null。 */
+    fun refOf(e: JsonElement?): MessageRef? {
+        val o = e as? JsonObject ?: return null
+        val key = str(o, "key")?.takeIf { it.isNotEmpty() } ?: return null
+        val args = (o["args"] as? JsonArray)?.map { a -> (a as? JsonPrimitive)?.takeIf { it !is JsonNull && it.isString }?.contentOrNull ?: return null }.orEmpty()
+        return MessageRef(key, args)
     }
 
     fun encodeViews(views: List<ConsentView>): String = JsonArray(views.map { encodeView(it) }).toString()
@@ -146,7 +168,7 @@ object ConsentWire {
     fun encodeResolution(r: ConsentResolution): String = buildJsonObject {
         put("end", r.end.name)
         put("choice", r.choice?.name)
-        put("notice", r.notice)
+        put("notice", r.notice?.let { encodeRef(it) } ?: JsonNull)
     }.toString()
 
     const val KIND_AUTH = "authorization"
@@ -195,7 +217,7 @@ object ConsentWire {
         Resolution(
             end = ConsentEnd.valueOf(str(o, "end") ?: return null),
             choice = str(o, "choice")?.let { name -> ConsentChoice.entries.firstOrNull { it.name == name } },
-            notice = str(o, "notice"),
+            notice = ref(o, "notice"),
         )
     } catch (e: Exception) {
         null
@@ -209,24 +231,25 @@ object ConsentWire {
         val options = ((o["options"] as? JsonArray) ?: return null).mapNotNull { e ->
             val eo = e as? JsonObject ?: return@mapNotNull null
             val choice = parseChoice(str(eo, "choice")) ?: return@mapNotNull null
-            Option(choice, str(eo, "label") ?: return@mapNotNull null, (eo["destructive"] as? JsonPrimitive)?.boolean == true)
+            Option(choice, ref(eo, "label") ?: return@mapNotNull null, (eo["destructive"] as? JsonPrimitive)?.boolean == true)
         }
         // 总有“允许一次”和“拒绝”（协调器保证）；缺了说明数据不对，不显示
         if (options.none { it.choice == ConsentChoice.DENY } || options.none { it.choice == ConsentChoice.ALLOW_ONCE }) return null
         return Card(
             requestId = str(o, "requestId")?.takeIf { it.isNotEmpty() } ?: return null,
-            title = str(o, "title") ?: return null,
-            initiatorLine = str(o, "initiatorLine") ?: return null,
+            title = ref(o, "title") ?: return null,
+            initiatorLine = ref(o, "initiatorLine") ?: return null,
             callerKind = str(o, "callerKind") ?: return null,
             callerPackage = str(o, "callerPackage"),
-            sourceLine = str(o, "sourceLine"),
+            sourceLine = ref(o, "sourceLine"),
             toolDisplayName = str(o, "toolDisplayName") ?: return null,
             argumentsPreview = str(o, "argumentsPreview").orEmpty(),
             argumentsTruncated = (o["argumentsTruncated"] as? JsonPrimitive)?.boolean == true,
             risk = str(o, "risk") ?: return null,
             severity = ConsentSeverity.entries.firstOrNull { it.name == str(o, "severity") } ?: ConsentSeverity.CRITICAL, // 不认识就按最醒目的显示
-            riskLabel = str(o, "riskLabel").orEmpty(),
-            riskDescription = str(o, "riskDescription").orEmpty(),
+            // 读不懂风险文案时按最醒目的高风险显示（和 severity 一致）：不显示空白
+            riskLabel = ref(o, "riskLabel") ?: MessageRef.of(ConsentMessages.RISK_HIGH),
+            riskDescription = ref(o, "riskDescription") ?: MessageRef.of(ConsentMessages.RISK_DESC_HIGH),
             options = options,
             deadlineMillis = (o["deadlineMillis"] as? JsonPrimitive)?.long ?: return null,
             timeoutMillis = (o["timeoutMillis"] as? JsonPrimitive)?.long ?: 60_000L,

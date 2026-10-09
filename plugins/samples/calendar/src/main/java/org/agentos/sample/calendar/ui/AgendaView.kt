@@ -24,9 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -40,14 +38,18 @@ import org.agentos.sample.calendar.data.Occurrence
 fun AgendaTab(
     data: CalendarData,
     fmt: Fmt,
+    horizon: Int,
+    onHorizon: (Int) -> Unit,
     onOpenEvent: (Occurrence) -> Unit,
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var horizon by remember { mutableIntStateOf(60) }
     val byDay = remember(data, horizon) { data.byDay(data.today, data.today.plusDays(horizon.toLong() - 1)) }
     val days = remember(byDay) { byDay.keys.sorted() }
     val list = rememberLazyListState()
+    // 视窗是后台加载的：还没覆盖到这段时间时，既不判“空”也不继续往后展开
+    val loaded = data.covers(data.today, data.today.plusDays(horizon.toLong() - 1))
+    if (!loaded) return
 
     if (days.isEmpty() && horizon >= 360) {
         EmptyState(stringResource(R.string.empty_agenda_title), stringResource(R.string.empty_agenda_hint), modifier.fillMaxSize()) {
@@ -60,7 +62,7 @@ fun AgendaTab(
         return
     }
     if (days.isEmpty()) {
-        LaunchedEffect(horizon) { horizon = (horizon * 2).coerceAtMost(720) }
+        LaunchedEffect(horizon) { onHorizon((horizon * 2).coerceAtMost(720)) }
     }
 
     LazyColumn(modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 112.dp)) {
@@ -83,7 +85,7 @@ fun AgendaTab(
         }
         if (days.isNotEmpty() && horizon < 720) {
             item(key = "more") {
-                LaunchedEffect(horizon) { horizon = (horizon + 60).coerceAtMost(720) }
+                LaunchedEffect(horizon) { onHorizon((horizon + 60).coerceAtMost(720)) }
                 Spacer(Modifier.height(1.dp))
             }
         }

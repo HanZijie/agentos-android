@@ -3,6 +3,7 @@ package org.agentos.runtime.consent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.Clock
 import org.agentos.runtime.ports.ToolRisk
 
@@ -42,13 +43,13 @@ class AutoConsentResponder(
         val requestId: String,
         val toolName: String,
         val risk: ToolRisk,
-        val sourceLine: String?,
+        val sourceLine: MessageRef?,
         val argumentsSummary: String,
         val options: List<ConsentChoice>,
         val atMillis: Long,
         val answeredWith: ConsentChoice? = null,
         val end: ConsentEnd? = null,
-        val notice: String? = null,
+        val notice: MessageRef? = null,
     )
 
     @Volatile var mode: Mode = Mode.OFF

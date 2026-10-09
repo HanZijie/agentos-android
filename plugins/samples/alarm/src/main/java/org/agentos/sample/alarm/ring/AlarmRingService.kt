@@ -116,11 +116,11 @@ class AlarmRingService : Service() {
         finish()
     }
 
-    internal fun snooze() {
+    internal fun snooze(minutes: Int? = null) {
         val alarm = current ?: return
         try {
-            AlarmGraph.get(this).repository.snooze(alarm.id)
-            Log.i(SystemAlarmScheduler.TAG, "snoozed alarm ${alarm.id} for ${alarm.snoozeMinutes} min")
+            AlarmGraph.get(this).repository.snooze(alarm.id, minutes)
+            Log.i(SystemAlarmScheduler.TAG, "snoozed alarm ${alarm.id} for ${minutes ?: alarm.snoozeMinutes} min")
         } catch (e: Exception) {
             Log.w(SystemAlarmScheduler.TAG, "snooze failed: ${e.message}")
         }

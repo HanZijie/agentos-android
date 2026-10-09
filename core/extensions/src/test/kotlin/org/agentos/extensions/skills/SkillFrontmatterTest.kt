@@ -1,5 +1,7 @@
 package org.agentos.extensions.skills
 
+import org.agentos.extensions.ExtMessages
+import org.agentos.runtime.i18n.MessageRef
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -50,13 +52,15 @@ class SkillFrontmatterTest {
             assertNull(p.name, text)
             assertTrue(p.problems.isNotEmpty(), text)
         }
+        assertEquals(listOf(MessageRef.of(ExtMessages.SKILL_NO_FRONTMATTER)), parse("no frontmatter at all").problems)
+        assertEquals(listOf(MessageRef.of(ExtMessages.SKILL_FRONTMATTER_UNCLOSED)), parse("---\nname: a\ndescription: d\n").problems)
     }
 
     @Test
     fun `garbage inside the frontmatter does not throw and keeps what is readable`() {
         val p = parse("---\n: : :\n\u0001\u0002\nname: ok\n- - -\n{{{\ndescription: \"unterminated\n---\n")
         assertEquals("ok", p.name)
-        assertTrue(p.problems.any { it.contains("双引号") })
+        assertTrue(p.problems.contains(MessageRef.of(ExtMessages.SKILL_DOUBLE_QUOTE_UNCLOSED, "description")))
         // 二进制垃圾也不抛
         val junk = String(ByteArray(2_000) { (it * 31).toByte() }, Charsets.ISO_8859_1)
         parse("---\n$junk\n---\n")
@@ -67,17 +71,17 @@ class SkillFrontmatterTest {
     fun `duplicate keys use the first one and report it`() {
         val p = parse("---\nname: first\nname: second\ndescription: d\n---\n")
         assertEquals("first", p.name)
-        assertTrue(p.problems.any { it.contains("重复") })
+        assertTrue(p.problems.contains(MessageRef.of(ExtMessages.SKILL_KEY_DUPLICATE, "name")))
     }
 
     @Test
     fun `missing name or description is reported`() {
         val noName = parse("---\ndescription: d\n---\n")
         assertNull(noName.name)
-        assertTrue(noName.problems.any { it.contains("没有 name") })
+        assertTrue(noName.problems.contains(MessageRef.of(ExtMessages.SKILL_NAME_MISSING)))
         val noDesc = parse("---\nname: a\n---\n")
         assertNull(noDesc.description)
-        assertTrue(noDesc.problems.any { it.contains("没有 description") })
+        assertTrue(noDesc.problems.contains(MessageRef.of(ExtMessages.SKILL_DESCRIPTION_MISSING)))
         assertNull(parse("---\nname:\ndescription: d\n---\n").name)
     }
 

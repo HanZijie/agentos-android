@@ -53,6 +53,7 @@ import androidx.compose.material.icons.rounded.FormatQuote
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -414,7 +415,7 @@ private fun DoneBody(state: ScheduleState.Done, actions: Actions) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.CheckCircle, null, Modifier.size(22.dp), tint = scheme.primary)
                 Spacer(Modifier.width(10.dp))
-                Text(createdHeadline(summary.eventCount, summary.alarmCount), style = MaterialTheme.typography.titleMedium, color = scheme.onSurface)
+                Text(createdHeadline(summary.eventCount, summary.alarmCount, summary.todoCount), style = MaterialTheme.typography.titleMedium, color = scheme.onSurface)
             }
         } else {
             Text(stringResource(R.string.agent_done_nothing_title), style = MaterialTheme.typography.titleMedium, color = scheme.onSurface)
@@ -470,13 +471,16 @@ private fun DoneBody(state: ScheduleState.Done, actions: Actions) {
 }
 
 @Composable
-private fun createdHeadline(events: Int, alarms: Int): String {
-    val e = pluralStringResource(R.plurals.agent_done_events, events, events)
-    val a = pluralStringResource(R.plurals.agent_done_alarms, alarms, alarms)
-    return when {
-        events > 0 && alarms > 0 -> stringResource(R.string.agent_done_headline_both, e, a)
-        events > 0 -> stringResource(R.string.agent_done_headline_one, e)
-        else -> stringResource(R.string.agent_done_headline_one, a)
+private fun createdHeadline(events: Int, alarms: Int, todos: Int): String {
+    val parts = buildList {
+        if (events > 0) add(pluralStringResource(R.plurals.agent_done_events, events, events))
+        if (todos > 0) add(pluralStringResource(R.plurals.agent_done_todos, todos, todos))
+        if (alarms > 0) add(pluralStringResource(R.plurals.agent_done_alarms, alarms, alarms))
+    }
+    return when (parts.size) {
+        3 -> stringResource(R.string.agent_done_headline_three, parts[0], parts[1], parts[2])
+        2 -> stringResource(R.string.agent_done_headline_both, parts[0], parts[1])
+        else -> stringResource(R.string.agent_done_headline_one, parts.firstOrNull() ?: pluralStringResource(R.plurals.agent_done_alarms, 0, 0))
     }
 }
 
@@ -589,11 +593,13 @@ private fun ToolCard(item: ScheduleItem) {
     val title = when (item.kind) {
         ItemKind.EVENT -> item.event?.title ?: stringResource(R.string.agent_item_event)
         ItemKind.ALARM -> item.alarm?.let { it.label.ifBlank { stringResource(R.string.agent_alarm_unlabeled) } } ?: stringResource(R.string.agent_item_alarm)
+        ItemKind.TODO -> item.todo?.title ?: stringResource(R.string.agent_item_todo)
         ItemKind.OTHER -> stringResource(R.string.agent_item_other)
     }
     val detail = when (item.kind) {
         ItemKind.EVENT -> item.event?.let { ScheduleFormat.eventWhen(context, it) }
         ItemKind.ALARM -> item.alarm?.let { ScheduleFormat.alarmWhen(context, it) }
+        ItemKind.TODO -> item.todo?.let { ScheduleFormat.todoDue(context, it) }
         ItemKind.OTHER -> null
     }
     Surface(shape = RoundedCornerShape(18.dp), color = container, border = BorderStroke(1.dp, scheme.outlineVariant)) {
@@ -603,6 +609,7 @@ private fun ToolCard(item: ScheduleItem) {
                     when (item.kind) {
                         ItemKind.EVENT -> Icons.Rounded.Event
                         ItemKind.ALARM -> Icons.Rounded.Alarm
+                        ItemKind.TODO -> Icons.Rounded.TaskAlt
                         ItemKind.OTHER -> Icons.Rounded.Build
                     },
                     null,

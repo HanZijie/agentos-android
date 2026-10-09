@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "sms",
+  "version": "1.0.0",
+  "description": "Read, search and send text messages (SMS) on this phone. Message text the agent reads becomes part of the chat history and is sent to the model endpoint configured in AgentOS. Sending is high risk: every send is confirmed by the user, one recipient at a time, and verification codes are masked by default.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "短信"
+      }
+    },
+    "org.agentos": {
+      "mcpServers": {
+        "sms": {
+          "service": "org.agentos.sample.sms.agent.SmsMcpService"
+        }
+      }
+    }
+  }
+}

@@ -19,6 +19,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.Alarm">
 
@@ -30,6 +31,36 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 系统标准 Intent：显示闹钟列表（AlarmClock.ACTION_SHOW_ALARMS，官方不要求权限） -->
+            <intent-filter>
+                <action android:name="android.intent.action.SHOW_ALARMS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          系统标准闹钟 Intent（AlarmClock）：设置、关闭、贪睡。官方要求接收这些 Intent 的 Activity 声明
+          com.android.alarm.permission.SET_ALARM（普通权限，调用方在清单里声明即可）；必须带 DEFAULT category 才能被 startActivity 的隐式 Intent 找到。
+          没有界面（NoDisplay），处理完立刻结束；不进最近任务。不处理计时器（本 App 没有计时器）。
+        -->
+        <activity
+            android:name=".intent.AlarmIntentActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:permission="com.android.alarm.permission.SET_ALARM"
+            android:theme="@style/Theme.Alarm.Handler">
+            <intent-filter>
+                <action android:name="android.intent.action.SET_ALARM" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DISMISS_ALARM" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SNOOZE_ALARM" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 

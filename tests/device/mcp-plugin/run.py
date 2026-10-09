@@ -264,7 +264,7 @@ def case_enable(c):
         "knownToolShape": bool(tools) and all(list(t.keys()) == KNOWN_TOOL_KEYS for t in tools.values()),
         "serverConnected": (p.get("servers") or [{}])[0].get("state") in ("connected", "idle") and p.get("toolCount") == 7,
         "skills": set(skills) == {"greet", "broken"} and p.get("skillCount") == 2,
-        "skillProblem": any("broken" in x.get("message", "") for x in p.get("skillProblems", [])),
+        "skillProblem": any(x.get("location") == "broken" for x in p.get("skillProblems", [])),
         "skillFileRead": "marker 7f3a" in (skill.get("skill") or {}).get("text", ""),
         "skillPathRejected": "bad_path" in str(bad.get("error")),
     }

@@ -67,6 +67,7 @@ fun HomeScreen(
     vm: CalendarViewModel,
     data: CalendarData,
     fmt: Fmt,
+    permission: CalendarPermissionState,
     onOpen: (Occurrence) -> Unit,
     onAdd: (startMs: Long?, allDay: Boolean) -> Unit,
     onSearch: () -> Unit,
@@ -77,8 +78,8 @@ fun HomeScreen(
     var visibleWeek by remember { mutableStateOf(weekStartOf(vm.selectedDate, data.firstDayOfWeek)) }
     var canPost by remember { mutableStateOf(ReminderNotifications.canPost(context)) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { canPost = ReminderNotifications.canPost(context) }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { canPost = it }
-    val anyReminders = remember(data.events) { data.events.any { it.reminders.isNotEmpty() } }
+    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { canPost = it }
+    val anyReminders = data.hasLocalReminders
 
     val title = when (vm.tab) {
         HomeTab.Month -> TitleKey(fmt.yearText(visibleMonth), fmt.monthName(visibleMonth), visibleMonth.year * 12L + visibleMonth.monthValue)
@@ -110,6 +111,7 @@ fun HomeScreen(
                     IconButton(onClick = onSearch) { Icon(Icons.Rounded.Search, stringResource(R.string.action_search)) }
                     IconButton(onClick = onCalendars) { Icon(Icons.Rounded.Layers, stringResource(R.string.action_calendars)) }
                 }
+                if (!permission.granted) CalendarPermissionBanner(permission, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 if (!canPost && anyReminders) {
                     Surface(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -120,7 +122,7 @@ fun HomeScreen(
                             Icon(Icons.Rounded.NotificationsOff, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
                             Spacer(Modifier.width(10.dp))
                             Text(stringResource(R.string.notif_banner), Modifier.weight(1f).padding(vertical = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                            TextButton(onClick = { permission.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text(stringResource(R.string.notif_banner_action)) }
+                            TextButton(onClick = { notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text(stringResource(R.string.notif_banner_action)) }
                         }
                     }
                 }
@@ -168,7 +170,7 @@ fun HomeScreen(
                         onOpenEvent = onOpen,
                         onCreateAt = { onAdd(it, false) },
                     )
-                    HomeTab.Agenda -> AgendaTab(data, fmt, onOpen, onAdd = { onAdd(null, false) })
+                    HomeTab.Agenda -> AgendaTab(data, fmt, vm.agendaDays, { vm.agendaDays = it }, onOpen, onAdd = { onAdd(null, false) })
                 }
             }
         }

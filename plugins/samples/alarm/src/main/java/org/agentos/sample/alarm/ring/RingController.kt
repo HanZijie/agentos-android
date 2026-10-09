@@ -26,9 +26,9 @@ object RingController : RingControl {
         return alarm
     }
 
-    override fun snooze(): Alarm? {
+    override fun snooze(minutes: Int?): Alarm? {
         val alarm = state.value ?: return null
-        main.post { service?.snooze() }
+        main.post { service?.snooze(minutes) }
         return alarm
     }
 }

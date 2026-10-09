@@ -61,7 +61,7 @@ class CalendarRepositoryTest {
         repo.saveEvent(timed(id = "", title = "B", start = "2026-10-09T10:00", end = "2026-10-09T11:00", calendarId = work.id))
         repo.saveEvent(timed(id = "", title = "C", start = "2026-10-09T10:00", end = "2026-10-09T11:00", calendarId = repo.defaultCalendar.id))
         assertEquals(2, repo.deleteCalendar(work.id))
-        assertEquals(listOf("C"), repo.events.value.map { it.title })
+        assertEquals(listOf("C"), repo.localEvents.value.map { it.title })
         assertNull(repo.calendar(work.id))
         expectError("default calendar cannot be deleted") { repo.deleteCalendar(repo.defaultCalendar.id) }
         expectError("not found") { repo.deleteCalendar("nope") }
@@ -75,13 +75,13 @@ class CalendarRepositoryTest {
         assertEquals("Dentist", created.title)
         assertEquals(listOf(10, 30), created.reminders)
         assertEquals(1_000, created.createdAt)
-        assertEquals(created, repo.events.first().single())
+        assertEquals(created, repo.localEvents.first().single())
         time.now = 5_000
         val edited = repo.saveEvent(created.copy(title = "Dentist!"))
         assertEquals(created.id, edited.id)
         assertEquals(1_000, edited.createdAt)
         assertEquals(5_000, edited.updatedAt)
-        assertEquals(1, repo.events.value.size)
+        assertEquals(1, repo.localEvents.value.size)
         assertEquals("Dentist!", repo.event(created.id)!!.title)
     }
 
@@ -100,7 +100,7 @@ class CalendarRepositoryTest {
         val day = allDay(id = "", start = "2026-10-08")
         expectError("end date") { repo.saveEvent(day.copy(endDay = day.startDay - 1)) }
         expectError("recurrence_until") { repo.saveEvent(day.copy(recurrence = Recurrence.WEEKLY, recurrenceUntilUtc = ms("2026-10-01T00:00:00+08:00"))) }
-        assertTrue(repo.events.value.isEmpty())
+        assertTrue(repo.localEvents.value.isEmpty())
     }
 
     @Test fun untilIsDroppedWhenNotRecurring() {
@@ -121,7 +121,7 @@ class CalendarRepositoryTest {
         val e = repo.saveEvent(timed(id = "", title = "Gone soon", start = "2026-10-08T10:00", end = "2026-10-08T11:00", recurrence = Recurrence.DAILY))
         val removed = repo.deleteEvent("${e.id}@20261009T020000Z") // 用某一次出现的 id 删除 = 删整个系列
         assertEquals(e, removed)
-        assertTrue(repo.events.value.isEmpty())
+        assertTrue(repo.localEvents.value.isEmpty())
         expectError("not found") { repo.deleteEvent(e.id) }
         repo.restoreEvent(removed)
         assertEquals(e, repo.event(e.id))
