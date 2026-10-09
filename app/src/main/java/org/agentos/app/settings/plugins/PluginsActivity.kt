@@ -18,7 +18,7 @@ class PluginsActivity : PluginPage() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val (root, col) = Ui.page(this, "插件管理")
+        val (root, col) = Ui.page(this, strings.get(R.string.plugins_title))
         column = col
         setContentView(root)
     }
@@ -34,12 +34,12 @@ class PluginsActivity : PluginPage() {
         scope?.launch {
             val snap = try {
                 host.use {
-                    val list = Plugins.parsePlugins(if (rescan) it.rescan() else it.listPlugins())
+                    val list = Plugins.withAppLabels(Plugins.parsePlugins(if (rescan) it.rescan() else it.listPlugins()), ::appLabelOf)
                     val policy = runCatching { Plugins.parsePolicy(it.policyStatus) }.getOrNull()
                     Snapshot(list, policy, null)
                 }
             } catch (e: Exception) {
-                Snapshot(emptyList(), null, Plugins.errorText(e.message))
+                Snapshot(emptyList(), null, Plugins.errorText(e.message, strings))
             }
             locked = snap.policy?.let { it.corrupt && it.failClosed } == true
             render(snap)
@@ -48,39 +48,39 @@ class PluginsActivity : PluginPage() {
 
     private fun render(s: Snapshot) {
         column.removeAllViews()
-        s.error?.let { column.addView(Ui.card(this).apply { addView(Ui.line(context, "插件服务", it, warn = true)) }) }
-        column.addView(Ui.paragraph(this, "插件是别的 App 提供给 AgentOS 模型调用的工具。第三方插件默认关闭；启用后，写操作每次都会先向你确认。"))
+        s.error?.let { column.addView(Ui.card(this).apply { addView(Ui.line(context, strings.get(R.string.plugins_service_label), it, warn = true)) }) }
+        column.addView(Ui.paragraph(this, strings.get(R.string.plugins_intro)))
 
         s.policy?.let { p ->
-            Plugins.policyText(p)?.let { text ->
-                column.addView(Ui.sectionTitle(this, "策略文件"))
+            Plugins.policyText(p, strings)?.let { text ->
+                column.addView(Ui.sectionTitle(this, strings.get(R.string.plugins_policy_section)))
                 column.addView(Ui.card(this).apply {
-                    addView(Ui.line(context, "状态", text, warn = true))
-                    p.reason?.takeIf { it.isNotEmpty() }?.let { addView(Ui.line(context, "原因", it)) }
-                    addView(Ui.buttons(context, "重置策略" to { confirmReset() }))
+                    addView(Ui.line(context, strings.get(R.string.plugins_state_label), text, warn = true))
+                    p.reason?.takeIf { it.isNotEmpty() }?.let { addView(Ui.line(context, strings.get(R.string.plugins_reason_label), it)) }
+                    addView(Ui.buttons(context, strings.get(R.string.plugins_reset_policy) to { confirmReset() }))
                 })
             }
         }
 
-        column.addView(Ui.sectionTitle(this, "已发现的插件"))
+        column.addView(Ui.sectionTitle(this, strings.get(R.string.plugins_discovered_section)))
         if (s.plugins.isEmpty() && s.error == null) {
             column.addView(Ui.card(this).apply {
-                addView(Ui.paragraph(context, "还没有发现插件。安装了支持 AgentOS 插件的 App 后点“重新扫描”。"))
+                addView(Ui.paragraph(context, strings.get(R.string.plugins_empty)))
             })
         }
         s.plugins.forEach { column.addView(card(it), Ui.matchWrap().apply { bottomMargin = dp(10) }) }
-        column.addView(Ui.buttons(this, "重新扫描" to { reload(rescan = true) }))
+        column.addView(Ui.buttons(this, strings.get(R.string.plugins_rescan) to { reload(rescan = true) }))
     }
 
     private fun card(p: Plugins.Plugin): LinearLayout = Ui.card(this).apply {
         addView(header(p) { on -> toggle(p, on) { reload() } })
         identity(this, p)
-        Plugins.toolSummary(p).takeIf { it.isNotEmpty() }?.let { addView(Ui.paragraph(context, it)) }
-        val issues = Plugins.issues(p)
+        Plugins.toolSummary(p, strings).takeIf { it.isNotEmpty() }?.let { addView(Ui.paragraph(context, it)) }
+        val issues = Plugins.issues(p, strings)
         issues.take(Plugins.LIST_ISSUES).forEach { addView(Ui.paragraph(context, it, R.color.ui_warn)) }
-        if (issues.size > Plugins.LIST_ISSUES) addView(Ui.paragraph(context, "另有 ${issues.size - Plugins.LIST_ISSUES} 项，点开查看"))
-        addView(Ui.buttons(context, "详情" to { openDetail(p) }))
-        clickable(this, "${p.displayName}，查看详情") { openDetail(p) }
+        if (issues.size > Plugins.LIST_ISSUES) addView(Ui.paragraph(context, (issues.size - Plugins.LIST_ISSUES).let { strings.plural(R.plurals.plugins_more_issues, it, it) }))
+        addView(Ui.buttons(context, strings.get(R.string.plugins_details) to { openDetail(p) }))
+        clickable(this, strings.get(R.string.plugins_card_cd, p.title)) { openDetail(p) }
     }
 
     private fun openDetail(p: Plugins.Plugin) =
@@ -89,10 +89,10 @@ class PluginsActivity : PluginPage() {
     private fun confirmReset() {
         show(
             AlertDialog.Builder(this)
-                .setTitle("重置插件策略？")
-                .setMessage("会丢弃现在的用户策略文件，全部恢复默认：第三方插件都会停用，所有“始终允许”都会取消。之后需要重新启用你要用的插件。")
-                .setPositiveButton("重置") { _, _ -> call({ reload() }) { it.resetPolicy() } }
-                .setNegativeButton("取消", null),
+                .setTitle(strings.get(R.string.plugins_reset_title))
+                .setMessage(strings.get(R.string.plugins_reset_message))
+                .setPositiveButton(strings.get(R.string.plugins_reset_confirm)) { _, _ -> call({ reload() }) { it.resetPolicy() } }
+                .setNegativeButton(strings.get(R.string.plugins_cancel), null),
         )
     }
 }

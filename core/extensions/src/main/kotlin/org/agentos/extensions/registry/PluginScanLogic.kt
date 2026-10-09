@@ -1,5 +1,6 @@
 package org.agentos.extensions.registry
 
+import org.agentos.extensions.ExtMessages
 import org.agentos.extensions.ManifestReader
 import org.agentos.extensions.ManifestResult
 import org.agentos.extensions.McpServerDecl
@@ -8,6 +9,7 @@ import org.agentos.extensions.PluginOrigin
 import org.agentos.extensions.UnsupportedKind
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.PolicyScope
+import org.agentos.runtime.i18n.MessageRef
 
 /**
  * 插件注册表的扫描逻辑（docs/extensions.md 4.1、E1、E6）：**纯函数，不依赖 Android**。
@@ -41,6 +43,8 @@ import org.agentos.runtime.broker.PolicyScope
  *    自带插件不受影响；清单被拒绝、assets 缺失的插件仍然是不可用（原因更根本）。
  *
  * 不可用的插件**留在注册表里**（带原因），插件页要显示，不静默丢弃。
+ *
+ * **问题的文字不是文字**：[PluginProblem.message] 是 [ExtMessages] 的 key + 参数，位置在 [PluginProblem.location]；界面按自己的语言渲染。
  */
 object PluginScanLogic {
     const val BIND_PERMISSION = "org.agentos.permission.BIND_MCP_SERVICE"
@@ -143,7 +147,7 @@ object PluginScanLogic {
                     base(id, null, view, prev[id], builtin, memoryLost).copy(
                         status = PluginStatus.UNAVAILABLE,
                         unavailableReason = UnavailableReason.ASSETS_MISSING,
-                        problems = listOf(PluginProblem("assets_missing", "插件的 Service 没有声明 org.agentos.plugin.assets，找不到插件包")),
+                        problems = listOf(PluginProblem("assets_missing", MessageRef.of(ExtMessages.ASSETS_NOT_DECLARED))),
                     ),
                     ownsName = false,
                 ),
@@ -177,7 +181,7 @@ object PluginScanLogic {
                 skeleton.copy(
                     status = PluginStatus.UNAVAILABLE,
                     unavailableReason = UnavailableReason.ASSETS_MISSING,
-                    problems = listOf(PluginProblem("assets_missing", "assets/$dir 里没有 plugin.json")),
+                    problems = listOf(PluginProblem("assets_missing", MessageRef.of(ExtMessages.ASSETS_NO_PLUGIN_JSON, dir))),
                 ),
                 ownsName = false,
             )
@@ -189,7 +193,7 @@ object PluginScanLogic {
                     status = PluginStatus.UNAVAILABLE,
                     unavailableReason = UnavailableReason.MANIFEST_REJECTED,
                     manifestErrors = result.errors,
-                    problems = result.errors.map { PluginProblem(it.code.name.lowercase(), "${it.location}：${it.message}") },
+                    problems = result.errors.map { PluginProblem(it.code.name.lowercase(), it.message, it.location) },
                 ),
                 ownsName = false,
             )
@@ -212,8 +216,8 @@ object PluginScanLogic {
             if (why == null) usable += server else rejected += RejectedServer(server.name, server.service, why)
         }
         val problems = ArrayList<PluginProblem>()
-        for (r in rejected) problems += PluginProblem("server_rejected", "服务器 ${r.name}（${r.service}）被拒绝：${rejectionText(r.reason)}")
-        for (u in manifest.unsupported) problems += PluginProblem("unsupported_${u.kind.name.lowercase()}", "${u.location}：${u.reason}")
+        for (r in rejected) problems += PluginProblem("server_rejected", rejectionMessage(r))
+        for (u in manifest.unsupported) problems += PluginProblem("unsupported_${u.kind.name.lowercase()}", u.reason, u.location)
 
         val declaredServers = manifest.servers.size + manifest.unsupported.count {
             it.kind == UnsupportedKind.STDIO_SERVER || it.kind == UnsupportedKind.SSE_SERVER || it.kind == UnsupportedKind.INSECURE_URL
@@ -228,9 +232,9 @@ object PluginScanLogic {
             signerChanged -> PluginStatus.SIGNATURE_CHANGED
             else -> PluginStatus.READY
         }
-        if (signerChanged) problems += PluginProblem("signature_changed", "这个 App 的签名变了：已停用，需要重新确认后才能启用")
-        if (unconfirmed) problems += PluginProblem("signature_unconfirmed", "没有这个 App 的签名记录（记忆丢失）：已停用，需要重新确认后才能启用")
-        if (nothingUsable) problems += PluginProblem("no_usable_server", "声明的服务器都不能用，插件没有可用的内容")
+        if (signerChanged) problems += PluginProblem("signature_changed", MessageRef.of(ExtMessages.SIGNATURE_CHANGED))
+        if (unconfirmed) problems += PluginProblem("signature_unconfirmed", MessageRef.of(ExtMessages.SIGNATURE_UNCONFIRMED))
+        if (nothingUsable) problems += PluginProblem("no_usable_server", MessageRef.of(ExtMessages.NO_USABLE_SERVER))
 
         return Draft(
             skeleton.copy(
@@ -270,16 +274,16 @@ object PluginScanLogic {
                     status = PluginStatus.UNAVAILABLE,
                     unavailableReason = UnavailableReason.NAME_CONFLICT,
                     servers = emptyList(),
-                    problems = d.record.problems + PluginProblem("name_conflict", "插件名 \"${d.record.name}\" 已被占用或是保留的名字"),
+                    problems = d.record.problems + PluginProblem("name_conflict", MessageRef.of(ExtMessages.NAME_CONFLICT, d.record.name.orEmpty())),
                 ),
                 ownsName = false,
             )
         }
     }
 
-    private fun rejectionText(r: ServerRejection) = when (r) {
-        ServerRejection.NOT_IN_PACKAGE -> "这个 Service 不属于这个 App"
-        ServerRejection.NOT_EXPORTED -> "这个 Service 没有导出"
-        ServerRejection.MISSING_PERMISSION -> "这个 Service 没有要求 $BIND_PERMISSION"
+    private fun rejectionMessage(r: RejectedServer): MessageRef = when (r.reason) {
+        ServerRejection.NOT_IN_PACKAGE -> MessageRef.of(ExtMessages.SERVER_REJECTED_NOT_IN_PACKAGE, r.name, r.service)
+        ServerRejection.NOT_EXPORTED -> MessageRef.of(ExtMessages.SERVER_REJECTED_NOT_EXPORTED, r.name, r.service)
+        ServerRejection.MISSING_PERMISSION -> MessageRef.of(ExtMessages.SERVER_REJECTED_MISSING_PERMISSION, r.name, r.service, BIND_PERMISSION)
     }
 }

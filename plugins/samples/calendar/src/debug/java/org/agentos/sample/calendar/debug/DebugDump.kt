@@ -17,6 +17,10 @@ data class ArmedReminder(val fireAtMs: Long, val occurrenceId: String, val minut
 /**
  * Read-only state dump for adb verification (debug builds only). Pure function: no Android classes, so it is unit tested.
  * Events and calendars use the same serializers as the MCP tools, so field names and formats match what AgentOS sees.
+ *
+ * `events` lists only the series this app created: every event of the local (app-owned) calendars plus the events in the system
+ * calendar database that carry this app's `CUSTOM_APP_PACKAGE` tag. Other apps' and synced events are never listed (they may be real
+ * data on a real phone); `other_events` only counts them. `calendars` lists every calendar (names and account labels, no events).
  */
 object DebugDump {
     const val DEFAULT_LIMIT = 50
@@ -29,7 +33,8 @@ object DebugDump {
         val zone = repo.zone
         val calendars = repo.calendars.value
         val hidden = calendars.filter { !it.visible }.map { it.id }.toSet()
-        val series = repo.events.value.sortedWith(compareBy({ it.startUtc }, { it.id }))
+        val series = repo.ownedEvents().sortedWith(compareBy({ it.startUtc }, { it.id }))
+        val defaultWriteId = repo.defaultWriteCalendar().id
         val total = series.size
         val page = series.drop(offset).take(limit)
         val rows = page.map { s ->
@@ -37,8 +42,9 @@ object DebugDump {
             buildJsonObject {
                 for ((k, v) in base) put(k, v)
                 put("hidden", s.calendarId in hidden)
-                put("created_at", IsoTime.format(s.createdAt, zone))
-                put("updated_at", IsoTime.format(s.updatedAt, zone))
+                // the system calendar database has no created / updated stamps for us
+                put("created_at", if (s.createdAt > 0) JsonPrimitive(IsoTime.format(s.createdAt, zone)) else JsonNull)
+                put("updated_at", if (s.updatedAt > 0) JsonPrimitive(IsoTime.format(s.updatedAt, zone)) else JsonNull)
             }
         }
         // Cut at an array-element boundary if the page is too big for broadcast result data.
@@ -54,7 +60,7 @@ object DebugDump {
         val shown = rows.take(kept)
         val next = offset + shown.size
         return buildJsonObject {
-            put("calendars", JsonArray(calendars.map { tools.calendarJson(it) }))
+            put("calendars", JsonArray(calendars.map { tools.calendarJson(it, defaultWriteId) }))
             put("events", JsonArray(shown))
             put(
                 "reminders_scheduled",
@@ -72,6 +78,8 @@ object DebugDump {
                 ),
             )
             put("timezone", zone.id)
+            put("system_access", repo.systemAccess.value)
+            put("other_events", repo.foreignEventCount())
             put("total", total)
             put("offset", offset)
             put("limit", limit)

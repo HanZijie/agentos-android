@@ -1,6 +1,9 @@
 package org.agentos.app.ui
 
 import android.content.Context
+import org.agentos.app.R
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +29,8 @@ import kotlinx.coroutines.Dispatchers
 class ChatController(
     private val agent: AgentConnection,
     private val scope: CoroutineScope,
+    /** Words of the notices this class adds (the notices of a stop reason come from [ChatReducer.finished]). */
+    private val strings: Strings,
     private val frameMs: Long = FRAME_MS,
 ) {
     private val _state = MutableStateFlow(ChatState())
@@ -50,10 +55,12 @@ class ChatController(
             flush()
             if (agent.consumeSessionReplaced()) {
                 _state.update {
-                    ChatReducer.notice(it, ChatItem.Notice.Kind.INFO, "已开始新的会话", "之前的会话在运行时重启后不再可用")
+                    ChatReducer.notice(
+                        it, ChatItem.Notice.Kind.INFO, strings.get(R.string.chat_notice_new_session), strings.get(R.string.chat_notice_new_session_hint),
+                    )
                 }
             }
-            _state.update { ChatReducer.finished(it, outcome) }
+            _state.update { ChatReducer.finished(it, outcome, strings) }
         }
         return true
     }
@@ -124,9 +131,9 @@ class ChatController(
         if (wasBusy) {
             _state.update {
                 ChatReducer.notice(
-                    ChatReducer.finished(it, TurnOutcome.Finished("end_turn")),
-                    ChatItem.Notice.Kind.INFO, "界面关闭时这一轮还在进行",
-                    "运行时会继续把它做完；M2 起可以回到原来的会话查看结果",
+                    ChatReducer.finished(it, TurnOutcome.Finished("end_turn"), strings),
+                    ChatItem.Notice.Kind.INFO, strings.get(R.string.chat_notice_screen_closed),
+                    strings.get(R.string.chat_notice_screen_closed_hint),
                 )
             }
         }
@@ -142,7 +149,7 @@ class ChatController(
         fun get(context: Context): ChatController = instance ?: synchronized(this) {
             instance ?: run {
                 val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-                ChatController(LocalAcpClient(context.applicationContext, scope), scope).also { instance = it }
+                ChatController(LocalAcpClient(context.applicationContext, scope), scope, AndroidStrings(context.applicationContext)).also { instance = it }
             }
         }
     }

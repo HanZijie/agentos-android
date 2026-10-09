@@ -1,0 +1,16 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "todo",
+  "version": "1.0.0",
+  "description": "读写手机上「待办」App 里的待办事项：新建、改状态和优先级、设截止日期、加子任务、搜索、看总览。",
+  "extensions": {
+    "com.openai": {
+      "interface": { "displayName": "待办" }
+    },
+    "org.agentos": {
+      "mcpServers": {
+        "todo": { "service": "org.agentos.sample.todo.agent.TodoMcpService" }
+      }
+    }
+  }
+}

@@ -20,6 +20,8 @@ import kotlinx.serialization.json.put
 import org.agentos.sample.alarm.data.Alarm
 import org.agentos.sample.alarm.data.TestEnv
 import org.agentos.sample.alarm.data.at
+import org.agentos.sample.alarm.schedule.SystemAlarmInfo
+import org.agentos.sample.alarm.schedule.SystemNextAlarm
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -36,13 +38,23 @@ class FakeRing : RingControl {
 
     override fun dismiss(): Alarm? = state.value?.also { dismissed++; state.value = null }
 
-    override fun snooze(): Alarm? = state.value?.also { snoozed++; state.value = null }
+    var lastSnoozeMinutes: Int? = null
+
+    override fun snooze(minutes: Int?): Alarm? = state.value?.also { snoozed++; lastSnoozeMinutes = minutes; state.value = null }
+}
+
+/** 假的系统闹钟提供者：JVM 里不碰 AlarmManager。 */
+class FakeSystemAlarms(override val ownPackage: String = "org.agentos.sample.alarm") : SystemAlarmInfo {
+    var next: SystemNextAlarm? = null
+
+    override fun next(): SystemNextAlarm? = next
 }
 
 class AlarmToolsTest {
     private val env = TestEnv()
     private val ring = FakeRing()
-    private val tools = AlarmTools(env.repository, ring)
+    private val systemAlarms = FakeSystemAlarms()
+    private val tools = AlarmTools(env.repository, ring, systemAlarms)
 
     private fun call(name: String, args: JsonObject = buildJsonObject {}): ToolOutput =
         runBlocking { tools.find(name)!!.handler(args) }
@@ -78,6 +90,7 @@ class AlarmToolsTest {
             "alarm_delete" to listOf("id"),
             "alarm_next" to emptyList(),
             "alarm_dismiss" to emptyList(),
+            "alarm_system_next" to emptyList(),
         )
         for ((name, required) in expected) {
             val tool = tools.find(name)
@@ -93,7 +106,7 @@ class AlarmToolsTest {
     @Test
     fun annotationsAreAccurate() {
         fun a(name: String) = tools.find(name)!!.annotations
-        for (readOnly in listOf("alarm_list", "alarm_get", "alarm_next")) assertEquals(true, a(readOnly).readOnlyHint)
+        for (readOnly in listOf("alarm_list", "alarm_get", "alarm_next", "alarm_system_next")) assertEquals(true, a(readOnly).readOnlyHint)
         assertEquals(true, a("alarm_delete").destructiveHint)
         assertEquals(true, a("alarm_update").idempotentHint)
         assertEquals(true, a("alarm_set_enabled").idempotentHint)
@@ -311,6 +324,63 @@ class AlarmToolsTest {
         assertEquals(tonight["id"], r["alarm"]!!.jsonObject["id"])
         assertEquals("2026-10-07T22:00:00+08:00", r["next_fire_at"]!!.jsonPrimitive.content)
         assertEquals(14 * 60, r["fires_in_minutes"]!!.jsonPrimitive.int)
+    }
+
+    // ---- alarm_system_next ----
+
+    @Test
+    fun systemNextIsJsonNullWhenNoAlarmAnywhere() {
+        val out = call("alarm_system_next")
+        assertFalse(out.isError)
+        assertEquals("null", out.text)
+        assertNull(out.structured)
+    }
+
+    @Test
+    fun systemNextReportsAnotherAppsAlarmAsNotOwned() {
+        // 比如 Google 时钟设的明早 06:30：时间用带偏移的 ISO，owned_by_this_app 为 false
+        systemAlarms.next = SystemNextAlarm(env.millis(at(6, 30, day = 8)), "com.google.android.deskclock")
+        val r = ok("alarm_system_next")
+        assertEquals("2026-10-08T06:30:00+08:00", r["next_fire_at"]!!.jsonPrimitive.content)
+        assertEquals(22 * 60 + 30, r["fires_in_minutes"]!!.jsonPrimitive.int)
+        assertFalse(r["owned_by_this_app"]!!.jsonPrimitive.boolean)
+        assertFalse("must not leak other apps' package names", r.toString().contains("deskclock"))
+    }
+
+    @Test
+    fun systemNextReportsThisAppsAlarmAsOwned() {
+        systemAlarms.next = SystemNextAlarm(env.millis(at(22, 0)), "org.agentos.sample.alarm")
+        val r = ok("alarm_system_next")
+        assertTrue(r["owned_by_this_app"]!!.jsonPrimitive.boolean)
+        assertEquals(14 * 60, r["fires_in_minutes"]!!.jsonPrimitive.int)
+    }
+
+    @Test
+    fun systemNextTreatsUnknownCreatorAsNotOwned() {
+        systemAlarms.next = SystemNextAlarm(env.millis(at(9, 0)), null)
+        assertFalse(ok("alarm_system_next")["owned_by_this_app"]!!.jsonPrimitive.boolean)
+    }
+
+    @Test
+    fun systemNextDoesNotChangeAlarmNext() {
+        // 系统里有别家更早的闹钟时：alarm_next 仍只看本 App 自己的；alarm_system_next 看系统范围
+        create("22:00")
+        systemAlarms.next = SystemNextAlarm(env.millis(at(9, 0)), "com.google.android.deskclock")
+        assertEquals("2026-10-07T22:00:00+08:00", ok("alarm_next")["next_fire_at"]!!.jsonPrimitive.content)
+        assertEquals("2026-10-07T09:00:00+08:00", ok("alarm_system_next")["next_fire_at"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun systemNextProviderFailureIsAnErrorNotACrash() {
+        val broken = AlarmTools(
+            env.repository, ring,
+            object : SystemAlarmInfo {
+                override val ownPackage = "x"
+                override fun next(): SystemNextAlarm? = throw IllegalStateException("boom")
+            },
+        )
+        val out = runBlocking { broken.find("alarm_system_next")!!.handler(buildJsonObject {}) }
+        assertTrue(out.isError)
     }
 
     // ---- alarm_dismiss ----

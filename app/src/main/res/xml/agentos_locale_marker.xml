@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  让 APK 登记“有中文”（docs/next-apps-plan.md D8，R5）。中文文字都在未加限定的 values/ 里（默认资源），系统看不到“有 zh”：
+  解析多个语言时（应用语言 zh + 系统语言 en-US，或系统语言列表 [zh-CN, en-US]）会改选 values-en，中文用户反而看到英文
+  （ResourcesImpl.updateConfiguration 按 APK 里登记的语言挑最合适的那个；设备上验证过，见 docs/assets/i18n-p1/README.md）。
+  所以放一个带 zh 限定的资源：xml-zh/ 里的这个文件（内容和默认的不同，aapt2 不会当重复项去掉）。不能用 values-zh/：
+  lint 的 MissingTranslation（R9 里是 error）会把它当成一份中文翻译，要求每个 key 都有。zh 就在列表里了，文字在 zh 下找不到，
+  仍然回落到 values/（中文）。中文文字放 values/，英文放 values-en/，这里不放文字。
+-->
+<locale-marker xmlns:tools="http://schemas.android.com/tools" tools:ignore="UnusedResources" language="default" />

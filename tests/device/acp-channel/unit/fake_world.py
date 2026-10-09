@@ -1,7 +1,8 @@
 """A fake phone for testing the acceptance driver without a device (A12).
 
 It models what the driver touches, with the same shapes as the real thing:
-  - the three apps' SQLite databases (same tables and columns as the real stores) changed by simple Python versions of the tools, and the apps' debug
+  - the five apps' state (SQLite databases for alarm / calendar / notes / todo, same tables and columns as the real stores for the first three; plain
+    Python state for sms: outbox, drafts, settings, permissions and the system inbox) changed by simple Python versions of the tools, and the apps' debug
     `dump` / `reset` receivers with the real JSON shapes (the driver never reads the databases: it has no way to, a real phone has no sqlite3);
   - the catalog the model is offered: after `enable` / `disable` the plugins' tools appear and disappear one plugin after the other, not together
     (`list_delay` / `drop_delay`: how many catalog reads later a plugin's tools show up / go away; 0 = at once, the default), as the real host does;
@@ -34,7 +35,7 @@ class ToolError(Exception):
 
 
 class FakePhone:
-    def __init__(self, today=date(2026, 10, 7), faults=None):
+    def __init__(self, today=date(2026, 10, 7), faults=None, serial="emulator-5554", other_devices=None):
         self.dir = tempfile.mkdtemp(prefix="fake-phone-")
         self.today = today
         self.faults = set(faults or [])
@@ -56,6 +57,12 @@ class FakePhone:
         self.log = []          # every adb shell / run call, for assertions
         self.model_requests = []
         self._next_alarm = 1
+        self.serial = serial
+        self.other_devices = list(other_devices or [])      # serials `adb devices` lists besides this one (a second emulator to send an SMS to)
+        self.sms = {"outbox": [], "drafts": [], "inbox": [], "next_id": 1, "settings": {"mask_codes": True, "allow_short_numbers": False, "rate_limit": 5},
+                    "granted": {"android.permission.READ_SMS": True, "android.permission.SEND_SMS": True}}
+        self.sms_tool_calls = []        # (tool, args) of the debug `tool` receiver
+        self.sms_sent_log = []          # every message that left the phone (the fake radio), whatever the outbox says
         self._init_dbs()
 
     @property
@@ -84,6 +91,10 @@ class FakePhone:
         c.execute("INSERT INTO calendars VALUES ('cal-default', '日历', 1, 1, 1, 0)")
         c.commit()
         c.close()
+        c = sqlite3.connect(self.db_path("todo.db"))
+        c.execute("CREATE TABLE todos (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'todo', priority TEXT NOT NULL DEFAULT 'medium', due TEXT, due_all_day INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '[]', parent_id TEXT, completed_at TEXT)")
+        c.commit()
+        c.close()
         c = sqlite3.connect(self.db_path("notes.db"))
         c.execute("CREATE TABLE notes (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, tags TEXT NOT NULL, color TEXT NOT NULL, pinned INTEGER NOT NULL, status INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, trashed_at INTEGER, revision INTEGER NOT NULL)")
         c.commit()
@@ -109,17 +120,28 @@ class FakePhone:
             return "+0800\n"
         if cmd.startswith("am broadcast"):
             return self._broadcast(cmd)
+        m = re.fullmatch(r"pm (grant|revoke) (\S+) (\S+)", cmd.strip())
+        if m and m.group(2) == L.SAMPLES["sms"].package and m.group(3) in self.sms["granted"]:
+            if m.group(1) == "grant" and "sms-grant-refused" in self.faults:
+                return "Exception occurred while executing 'grant': SecurityException\n"
+            self.sms["granted"][m.group(3)] = m.group(1) == "grant"
         return ""
 
     def run(self, *args, **kw):
         self.log.append(" ".join(args))
+        if tuple(args[:3]) == ("emu", "sms", "send") and len(args) >= 5:
+            # the emulator console: an incoming SMS lands in the system SMS store (the sms app reads it with READ_SMS; its dump never shows it)
+            self.sms["inbox"].append({"address": args[3], "body": " ".join(args[4:]), "type": "inbox", "date": self.NOW_MS + len(self.sms["inbox"]) * 1000})
+            return "OK\n"
         return ""
 
     def prop(self, name):
         return {"ro.product.model": "FakePhone", "ro.build.version.sdk": "36", "ro.build.version.release": "16", "ro.build.fingerprint": "fake"}.get(name, "")
 
     adb = "fake-adb"
-    serial = "fake:0"
+
+    def devices(self):
+        return [self.serial] + self.other_devices
 
     # ------------------------------------------------------------------ debug receivers
     def _broadcast(self, cmd):
@@ -142,6 +164,10 @@ class FakePhone:
             data = self._consent(extras)
         elif comp.endswith("DesktopGatewayDebugReceiver"):
             data = self._gateway(extras)
+        elif comp.startswith("org.agentos.sample.todo/"):
+            data = self._todo_app(extras)
+        elif comp.startswith("org.agentos.sample.sms/"):
+            data = self._sms_app(extras)
         elif comp.endswith("/.debug.DebugToolReceiver"):
             data = self._alarm_app(extras)
         elif comp.endswith("/.debug.DebugCallReceiver"):
@@ -152,7 +178,7 @@ class FakePhone:
                 return "Broadcasting: Intent { }\nBroadcast completed: result=0\n"   # seed / clear / remind_test answer in logcat only
         else:
             return "Broadcast completed: result=0\n"
-        code = 1 if data.get("ok", "error" not in data) else 2
+        code = 1 if data.get("ok", "error" not in data) and not data.get("isError") else 2
         return 'Broadcasting: Intent { }\nBroadcast completed: result=%d, data="%s"' % (code, json.dumps(data, ensure_ascii=False).replace("/", "\\/"))
 
     def _plugin_json(self, s):
@@ -213,7 +239,7 @@ class FakePhone:
                 if "hide-" + t in self.faults:
                     continue
                 n = scripted_tools.tool_name(s.name, s.name, t)
-                out[n] = "HIGH" if t.endswith("_delete") else ("WRITE" if "risk-read" not in self.faults else "READ")
+                out[n] = "HIGH" if L.expected_risk(t) == "HIGH" else ("WRITE" if "risk-read" not in self.faults else "READ")
         return out
 
     def _consent(self, ex):
@@ -296,6 +322,74 @@ class FakePhone:
                            "archived": r["status"] == 1, "trashed": r["status"] == 2, "created_at": "2026-10-07T12:00:00+08:00", "updated_at": "2026-10-07T12:00:00+08:00",
                            "content_length": len(r["content"]), "revision": r["revision"]} for r in page],
                 "tags": [{"name": k, "count": v} for k, v in sorted(tags.items())], "total": len(rows), "offset": offset, "count": len(page), "next_offset": nxt}
+
+    def _todo_json(self, r, full=False):
+        """A todo the way todo_get / dump print it (full) or in the compact list form."""
+        out = {"id": r["id"], "title": r["title"], "status": r["status"], "priority": r["priority"]}
+        if full:
+            out.update({"due": r["due"], "due_all_day": bool(r["due_all_day"]), "tags": json.loads(r["tags"]), "parent_id": r["parent_id"],
+                        "completed_at": r["completed_at"], "overdue": False, "created_at": "2026-10-07T12:00:00+08:00", "updated_at": "2026-10-07T12:00:00+08:00",
+                        "notes": r["notes"]})
+        return out
+
+    def _todo_app(self, ex):
+        cmd = ex.get("cmd")
+        if cmd == "reset":
+            n = len(self.q("todo.db", "SELECT id FROM todos"))
+            if "todo-reset-noop" not in self.faults:
+                self.q("todo.db", "DELETE FROM todos")
+            left = len(self.q("todo.db", "SELECT id FROM todos"))
+            return {"cleared": n, "remaining": left, "remaining_in_db": left}
+        if cmd != "dump":
+            return {"ok": False, "error": "unknown cmd: %s (use dump or reset)" % cmd}
+        if "dump-fails-todo" in self.faults:
+            return {"ok": False, "error": "boom"}
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        offset, limit, nxt = self._page(ex, len(rows))
+        page = rows[offset:offset + limit]
+        counts = {k: len([r for r in rows if r["status"] == k]) for k in ("todo", "doing", "done", "shelved")}
+        return {"todos": [self._todo_json(r, full=True) for r in page], "counts": counts, "total": len(rows), "offset": offset, "count": len(page),
+                "next_offset": nxt, "now": "2026-10-07T12:00:00+08:00", "time_zone": "Asia/Shanghai"}
+
+    # ---- sms app: the outbox / drafts / settings / permissions are the app's own records; the inbox is the system SMS store (not in the dump)
+    def sms_mode(self):
+        read, send = (self.sms["granted"][p] for p in L.SMS_PERMISSIONS)
+        return "full" if read and send else "compose_only" if not read and not send else "partial"
+
+    def _sms_app(self, ex):
+        cmd = ex.get("cmd")
+        st = self.sms
+        if cmd == "reset":
+            n, d = len(st["outbox"]), len(st["drafts"])
+            if "sms-reset-noop" not in self.faults:
+                st["outbox"], st["drafts"] = [], []
+            return {"cleared": n, "outbox_remaining": len(st["outbox"]), "drafts_cleared": d}
+        if cmd == "set":
+            key, value = ex.get("key"), ex.get("value")
+            if key in ("mask_codes", "allow_short_numbers"):
+                st["settings"][key] = str(value).lower() == "true"
+            elif key == "rate_limit":
+                st["settings"][key] = int(value)
+            else:
+                return {"error": "unknown key '%s'; use mask_codes, allow_short_numbers or rate_limit" % key}
+            return dict(st["settings"])
+        if ex.get("tool") is not None:
+            args = json.loads(ex.get("args", "{}"))
+            self.sms_tool_calls.append((ex["tool"], args))
+            status, text = self._call_sms_tool(ex["tool"], args)
+            return {"tool": ex["tool"], "isError": status != "completed", "result": text}
+        if cmd != "dump":
+            return {"error": "unknown cmd '%s'; use dump, reset or set" % cmd}
+        self._sms_advance()
+        if "dump-fails-sms" in self.faults:
+            return {"error": "IllegalStateException: boom"}
+        rows = st["outbox"]
+        offset, limit, nxt = self._page(ex, len(rows))
+        return {"mode": self.sms_mode(), "permissions": {"read_sms": st["granted"][L.SMS_PERMISSIONS[0]], "send_sms": st["granted"][L.SMS_PERMISSIONS[1]]},
+                "settings": dict(st["settings"]), "outbox": [dict({k: v for k, v in o.items() if not k.startswith("_")}, created_at="2026-10-07T12:00:00+08:00", updated_at="2026-10-07T12:00:00+08:00")
+                           for o in rows[offset:offset + limit]],
+                "drafts": [dict(d, created_at="2026-10-07T12:00:00+08:00") for d in st["drafts"]], "total": len(rows), "offset": offset, "count": len(rows[offset:offset + limit]),
+                "next_offset": nxt, "now": "2026-10-07T12:00:00+08:00", "time_zone": "Asia/Shanghai"}
 
     NOW_MS = int(datetime(2026, 10, 7, 12, 0, tzinfo=TZ).timestamp() * 1000)
 
@@ -393,7 +487,8 @@ class FakePhone:
             answer = {"allow": "ALLOW_ONCE" if risk == "HIGH" else "ALLOW_FOR_SESSION", "allowonce": "ALLOW_ONCE", "deny": "DENY"}.get(mode)
             self._req += 1
             plugin = name.split("__")[1]
-            self.consent_log.append({"requestId": "req_%d" % self._req, "tool": name, "risk": risk, "source": L.source_line(plugin), "args": "{}",
+            self.consent_log.append({"requestId": "req_%d" % self._req, "tool": name, "risk": risk, "source": L.source_line(plugin),
+                                     "args": json.dumps(args, ensure_ascii=False, separators=(",", ":"))[:(20 if "consent-args-truncated" in self.faults else 120)],
                                      "options": options, "answeredWith": answer, "end": "ANSWERED" if answer else "TIMED_OUT", "notice": None})
             del self.consent_log[:-50]
             if answer is None:
@@ -470,6 +565,21 @@ class FakePhone:
             return None
         j = self._alarm_json(rows[0])
         return {"alarm": j, "next_fire_at": j["next_fire_at"], "fires_in_minutes": 600}
+
+    def t_alarm_system_next(self, a):
+        """The phone's next alarm of any app: here this app's alarms and `other_alarm` (the Clock app's), which a test can set."""
+        rows = self.q("alarms.db", "SELECT * FROM alarms WHERE enabled=1 ORDER BY hour, minute")
+        mine = self._alarm_json(rows[0])["next_fire_at"] if rows else None
+        other = getattr(self, "other_alarm", None)
+        if "system-next-bad-shape" in self.faults:
+            return {"next_fire_at": mine}
+        if "system-next-later-and-not-mine" in self.faults and mine:
+            return {"next_fire_at": "2026-10-08T23:59:00+08:00", "fires_in_minutes": 900, "owned_by_this_app": False}
+        if "system-next-owned-but-gone" in self.faults and not rows:
+            return {"next_fire_at": "2026-10-08T05:00:00+08:00", "fires_in_minutes": 5, "owned_by_this_app": True}
+        if other and (mine is None or other < mine):
+            return {"next_fire_at": other, "fires_in_minutes": 300, "owned_by_this_app": False}
+        return None if mine is None else {"next_fire_at": mine, "fires_in_minutes": 600, "owned_by_this_app": True}
 
     def t_alarm_dismiss(self, a):
         raise ToolError("No alarm is ringing right now")
@@ -595,6 +705,395 @@ class FakePhone:
         if day1 - cur >= need:
             slots.append({"start": self._iso(cur), "end": self._iso(day1)})
         return {"date": a["date"], "timezone": "Asia/Shanghai", "slots": slots, "busy": []}
+
+    # ---- todo (the semantics of plugins/samples/todo/README.md, as far as the driver's expectations need them)
+    PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+    STATUSES = ("todo", "doing", "done", "shelved")
+
+    def _todo(self, a):
+        rows = self.q("todo.db", "SELECT * FROM todos WHERE id = ?", str(a.get("id", "")))
+        if not rows:
+            raise ToolError("No todo with id '%s'" % a.get("id"))
+        return rows[0]
+
+    def _parse_due(self, text, all_day=None):
+        """-> (due string as the app stores it, all_day). A date (all-day) or an ISO-8601 date-time WITH an offset; anything else is an error."""
+        t = str(text).strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):
+            try:
+                date.fromisoformat(t)
+            except ValueError:
+                raise ToolError("Invalid due '%s': not a calendar date" % t) from None
+            if all_day is False:
+                raise ToolError("due_all_day=false needs a time: pass due as an ISO-8601 date-time with UTC offset.")
+            return t, True
+        if "todo-accepts-bad-due" in self.faults and re.fullmatch(r"\d{4}-\d{2}-\d{2}T[\d:]+", t):
+            return t, False
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})", t):
+            raise ToolError("Invalid due '%s': use YYYY-MM-DD or an ISO-8601 date-time with a UTC offset, e.g. 2026-10-12T17:00:00+08:00" % t)
+        try:
+            dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        except ValueError:
+            raise ToolError("Invalid due '%s'" % t) from None
+        if all_day:
+            return t[:10], True
+        return dt.astimezone(TZ).replace(microsecond=0).isoformat(), False
+
+    def _due_cmp_key(self, due, all_day, bound, bound_all_day):
+        """Both sides as comparable values: instants when both are timed, local dates when one of them is a date."""
+        if all_day or bound_all_day:
+            local = due[:10] if all_day else datetime.fromisoformat(due).astimezone(TZ).date().isoformat()
+            return local, bound[:10] if bound_all_day else datetime.fromisoformat(bound).astimezone(TZ).date().isoformat()
+        return datetime.fromisoformat(due).timestamp(), datetime.fromisoformat(bound).timestamp()
+
+    def _todo_overdue(self, r):
+        if r["status"] not in ("todo", "doing") or not r["due"]:
+            return False
+        if r["due_all_day"]:
+            return r["due"] < self.today.isoformat()
+        return datetime.fromisoformat(r["due"]).timestamp() * 1000 < self.NOW_MS
+
+    def _compact_todo(self, r, rows):
+        out = self._todo_json(r)
+        if r["due"]:
+            out["due"], out["due_all_day"] = r["due"], bool(r["due_all_day"])
+        if json.loads(r["tags"]):
+            out["tags"] = json.loads(r["tags"])
+        if r["parent_id"]:
+            out["parent_id"] = r["parent_id"]
+        if r["completed_at"]:
+            out["completed_at"] = r["completed_at"]
+        if self._todo_overdue(r):
+            out["overdue"] = True
+        kids = [x for x in rows if x["parent_id"] == r["id"]]
+        if kids:
+            out["subtask_total"], out["subtask_done"] = len(kids), len([x for x in kids if x["status"] == "done"])
+        return out
+
+    def _check_enum(self, name, value, allowed):
+        if value not in allowed:
+            raise ToolError("Invalid %s '%s': use one of %s" % (name, value, ", ".join(allowed)))
+        return value
+
+    def t_todo_create(self, a):
+        title = a.get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ToolError("Missing required argument: title")
+        if len(title) > 200:
+            raise ToolError("title is too long (200 characters at most)")
+        priority = self._check_enum("priority", a.get("priority", "medium"), tuple(self.PRIORITY_RANK))
+        status = self._check_enum("status", a.get("status", "todo"), self.STATUSES)
+        due, all_day = (None, False)
+        if a.get("due"):
+            due, all_day = self._parse_due(a["due"], a.get("due_all_day"))
+        parent = a.get("parent_id") or None
+        if parent:
+            p = self._todo({"id": parent})
+            if p["parent_id"] and "todo-nested-subtask-allowed" not in self.faults:
+                raise ToolError("A subtask cannot have subtasks: only one level is supported")
+        tid = uuid.uuid4().hex[:8]
+        done_at = datetime.fromtimestamp(self.NOW_MS / 1000, tz=TZ).isoformat() if status == "done" else None
+        if "todo-forgets-write" not in self.faults:
+            self.q("todo.db", "INSERT INTO todos (id, title, notes, status, priority, due, due_all_day, tags, parent_id, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   tid, title.strip(), a.get("notes", ""), status, priority, due, 1 if all_day else 0, json.dumps(a.get("tags", []), ensure_ascii=False), parent, done_at)
+            return self._todo_json(self._todo({"id": tid}), full=True)
+        return {"id": tid, "title": title.strip(), "status": status, "priority": priority}
+
+    def t_todo_get(self, a):
+        r = self._todo(a)
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        out = self._todo_json(r, full=True)
+        out["subtasks"] = [self._compact_todo(x, rows) for x in rows if x["parent_id"] == r["id"]]
+        return out
+
+    def t_todo_update(self, a):
+        r = self._todo(a)
+        sets, vals = [], []
+        if "title" in a:
+            sets.append("title=?"), vals.append(a["title"])
+        if "notes" in a:
+            sets.append("notes=?"), vals.append(a["notes"])
+        if "priority" in a:
+            sets.append("priority=?"), vals.append(self._check_enum("priority", a["priority"], tuple(self.PRIORITY_RANK)))
+        if "tags" in a:
+            sets.append("tags=?"), vals.append(json.dumps(a["tags"], ensure_ascii=False))
+        if "status" in a:
+            sets.append("status=?"), vals.append(self._check_enum("status", a["status"], self.STATUSES))
+        if "due" in a:
+            if a["due"] == "":
+                sets += ["due=NULL", "due_all_day=0"]
+            else:
+                due, all_day = self._parse_due(a["due"], a.get("due_all_day"))
+                sets += ["due=?", "due_all_day=?"]
+                vals += [due, 1 if all_day else 0]
+        if not sets:
+            raise ToolError("Nothing to update: pass at least one of title, notes, priority, due, tags, parent_id, status.")
+        self.q("todo.db", "UPDATE todos SET %s WHERE id=?" % ", ".join(sets), *vals, r["id"])
+        return self._todo_json(self._todo({"id": r["id"]}), full=True)
+
+    def t_todo_set_status(self, a):
+        r = self._todo(a)
+        if "status" not in a:
+            raise ToolError("Missing required argument: status")
+        status = self._check_enum("status", a["status"], self.STATUSES)
+        if status != r["status"]:
+            done_at = datetime.fromtimestamp(self.NOW_MS / 1000, tz=TZ).isoformat() if status == "done" and "todo-done-no-completed-at" not in self.faults else None
+            self.q("todo.db", "UPDATE todos SET status=?, completed_at=? WHERE id=?", status, done_at, r["id"])
+        return self._todo_json(self._todo({"id": r["id"]}), full=True)
+
+    def t_todo_delete(self, a):
+        r = self._todo(a)
+        kids = [x for x in self.q("todo.db", "SELECT * FROM todos WHERE parent_id = ?", r["id"])]
+        if "todo-delete-no-cascade" in self.faults:
+            kids = []
+        for k in kids:
+            self.q("todo.db", "DELETE FROM todos WHERE id=?", k["id"])
+        self.q("todo.db", "DELETE FROM todos WHERE id=?", r["id"])
+        return {"deleted": 1 + len(kids), "id": r["id"], "title": r["title"], "subtasks_deleted": len(kids)}
+
+    def t_todo_list(self, a):
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        status = self._check_enum("status", a["status"], self.STATUSES) if a.get("status") else None
+        hits = []
+        for r in rows:
+            if status and r["status"] != status:
+                continue
+            if not status and r["status"] == "done" and not a.get("include_done"):
+                continue
+            if a.get("priority") and r["priority"] != a["priority"]:
+                continue
+            if a.get("tag") and a["tag"].lower() not in [t.lower() for t in json.loads(r["tags"])]:
+                continue
+            if a.get("parent_id") and r["parent_id"] != a["parent_id"]:
+                continue
+            if a.get("overdue_only") and not self._todo_overdue(r):
+                continue
+            for key, sign in (("due_after", 1), ("due_before", -1)):
+                if a.get(key):
+                    if not r["due"]:
+                        break
+                    bound, bound_all_day = self._parse_due(a[key])
+                    mine, theirs = self._due_cmp_key(r["due"], bool(r["due_all_day"]), bound, bound_all_day)
+                    if (mine < theirs) if sign == 1 else (mine > theirs):
+                        break
+            else:
+                hits.append(r)
+        hits.sort(key=lambda r: (self.PRIORITY_RANK[r["priority"]], r["due"] is None, self._due_cmp_key(r["due"], bool(r["due_all_day"]), r["due"], bool(r["due_all_day"]))[0] if r["due"] else 0))
+        limit, offset = int(a.get("limit", 50)), int(a.get("offset", 0))
+        page = hits[offset:offset + limit]
+        out = {"todos": [self._compact_todo(r, rows) for r in page], "total": len(hits), "offset": offset, "limit": limit, "count": len(page),
+               "has_more": offset + len(page) < len(hits)}
+        if out["has_more"]:
+            out["next_offset"] = offset + len(page)
+        return out
+
+    def t_todo_search(self, a):
+        q = a.get("query")
+        if not isinstance(q, str) or not q.strip():
+            raise ToolError("query must not be blank." if q is not None else "Missing required argument: query")
+        words = q.lower().split()
+        rows = self.q("todo.db", "SELECT * FROM todos ORDER BY seq")
+        hits = []
+        for r in rows:
+            if a.get("status") and r["status"] != a["status"]:
+                continue
+            hay = {"title": r["title"].lower(), "notes": r["notes"].lower(), "tags": " ".join(json.loads(r["tags"])).lower()}
+            if all(any(w in v for v in hay.values()) for w in words):
+                hits.append((r, [k for k, v in hay.items() if any(w in v for w in words)]))
+        hits.sort(key=lambda x: "title" not in x[1])
+        limit = int(a.get("limit", 20))
+        res = []
+        for r, where in hits[:limit]:
+            item = self._compact_todo(r, rows)
+            item["matched_in"] = where
+            res.append(item)
+        return {"query": q.strip(), "results": res, "total": len(hits), "count": len(res), "has_more": len(hits) > limit}
+
+    def t_todo_summary(self, a):
+        rows = self.q("todo.db", "SELECT * FROM todos")
+        counts = {k: len([r for r in rows if r["status"] == k]) for k in self.STATUSES}
+        if "todo-summary-wrong-count" in self.faults:
+            counts["todo"] += 1
+        week_start = self.today - timedelta(days=self.today.weekday())
+        open_rows = [r for r in rows if r["status"] in ("todo", "doing") and r["due"]]
+        day_of = lambda r: r["due"][:10] if r["due_all_day"] else datetime.fromisoformat(r["due"]).astimezone(TZ).date().isoformat()  # noqa: E731
+        live = [r for r in open_rows if not self._todo_overdue(r)]
+        return {"total": len(rows), "counts": counts, "overdue": len([r for r in open_rows if self._todo_overdue(r)]),
+                "due_today": len([r for r in live if day_of(r) == self.today.isoformat()]),
+                "due_this_week": len([r for r in live if self.today.isoformat() <= day_of(r) <= (week_start + timedelta(days=6)).isoformat()]),
+                "today": self.today.isoformat(), "week_start": week_start.isoformat(), "week_end": (week_start + timedelta(days=6)).isoformat(), "time_zone": "Asia/Shanghai"}
+
+    # ---- sms (plugins/samples/sms/README.md: permission gate, masking, short numbers, dedupe, rate limit, the async outbox)
+    def _call_sms_tool(self, tool, args):
+        try:
+            return "completed", json.dumps(getattr(self, "t_" + tool)(args), ensure_ascii=False)
+        except ToolError as e:
+            return "failed", str(e)
+
+    def _sms_require(self, perm_index):
+        mode = self.sms_mode()
+        if self.sms["granted"][L.SMS_PERMISSIONS[perm_index]]:
+            return
+        if mode == "compose_only":
+            raise ToolError("Compose-only mode: the Messages app has no SMS permissions, so only sms_compose works right now. Ask the user to open the Messages app")
+        raise ToolError("%s is not granted. Ask the user to open the Messages app" % L.SMS_PERMISSIONS[perm_index].split(".")[-1])
+
+    def _sms_advance(self):
+        """The async part of a send: every look at the outbox moves a row one step on (queued -> sent -> delivered)."""
+        for o in self.sms["outbox"]:
+            if o["state"] in ("queued", "sent"):
+                o["_age"] = o.get("_age", 0) + 1
+                if "sms-send-fails" in self.faults:
+                    o["state"], o["error"] = "failed", "radio_off"
+                elif o["_age"] >= 1 and o["state"] == "queued":
+                    o["state"], o["sent_parts"] = "sent", o["parts"]
+                elif o["_age"] >= 3 and o["state"] == "sent" and "sms-never-delivered" not in self.faults:
+                    o["state"], o["delivered_parts"] = "delivered", o["parts"]
+
+    CODE_WORDS = ("code", "otp", "pin", "verification", "验证码", "校验码", "动态码")
+
+    def _sms_mask(self, body):
+        if not self.sms["settings"]["mask_codes"] or "sms-never-masks" in self.faults or not any(w in body.lower() for w in self.CODE_WORDS):
+            return body, 0
+        n = [0]
+        def hide(m):
+            n[0] += 1
+            return "\u2022" * len(m.group(0))
+        return re.sub(r"(?<!\d)\d{4,8}(?!\d)", hide, body), n[0]
+
+    def _sms_parse_to(self, a):
+        raw = str(a.get("to") or "").strip()
+        if not raw:
+            raise ToolError("Missing recipient: pass the phone number in 'to'.")
+        if any(ch in raw for ch in ",;/|\n"):
+            raise ToolError("Only one recipient per call is allowed; send separate messages one at a time.")
+        number = re.sub(r"[ \-.()]", "", raw)
+        if not re.fullmatch(r"\+?\d+", number):
+            raise ToolError("Invalid recipient: use a phone number with digits only (optionally starting with +), not names or text.")
+        digits = number.lstrip("+")
+        if not 3 <= len(digits) <= 15:
+            raise ToolError("Invalid recipient: a phone number has 3 to 15 digits (got %d). Pass exactly one number." % len(digits))
+        return number
+
+    def _sms_is_short(self, number):
+        digits = number.lstrip("+")
+        if not number.startswith("+") and len(digits) < 7:
+            return True
+        national = digits[2:] if number.startswith("+86") else digits
+        return (number.startswith("+86") or len(national) <= 8) and national[:2] in ("10", "95", "96") and not number.startswith("+") or number.startswith("+86") and national[:2] in ("10", "95", "96")
+
+    def _sms_check_text(self, a):
+        text = a.get("text")
+        if text is None:
+            raise ToolError("Missing required parameter 'text' (the message body).")
+        if not str(text).strip():
+            raise ToolError("The message text is empty.")
+        if len(text) > 500:
+            raise ToolError("The message is too long: %d characters, the limit is 500. Shorten it; do not split one request into several messages." % len(text))
+        return text
+
+    @staticmethod
+    def _last10(address):
+        return re.sub(r"\D", "", address)[-10:]
+
+    def t_sms_thread_list(self, a):
+        self._sms_require(0)
+        threads = {}
+        for m in self.sms["inbox"]:
+            threads.setdefault(self._last10(m["address"]), []).append(m)
+        out, masked_total = [], 0
+        for key, msgs in sorted(threads.items(), key=lambda kv: -max(x["date"] for x in kv[1])):
+            last = max(msgs, key=lambda x: x["date"])
+            snippet, masked = self._sms_mask(last["body"])
+            masked_total += masked
+            item = {"thread_id": str(len(out) + 1), "address": last["address"], "last_date": "2026-10-07T12:00:00+08:00", "last_type": last["type"], "message_count": len(msgs),
+                    "unread_count": 0, "snippet": snippet}
+            if masked:
+                item["code_masked"] = True
+            out.append(item)
+        limit, offset = int(a.get("limit", 20)), int(a.get("offset", 0))
+        page = out[offset:offset + limit]
+        return {"count": len(page), "total": len(out), "has_more": offset + len(page) < len(out), "next_offset": None,
+                "masking": {"verification_codes": "masked" if self.sms["settings"]["mask_codes"] else "visible", **({"masked_count": masked_total} if masked_total else {})}, "threads": page}
+
+    def _sms_message_json(self, i, m, body, masked):
+        out = {"id": str(i), "address": m["address"], "type": m["type"], "date": "2026-10-07T12:00:00+08:00", "read": True, "body": body}
+        if masked:
+            out["code_masked"] = True
+        return out
+
+    def t_sms_message_list(self, a):
+        self._sms_require(0)
+        address = str(a.get("address") or "").strip()
+        if not address:
+            raise ToolError("Missing required parameter 'address' (phone number or sender name).")
+        rows = sorted([(i, m) for i, m in enumerate(self.sms["inbox"], 1) if self._last10(m["address"]) == self._last10(address)], key=lambda x: -x[1]["date"])
+        out, masked_total = [], 0
+        for i, m in rows[:int(a.get("limit", 20))]:
+            body, masked = self._sms_mask(m["body"])
+            masked_total += masked
+            out.append(self._sms_message_json(i, m, body, masked))
+        return {"address": address, "count": len(out), "has_more": len(rows) > len(out), "next_offset": None,
+                "masking": {"verification_codes": "masked" if self.sms["settings"]["mask_codes"] else "visible", **({"masked_count": masked_total} if masked_total else {})}, "messages": out}
+
+    def t_sms_search(self, a):
+        self._sms_require(0)
+        q = str(a.get("query") or "").strip()
+        if not q:
+            raise ToolError("Missing required parameter 'query' (text to search for).")
+        out, masked_total = [], 0
+        for i, m in sorted(enumerate(self.sms["inbox"], 1), key=lambda x: -x[1]["date"]):
+            body, masked = self._sms_mask(m["body"])
+            if q.lower() in body.lower():
+                masked_total += masked
+                out.append(self._sms_message_json(i, m, body, masked))
+        out = out[:int(a.get("limit", 20))]
+        return {"query": q, "count": len(out), "has_more": False,
+                "masking": {"verification_codes": "masked" if self.sms["settings"]["mask_codes"] else "visible", **({"masked_count": masked_total} if masked_total else {})}, "messages": out}
+
+    def t_sms_send(self, a):
+        self._sms_require(1)
+        to = self._sms_parse_to(a)
+        text = self._sms_check_text(a)
+        if not self.sms["settings"]["allow_short_numbers"] and "sms-sends-to-short" not in self.faults and self._sms_is_short(to):
+            raise ToolError("Refusing to send to %s: it looks like a short or service number, and messages to those can be charged or are irreversible. "
+                            "Only the user can allow short numbers, in the Messages app settings." % to)
+        out = self.sms["outbox"]
+        dup = next((o for o in out if o["state"] != "failed" and o["to"] == to and o["text"] == text), None)
+        if dup is not None and "sms-no-dedupe" not in self.faults:
+            return {"id": dup["id"], "to": to, "parts": dup["parts"], "state": dup["state"], "submitted": True, "deduplicated": True, "note": "already submitted"}
+        if len(out) >= self.sms["settings"]["rate_limit"]:
+            raise ToolError("Rate limit reached: %d messages were submitted in the last 10 minutes (limit %d)." % (len(out), self.sms["settings"]["rate_limit"]))
+        parts = 1 if len(text) <= 70 else -(-len(text) // 67)
+        entry = {"id": str(self.sms["next_id"]), "to": to, "text": text, "parts": parts, "state": "queued", "sent_parts": 0, "delivered_parts": 0, "error": None}
+        self.sms["next_id"] += 1
+        if "sms-forgets-outbox" not in self.faults:
+            out.insert(0, entry)
+        self.sms_sent_log.append({"to": to, "text": text})
+        self.sms["inbox"].append({"address": to, "body": text, "type": "sent", "date": self.NOW_MS + 10_000 + len(self.sms["inbox"]) * 1000})
+        return {"id": entry["id"], "to": to, "parts": parts, "state": "queued", "submitted": True, "deduplicated": False, "note": "Submitted to the phone's SMS service."}
+
+    def t_sms_send_status(self, a):
+        self._sms_require(1)
+        sid = str(a.get("id") or "").strip()
+        if not sid:
+            raise ToolError("Missing required parameter 'id' (as returned by sms_send).")
+        self._sms_advance()
+        o = next((x for x in self.sms["outbox"] if x["id"] == sid), None)
+        if o is None:
+            raise ToolError("Unknown id '%s': only messages sent by this app with sms_send can be checked." % sid)
+        return {k: o[k] for k in ("id", "to", "parts", "state", "sent_parts", "delivered_parts")} | ({"error": o["error"]} if o["error"] else {})
+
+    def t_sms_compose(self, a):
+        to = self._sms_parse_to(a)
+        text = a.get("text") or None
+        if text is not None and len(text) > 500:
+            raise ToolError("The message is too long: %d characters, the limit is 500." % len(text))
+        if "sms-no-composer" in self.faults:
+            raise ToolError("No messaging screen could be opened on this phone.")
+        draft = {"id": str(len(self.sms["drafts"]) + 1), "to": to, "text": text}
+        self.sms["drafts"].append(draft)
+        return {"opened": True, "draft_id": draft["id"], "to": to, "prefilled_text": text is not None, "note": "Nothing was sent; the user has to press send."}
 
     # ---- notes
     def _note(self, a):
@@ -736,6 +1235,7 @@ class FakeEnv:
         self.consent = L.ConsentDebug(phone)
         self.gateway = L.GatewayDebug(phone)
         self.bridge = FakeBridge(phone, live_plan)
+        self.apps = list(L.SAMPLES)
         self.events = []
 
     def prepare_device(self, opts):
@@ -759,5 +1259,5 @@ class FakeEnv:
     def finish(self, notes):
         self.events.append("finish")
         self.consent.set_mode("off")
-        for s in L.SAMPLES.values():
-            self.ext.disable(s.package)
+        for name in self.apps:
+            self.ext.disable(L.SAMPLES[name].package)

@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import org.agentos.runtime.i18n.MessageRef
 import java.net.URI
 
 /**
@@ -26,6 +27,9 @@ import java.net.URI
  *
  * **整个插件校验失败**（[ManifestResult.Rejected]）：JSON 不合法、不符合 schema、`org.agentos` 部分不合规、
  * 两处声明了同名服务器、导入的插件包里有 Binder 服务器。一次收集全部能发现的问题。
+ *
+ * **错误信息不是文字**：每一项是 [ExtMessages] 的 key + 参数（[MessageRef]），位置（`plugin.json › name`）是文件和字段路径；
+ * 用哪种语言显示由界面定（核心层是纯 Kotlin / JVM，用不了 Android 资源）。参数里可能有第三方文字（服务器名、图标路径…），界面渲染前负责清理。
  *
  * 不做的事（归调用方）：Service 是否属于这个 App、是否导出、是否要求 BIND_MCP_SERVICE（Android 侧，W14 的 AppPluginScanner）；
  * 文件系统层面的检查（符号链接、`..`、大小、数量，PackageValidator，W18）；`SKILL.md` 的内容；Hook 的解析（W22）。
@@ -92,7 +96,7 @@ object ManifestReader {
                 errors += ManifestError(
                     ManifestErrorCode.DUPLICATE_SERVER,
                     "$PLUGIN_FILE › extensions.org.agentos.mcpServers / $MCP_FILE › mcpServers.$server",
-                    "服务器名 \"$server\" 在同一个插件里出现了不止一次",
+                    msg(ExtMessages.DUPLICATE_SERVER, server),
                 )
             }
         }
@@ -117,45 +121,44 @@ object ManifestReader {
 
     private fun checkPlugin(plugin: JsonObject, errors: MutableList<ManifestError>): String? {
         val where = PLUGIN_FILE
-        for (key in plugin.keys - PLUGIN_KEYS) errors += schema("$where › $key", "不允许的字段（Agent Plugins 1.0 的 plugin.json 只有固定的几个顶层字段，客户端专属内容放在 extensions 下）")
+        for (key in plugin.keys - PLUGIN_KEYS) errors += schema("$where › $key", msg(ExtMessages.PLUGIN_FIELD_NOT_ALLOWED))
         when (val s = plugin["\$schema"]) {
-            null -> errors += schema("$where › \$schema", "缺少必填项 \$schema")
-            else -> if (s.stringOrNull() != PLUGIN_SCHEMA_ID) errors += schema("$where › \$schema", "必须是 $PLUGIN_SCHEMA_ID")
+            null -> errors += schema("$where › \$schema", msg(ExtMessages.MISSING_REQUIRED, "\$schema"))
+            else -> if (s.stringOrNull() != PLUGIN_SCHEMA_ID) errors += schema("$where › \$schema", msg(ExtMessages.MUST_BE_VALUE, PLUGIN_SCHEMA_ID))
         }
         var name: String? = null
         when (val n = plugin["name"]) {
-            null -> errors += schema("$where › name", "缺少必填项 name")
+            null -> errors += schema("$where › name", msg(ExtMessages.MISSING_REQUIRED, "name"))
             else -> {
                 val text = n.stringOrNull()
                 when {
-                    text == null -> errors += schema("$where › name", "必须是字符串")
-                    text.isEmpty() || text.length > MAX_NAME_LENGTH -> errors += schema("$where › name", "长度必须在 1 到 $MAX_NAME_LENGTH 个字符之间")
-                    NAME_REGEX.matchEntire(text) == null ->
-                        errors += schema("$where › name", "只能用小写字母、数字、`.`、`-`，首尾必须是字母或数字，不能出现 `--` 或 `..`")
+                    text == null -> errors += schema("$where › name", msg(ExtMessages.MUST_BE_STRING))
+                    text.isEmpty() || text.length > MAX_NAME_LENGTH -> errors += schema("$where › name", msg(ExtMessages.NAME_LENGTH, MAX_NAME_LENGTH.toString()))
+                    NAME_REGEX.matchEntire(text) == null -> errors += schema("$where › name", msg(ExtMessages.NAME_PATTERN))
                     else -> name = text
                 }
             }
         }
         for (key in listOf("version", "description", "homepage", "repository", "license")) {
             val v = plugin[key] ?: continue
-            if (v.stringOrNull() == null) errors += schema("$where › $key", "必须是字符串")
+            if (v.stringOrNull() == null) errors += schema("$where › $key", msg(ExtMessages.MUST_BE_STRING))
         }
         plugin["author"]?.let { author ->
             if (author !is JsonObject) {
-                errors += schema("$where › author", "必须是对象")
+                errors += schema("$where › author", msg(ExtMessages.MUST_BE_OBJECT))
             } else {
-                for (key in author.keys - AUTHOR_KEYS) errors += schema("$where › author.$key", "不允许的字段")
-                for (key in AUTHOR_KEYS) author[key]?.let { if (it.stringOrNull() == null) errors += schema("$where › author.$key", "必须是字符串") }
+                for (key in author.keys - AUTHOR_KEYS) errors += schema("$where › author.$key", msg(ExtMessages.FIELD_NOT_ALLOWED))
+                for (key in AUTHOR_KEYS) author[key]?.let { if (it.stringOrNull() == null) errors += schema("$where › author.$key", msg(ExtMessages.MUST_BE_STRING)) }
             }
         }
         plugin["keywords"]?.let { keywords ->
-            if (keywords !is JsonArray || keywords.any { it.stringOrNull() == null }) errors += schema("$where › keywords", "必须是字符串数组")
+            if (keywords !is JsonArray || keywords.any { it.stringOrNull() == null }) errors += schema("$where › keywords", msg(ExtMessages.MUST_BE_STRING_ARRAY))
         }
         plugin["extensions"]?.let { extensions ->
             if (extensions !is JsonObject) {
-                errors += schema("$where › extensions", "必须是对象")
+                errors += schema("$where › extensions", msg(ExtMessages.MUST_BE_OBJECT))
             } else {
-                for ((key, value) in extensions) if (value !is JsonObject) errors += schema("$where › extensions.$key", "每个分区必须是对象")
+                for ((key, value) in extensions) if (value !is JsonObject) errors += schema("$where › extensions.$key", msg(ExtMessages.SECTION_MUST_BE_OBJECT))
             }
         }
         return name
@@ -172,21 +175,21 @@ object ManifestReader {
         val servers = org["mcpServers"] ?: return
         val where = "$PLUGIN_FILE › extensions.org.agentos.mcpServers"
         if (origin == PluginOrigin.IMPORTED) {
-            errors += ManifestError(ManifestErrorCode.BINDER_NOT_ALLOWED, where, "导入的插件包不能声明本地 App 的 Binder 服务（只有已安装 App 内嵌的插件可以）")
+            errors += ManifestError(ManifestErrorCode.BINDER_NOT_ALLOWED, where, msg(ExtMessages.BINDER_NOT_ALLOWED))
             return
         }
         if (servers !is JsonObject) {
-            errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, where, "必须是对象：服务器名 → { \"service\": \"<Service 完整类名>\" }")
+            errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, where, msg(ExtMessages.ORG_SERVERS_SHAPE))
             return
         }
         for ((serverName, decl) in servers) {
             val at = "$where.$serverName"
             val service = (decl as? JsonObject)?.get("service")?.stringOrNull()
             when {
-                serverName.isEmpty() -> errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, where, "服务器名不能为空")
-                decl !is JsonObject -> errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, at, "必须是对象 { \"service\": \"<Service 完整类名>\" }")
+                serverName.isEmpty() -> errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, where, msg(ExtMessages.SERVER_NAME_EMPTY))
+                decl !is JsonObject -> errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, at, msg(ExtMessages.ORG_SERVER_SHAPE))
                 service.isNullOrBlank() || service.any { it.isWhitespace() } ->
-                    errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, "$at.service", "必须是 Service 的完整类名（非空、不含空白）")
+                    errors += ManifestError(ManifestErrorCode.ORG_AGENTOS, "$at.service", msg(ExtMessages.SERVICE_CLASS_NAME))
                 else -> out += McpServerDecl.Binder(serverName, service)
             }
         }
@@ -201,7 +204,7 @@ object ManifestReader {
             if (safeRelativePath(rawIcon)) {
                 icon = rawIcon
             } else {
-                unsupported += UnsupportedPart(UnsupportedKind.UNSAFE_PATH, "$PLUGIN_FILE › extensions.com.openai.interface", "图标路径 \"$rawIcon\" 必须以 ./ 开头，并且不能跑出插件根目录")
+                unsupported += UnsupportedPart(UnsupportedKind.UNSAFE_PATH, "$PLUGIN_FILE › extensions.com.openai.interface", msg(ExtMessages.ICON_PATH_UNSAFE, rawIcon))
             }
         }
         return PluginDisplay(ui.string("displayName"), ui.string("shortDescription"), ui.string("longDescription"), icon)
@@ -217,33 +220,33 @@ object ManifestReader {
         errors: MutableList<ManifestError>,
     ) {
         val where = MCP_FILE
-        for (key in mcp.keys - setOf("\$schema", "mcpServers")) errors += schema("$where › $key", "不允许的字段")
+        for (key in mcp.keys - setOf("\$schema", "mcpServers")) errors += schema("$where › $key", msg(ExtMessages.FIELD_NOT_ALLOWED))
         when (val s = mcp["\$schema"]) {
-            null -> errors += schema("$where › \$schema", "缺少必填项 \$schema")
-            else -> if (s.stringOrNull() != MCP_SCHEMA_ID) errors += schema("$where › \$schema", "必须是 $MCP_SCHEMA_ID")
+            null -> errors += schema("$where › \$schema", msg(ExtMessages.MISSING_REQUIRED, "\$schema"))
+            else -> if (s.stringOrNull() != MCP_SCHEMA_ID) errors += schema("$where › \$schema", msg(ExtMessages.MUST_BE_VALUE, MCP_SCHEMA_ID))
         }
         val declared = mcp["mcpServers"]
         if (declared == null) {
-            errors += schema("$where › mcpServers", "缺少必填项 mcpServers")
+            errors += schema("$where › mcpServers", msg(ExtMessages.MISSING_REQUIRED, "mcpServers"))
             return
         }
         if (declared !is JsonObject) {
-            errors += schema("$where › mcpServers", "必须是对象")
+            errors += schema("$where › mcpServers", msg(ExtMessages.MUST_BE_OBJECT))
             return
         }
         for ((serverName, decl) in declared) {
             val at = "$where › mcpServers.$serverName"
             names += serverName
             if (decl !is JsonObject) {
-                errors += schema(at, "必须是对象")
+                errors += schema(at, msg(ExtMessages.MUST_BE_OBJECT))
                 continue
             }
             when (val type = decl["type"]?.stringOrNull()) {
                 "stdio" -> if (checkStdio(decl, at, errors)) {
-                    unsupported += UnsupportedPart(UnsupportedKind.STDIO_SERVER, at, "stdio 服务器需要在手机上启动进程和解释器，AgentOS 不支持")
+                    unsupported += UnsupportedPart(UnsupportedKind.STDIO_SERVER, at, msg(ExtMessages.STDIO_UNSUPPORTED))
                 }
                 "sse" -> if (checkRemote(decl, at, errors)) {
-                    unsupported += UnsupportedPart(UnsupportedKind.SSE_SERVER, at, "旧的 HTTP+SSE 传输，AgentOS 只支持 Streamable HTTP")
+                    unsupported += UnsupportedPart(UnsupportedKind.SSE_SERVER, at, msg(ExtMessages.SSE_UNSUPPORTED))
                 }
                 "streamable-http" -> if (checkRemote(decl, at, errors)) {
                     val url = decl["url"]!!.stringOrNull()!!
@@ -255,52 +258,52 @@ object ManifestReader {
                         servers += McpServerDecl.StreamableHttp(serverName, url, headerNames)
                     }
                 }
-                else -> errors += schema("$at.type", if (type == null) "缺少 type（stdio、streamable-http、sse 之一）" else "未知的服务器类型 \"$type\"（只有 stdio、streamable-http、sse）")
+                else -> errors += schema("$at.type", if (type == null) msg(ExtMessages.SERVER_TYPE_MISSING) else msg(ExtMessages.SERVER_TYPE_UNKNOWN, type))
             }
         }
     }
 
     private fun checkStdio(decl: JsonObject, at: String, errors: MutableList<ManifestError>): Boolean {
         val before = errors.size
-        for (key in decl.keys - STDIO_KEYS) errors += schema("$at.$key", "stdio 服务器不允许的字段")
+        for (key in decl.keys - STDIO_KEYS) errors += schema("$at.$key", msg(ExtMessages.STDIO_FIELD_NOT_ALLOWED))
         val command = decl["command"]
-        if (command == null) errors += schema("$at.command", "缺少必填项 command")
-        else if (command.stringOrNull().isNullOrEmpty()) errors += schema("$at.command", "必须是非空字符串")
-        decl["args"]?.let { if (it !is JsonArray || it.any { a -> a.stringOrNull() == null }) errors += schema("$at.args", "必须是字符串数组") }
+        if (command == null) errors += schema("$at.command", msg(ExtMessages.MISSING_REQUIRED, "command"))
+        else if (command.stringOrNull().isNullOrEmpty()) errors += schema("$at.command", msg(ExtMessages.MUST_BE_NONEMPTY_STRING))
+        decl["args"]?.let { if (it !is JsonArray || it.any { a -> a.stringOrNull() == null }) errors += schema("$at.args", msg(ExtMessages.MUST_BE_STRING_ARRAY)) }
         decl["env"]?.let { env ->
             if (env !is JsonObject || env.values.any { it.stringOrNull() == null }) {
-                errors += schema("$at.env", "必须是 字符串 → 字符串 的对象")
+                errors += schema("$at.env", msg(ExtMessages.MUST_BE_STRING_MAP))
             } else {
-                for (key in env.keys.filter { it in RESERVED_ENV }) errors += schema("$at.env.$key", "PLUGIN_ROOT、PLUGIN_DATA 是保留的环境变量名")
+                for (key in env.keys.filter { it in RESERVED_ENV }) errors += schema("$at.env.$key", msg(ExtMessages.ENV_RESERVED))
             }
         }
         decl["cwd"]?.let { cwd ->
             val text = cwd.stringOrNull()
-            if (text == null || !CWD_REGEX.matches(text)) errors += schema("$at.cwd", "必须以 ./、\${PLUGIN_ROOT} 或 \${PLUGIN_DATA} 开头")
+            if (text == null || !CWD_REGEX.matches(text)) errors += schema("$at.cwd", msg(ExtMessages.CWD_PREFIX))
         }
         return errors.size == before
     }
 
     private fun checkRemote(decl: JsonObject, at: String, errors: MutableList<ManifestError>): Boolean {
         val before = errors.size
-        for (key in decl.keys - REMOTE_KEYS) errors += schema("$at.$key", "不允许的字段")
+        for (key in decl.keys - REMOTE_KEYS) errors += schema("$at.$key", msg(ExtMessages.FIELD_NOT_ALLOWED))
         val url = decl["url"]
-        if (url == null) errors += schema("$at.url", "缺少必填项 url")
-        else if (url.stringOrNull().isNullOrEmpty()) errors += schema("$at.url", "必须是非空字符串")
+        if (url == null) errors += schema("$at.url", msg(ExtMessages.MISSING_REQUIRED, "url"))
+        else if (url.stringOrNull().isNullOrEmpty()) errors += schema("$at.url", msg(ExtMessages.MUST_BE_NONEMPTY_STRING))
         decl["headers"]?.let { h ->
-            if (h !is JsonObject || h.values.any { it.stringOrNull() == null }) errors += schema("$at.headers", "必须是 字符串 → 字符串 的对象")
+            if (h !is JsonObject || h.values.any { it.stringOrNull() == null }) errors += schema("$at.headers", msg(ExtMessages.MUST_BE_STRING_MAP))
         }
         return errors.size == before
     }
 
     // ------------------------------------------------------------------ 小工具
 
-    /** 只收 `https://`、有主机名、不带用户名密码的地址；否则返回给人看的原因。 */
-    internal fun httpsProblem(url: String): String? {
-        val uri = runCatching { URI(url) }.getOrNull() ?: return "不是合法的地址"
-        if (!"https".equals(uri.scheme, ignoreCase = true)) return "只支持 https:// 地址"
-        if (uri.host.isNullOrEmpty()) return "地址里没有主机名"
-        if (uri.userInfo != null) return "地址里不能带用户名和密码"
+    /** 只收 `https://`、有主机名、不带用户名密码的地址；否则返回原因（文案 key，没有参数：地址本身是第三方文字，不进文案）。 */
+    internal fun httpsProblem(url: String): MessageRef? {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return msg(ExtMessages.URL_INVALID)
+        if (!"https".equals(uri.scheme, ignoreCase = true)) return msg(ExtMessages.URL_NOT_HTTPS)
+        if (uri.host.isNullOrEmpty()) return msg(ExtMessages.URL_NO_HOST)
+        if (uri.userInfo != null) return msg(ExtMessages.URL_USERINFO)
         return null
     }
 
@@ -321,17 +324,19 @@ object ManifestReader {
         val element = try {
             Json.parseToJsonElement(text)
         } catch (e: Exception) {
-            errors += ManifestError(ManifestErrorCode.NOT_JSON, file, "不是合法的 JSON")
+            errors += ManifestError(ManifestErrorCode.NOT_JSON, file, msg(ExtMessages.NOT_JSON))
             return null
         }
         if (element !is JsonObject) {
-            errors += ManifestError(ManifestErrorCode.NOT_JSON, file, "根必须是 JSON 对象")
+            errors += ManifestError(ManifestErrorCode.NOT_JSON, file, msg(ExtMessages.ROOT_NOT_OBJECT))
             return null
         }
         return element
     }
 
-    private fun schema(location: String, message: String) = ManifestError(ManifestErrorCode.SCHEMA, location, message)
+    private fun schema(location: String, message: MessageRef) = ManifestError(ManifestErrorCode.SCHEMA, location, message)
+
+    private fun msg(key: String, vararg args: String) = MessageRef(key, args.toList())
 
     private fun JsonElement.stringOrNull(): String? = (this as? JsonPrimitive)?.takeIf { it.isString }?.content
 

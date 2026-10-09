@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.Clock
@@ -499,8 +500,9 @@ class ConsentCoordinatorTest {
         runCurrent()
         val resolution = f.surface.resolutions["r1"]!!
         val notice = resolution.notice
-        assertTrue(notice != null && "没能保存" in notice && "下次还会询问" in notice, "the notice says it was not saved: $notice")
-        assertFalse("/data/secret/path" in notice!!, "internal paths stay out of the user-facing notice")
+        // a fixed message (no arguments): the reason given by the writer ("/data/secret/path ...") never reaches the user
+        assertEquals(MessageRef.of(ConsentMessages.NOTICE_UNSAVED_POLICY), notice)
+        assertTrue(notice!!.args.isEmpty(), "internal paths stay out of the user-facing notice")
     }
 
     @Test
@@ -512,7 +514,7 @@ class ConsentCoordinatorTest {
         f1.coordinator.respond("t", ConsentChoice.ALWAYS_ALLOW)
         assertEquals(ConsentDecision.Allow(), d1.await())
         runCurrent()
-        assertTrue(f1.surface.resolutions["t"]!!.notice != null)
+        assertEquals(MessageRef.of(ConsentMessages.NOTICE_UNSAVED_ERROR), f1.surface.resolutions["t"]!!.notice)
 
         val hanging = FakeWriter().also { it.gate = CompletableDeferred() }
         val f2 = fixture(ConsentConfig(writeTimeoutMillis = 2_000), hanging)
@@ -524,7 +526,7 @@ class ConsentCoordinatorTest {
         advanceTimeBy(2_000)
         runCurrent()
         assertEquals(ConsentDecision.Allow(), d2.await())
-        assertTrue(f2.surface.resolutions["h"]!!.notice!!.contains("没能保存"))
+        assertEquals(MessageRef.of(ConsentMessages.NOTICE_UNSAVED_TIMEOUT), f2.surface.resolutions["h"]!!.notice)
     }
 
     // ------------------------------------------------------------------ 界面回调
@@ -608,12 +610,13 @@ class ConsentCoordinatorTest {
         f.ask(req("r1", title = "追加备忘", packageName = "com.example.app"))
         runCurrent()
         val v = f.coordinator.pending.value.single()
-        assertEquals("要允许「追加备忘」吗？", v.title)
-        assertEquals("由 com.example.app 发起", v.initiatorLine)
+        assertEquals(MessageRef.of(ConsentMessages.TITLE, "追加备忘"), v.title)
+        assertEquals(MessageRef.of(ConsentMessages.INITIATOR_NAMED, "com.example.app"), v.initiatorLine)
         assertEquals(CallerKind.APP, v.caller.kind)
         assertEquals("com.example.app", v.caller.packageName)
-        assertEquals("来自插件「com.example.notes」 · 服务器「main」", v.sourceLine)
-        assertEquals("会修改数据", v.riskLabel)
+        assertEquals(MessageRef.of(ConsentMessages.SOURCE, "com.example.notes", "main"), v.sourceLine)
+        assertEquals(MessageRef.of(ConsentMessages.RISK_WRITE), v.riskLabel)
+        assertEquals(MessageRef.of(ConsentMessages.RISK_DESC_WRITE), v.riskDescription)
         assertEquals(ConsentSeverity.ELEVATED, v.severity)
         assertIs<ConsentView>(v)
         f.coordinator.close()

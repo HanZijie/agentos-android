@@ -1,4 +1,4 @@
-# 示例 App：闹钟、日历、备忘录（W17 的一部分，提前做）
+# 示例 App：闹钟、日历、备忘录、待办、短信（W17 的一部分，提前做；待办、短信见 [next-apps-plan.md](next-apps-plan.md)）
 
 > **目的**：三个界面精美、有完整增删改查的独立 App；每个 App 内嵌一个 Agent Plugin（`assets/agent-plugin/`）并导出 Binder MCP 服务，装在手机上后，AgentOS 能发现它们、列出工具、经 MCP 完整操作它们的数据，App 界面实时刷新。
 > **路线**：严格按 [extensions.md](extensions.md) 第 4.1、5.1 节（App 内嵌插件 + `McpBinderService` + `BIND_MCP_SERVICE`），不开回环 HTTP 端口。平台侧由 C 车道做 `sdk/plugin-sdk` 与 Extension Host，A 车道做 `core/extensions`，D 车道做确认界面与插件管理页；三个 App 各自一个 SubAgent。
@@ -11,6 +11,8 @@
 | 闹钟 | `plugins/samples/alarm` | `org.agentos.sample.alarm` | `alarm` | `alarm` |
 | 日历 | `plugins/samples/calendar` | `org.agentos.sample.calendar` | `calendar` | `calendar` |
 | 备忘录 | `plugins/samples/notes` | `org.agentos.sample.notes` | `notes` | `notes` |
+| 待办 | `plugins/samples/todo` | `org.agentos.sample.todo` | `todo` | `todo` |
+| 短信 | `plugins/samples/sms` | `org.agentos.sample.sms` | `sms` | `sms` |
 
 - 目录里有 `build.gradle.kts` 就自动成为 Gradle 模块 `:plugins:samples:<name>`（`settings.gradle.kts` 已写好）。根 `build.gradle.kts` 已统一 SDK 级别（minSdk 35、compileSdk 36）、字节码版本和签名。
 - 界面用 **Jetpack Compose + Material 3**。依赖已锁在 `gradle/libs.versions.toml`（`androidx-compose-bom` 等，Kotlin Compose 插件 `libs.plugins.kotlin.compose`）。**不要自己加别的界面库，也不要升级这几项**（BOM 2026.09 要 AGP 9.1 和 compileSdk 37，用不了）；确实需要新依赖，写进报告第 5 节，由整合人决定。数据库用平台自带的 `SQLiteOpenHelper`，不引入 Room / KSP。
@@ -84,7 +86,7 @@ class McpToolResult {
 - C7a 同时提供测试用的客户端（`McpBinderClient`，Extension Host 也用它）：给定一个 `ComponentName` 或 `IMcpService`，可以 `initialize`、`listTools`、`callTool`，方便示例 App 在 debug 构建里做“自测入口”和设备上的 androidTest。
 - 实现上用不用官方 MCP Kotlin SDK 由 C 在 S5 里定，不影响上面的公开接口。
 
-## 4. 三个 App 的工具清单（最低要求；可以多，不能少，名字和必填参数不能改）
+## 4. 五个 App 的工具清单（最低要求；可以多，不能少，名字和必填参数不能改）
 
 ### 4.1 闹钟 `alarm`
 
@@ -100,10 +102,11 @@ class McpToolResult {
 | `alarm_delete` | `id` | — | destructive |
 | `alarm_next` | — | — | 下一个会响的闹钟和时间；没有则返回 null |
 | `alarm_dismiss` | — | `id` | 关闭正在响的闹钟（没有在响则返回错误说明） |
+| `alarm_system_next` | — | — | 只读：系统范围的下一个闹钟（`AlarmManager.getNextAlarmClock()`，含其他时钟 App 设的）、时间、`owned_by_this_app`；系统里没有则返回 null。`alarm_next` 仍只看本 App（next-apps-plan.md 第 1 节 A2） |
 
 ### 4.2 日历 `calendar`
 
-界面：月视图（有日程的日期带点 / 色条）、日程列表（议程）、周视图或日视图至少一种、新建 / 编辑日程（标题、起止、全天、地点、备注、颜色、提醒、重复）、多个日历（可显示 / 隐藏）、搜索。提醒到点发通知（`AlarmManager` + 通知）。数据用自己的 SQLite，不用系统 `CalendarContract`。
+界面：月视图（有日程的日期带点 / 色条）、日程列表（议程）、周视图或日视图至少一种、新建 / 编辑日程（标题、起止、全天、地点、备注、颜色、提醒、重复）、多个日历（可显示 / 隐藏）、搜索。提醒到点发通知。**数据层（next-apps-plan.md 第 2 节）：系统日历库 `CalendarContract` + 本机日历并存**——有 Google / CalDAV 账号的日历由系统同步到云端（`READ_CALENDAR` / `WRITE_CALENDAR` 运行时权限，未授权时工具返回明确错误，本机日历照常）；本机日历是 App 自己的 SQLite（无账号、无权限时可用），提醒仍由 `AlarmManager` + 通知，账号日历的提醒写 `Reminders` 表由系统日历 App 发。工具名和必填参数不变，只加字段：`calendar_list` 多了 `account`、`account_type`、`source`（`google` / `caldav` / `local` / `other`）、`writable`、`storage`，`is_default` 表示“默认写入日历”；`calendar_create` / `calendar_delete` 只作用于本机日历；`event_create` 缺省日历 = 用户选的“默认写入日历”，否则第一个“可写、可见、非本机”的日历，再否则本机默认日历；读到无法无损表达的 RRULE 时 `recurrence: "custom"` 并带 `rrule` 原文，更新被拒。详见 `plugins/samples/calendar/README.md`。
 
 | 工具 | 必填参数 | 可选参数 | 说明 |
 |---|---|---|---|
@@ -136,11 +139,39 @@ class McpToolResult {
 | `note_delete` | `id` | — | destructive：永久删除；只允许删回收站里的备忘录，否则返回错误提示先 `note_trash` |
 | `tag_list` | — | — | 全部标签及各自的备忘录数 |
 
+### 4.4 待办 `todo`
+
+界面：概览卡、按“已逾期 / 今天 / 即将到来 / 无日期 / 搁置 / 已完成”分组的列表（优先级色条、状态圆圈、子任务展开）、快速添加、左滑完成 / 右滑删除（带撤销）、筛选 chips、详情 / 编辑页、空状态。数据在自己的 SQLite，仓库单例 + `StateFlow`，界面与 MCP 共用。`status`：`todo` / `doing` / `done` / `shelved`；`priority`：`high` / `medium` / `low`；`due`：带偏移的 ISO-8601 时间，或仅日期（全天）；只支持一层子任务（`parent_id`）。v1 不自带提醒（到期提醒由 Agent 经日历 `reminder_minutes` 或闹钟编排）。详见 [next-apps-plan.md](next-apps-plan.md) 第 3 节和 `plugins/samples/todo/README.md`。
+
+| 工具 | 必填参数 | 可选参数 | 说明 |
+|---|---|---|---|
+| `todo_list` | — | `status`, `priority`, `tag`, `due_before`, `due_after`, `overdue_only`, `parent_id`, `include_done`（默认 false）, `limit`（默认 50，最大 200）, `offset` | 按优先级、截止时间排序；返回 `has_more` |
+| `todo_get` | `id` | — | 含子任务 |
+| `todo_create` | `title` | `notes`, `priority`, `due`, `due_all_day`, `tags`, `parent_id`, `status` | 建子任务靠 `parent_id` |
+| `todo_update` | `id` | 同 create 的各字段 | 只改给出的；idempotent |
+| `todo_set_status` | `id`, `status` | — | 完成时写 `completed_at`；idempotent |
+| `todo_delete` | `id` | — | destructive：有子任务时连带删除并返回删除数 |
+| `todo_search` | `query` | `status`, `limit` | 标题、备注、标签的包含匹配 |
+| `todo_summary` | — | — | 各状态计数、已逾期数、今天到期、本周到期；只读 |
+
+### 4.5 短信 `sms`
+
+能力型路线：**不当默认短信应用**，`READ_SMS` 读系统短信库，`SmsManager` 发送，发送异步、自维护 `outbox`。权限被限制或未授权时进入“仅撰写”模式（只有 `sms_compose` 可用，其余工具返回明确错误，工具目录不变）。独立示例 App，不是自带插件：读也默认每次确认。安全规则（单收件人、长度上限、短号拒绝、频率限制、去重、验证码默认遮蔽）和 V1 实测结论见 [next-apps-plan.md](next-apps-plan.md) 第 4 节和 `plugins/samples/sms/README.md`。
+
+| 工具 | 必填参数 | 可选参数 | 说明 |
+|---|---|---|---|
+| `sms_thread_list` | — | `limit`, `offset` | 会话列表与摘要；返回 `has_more` |
+| `sms_message_list` | `address` | `since`, `until`, `limit`, `offset` | 某号码的消息；疑似验证码默认遮蔽 |
+| `sms_search` | `query` | `limit` | 正文包含匹配；疑似验证码默认遮蔽 |
+| `sms_send` | `to`, `text` | — | destructive（高风险，每次确认）；异步，返回本地 `id` 与 `parts`，不承诺送达 |
+| `sms_send_status` | `id` | — | 本 App 发出的某条：`queued` / `sent` / `delivered` / `failed` |
+| `sms_compose` | `to` | `text` | `ACTION_SENDTO smsto:` 打开系统短信界面预填，不需要短信权限，不发送 |
+
 ## 5. 怎么验证
 
 1. **JVM 单元测试**：数据层 + 工具层，`./gradlew :plugins:samples:<name>:testDebugUnitTest`。
 2. **设备（模拟器）**：装 debug 包，界面逐页走一遍，截图；SDK 合入后加“自测入口”（debug 构建的导出 `BroadcastReceiver` 或 `adb shell am start` 的 Activity，经 `McpBinderClient` 绑自己的 Service，依次 `tools/list`、增删改查全部工具，结果写 logcat 一行 JSON 摘要），确认 MCP 路径通。
-3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），读各 App 的状态确认结果。**读状态用各 App 的 debug `dump`（`--es cmd dump [--ei offset N --ei limit M]`，结果在广播 result data，按 `next_offset` 翻页），复位用 `reset`；不要在真机上跑 `run-as sqlite3`（user 构建的真机没有 sqlite3）。**闹钟的 dump 带 `scheduled[].registered`，是 `AlarmManager` 里真的登记了的实测。日历的 `dump` 一样（分页、`events` 每个系列一行、时间是带偏移的 ISO 字符串、提醒是 `reminder_minutes`），`reset` 返回 `{cleared, calendars_remaining, remaining_scheduled}`，同步完成，不用轮询；`clear` 只写 logcat。
+3. **和 AgentOS 联调**（整合人在 Pixel 8 上做）：装好三个 App，AgentOS 的插件页启用，经 acp-bridge 发自然语言（“明早 7 点叫我”“下周三下午 3 点和王总开会”“把刚才那条备忘录加上标签”），读各 App 的状态确认结果。**读状态用各 App 的 debug `dump`（`--es cmd dump [--ei offset N --ei limit M]`，结果在广播 result data，按 `next_offset` 翻页），复位用 `reset`；不要在真机上跑 `run-as sqlite3`（user 构建的真机没有 sqlite3）。**闹钟的 dump 带 `scheduled[].registered`，是 `AlarmManager` 里真的登记了的实测。日历的 `dump` 一样（分页、`events` 每个系列一行、时间是带偏移的 ISO 字符串、提醒是 `reminder_minutes`），`reset` 返回 `{cleared, calendars_remaining, remaining_scheduled}`，同步完成，不用轮询；`clear` 只写 logcat。**日历改用系统日历库之后**：`dump` 的 `events[]` 只列**本 App 创建的**日程（本机日历全部 + 系统日历里带本 App `CUSTOM_APP_PACKAGE` 标记的），别人的 / 同步下来的日程从不列出，只在 `other_events` 里数个数；`reset` 只删本 App 创建的日程和本机的非默认日历，**绝不整库清理**——所以带真实账号的设备上跑 e2e 也不会碰用户的日程。`CUSTOM_APP_PACKAGE` 是约定不是安全边界（任何 App 都能写任意字符串）。待办、短信的 `dump` / `reset` 同一口径（短信的 `reset` 只清自己的 `outbox` 与草稿，不碰系统短信）。
    驱动是 `tests/device/acp-channel/sample_apps_e2e.py`（脚本模式；`--live` 用真实模型，要先开电脑端接入、最后配真实模型并核对 `modelBaseUrl`）。
 4. 提交前：`./gradlew :plugins:samples:<name>:assembleDebug :plugins:samples:<name>:assembleRelease :plugins:samples:<name>:lintDebug` 通过；`git diff | grep -c` 自查没有任何 key。
 

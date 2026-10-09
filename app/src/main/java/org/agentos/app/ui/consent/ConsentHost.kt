@@ -16,6 +16,7 @@ import org.agentos.app.agent.consent.ConsentService
 import org.agentos.app.agent.consent.ConsentWire
 import org.agentos.app.agent.consent.ConsentWire.AuthRequest
 import org.agentos.app.agent.consent.ConsentWire.Card
+import org.agentos.app.i18n.AndroidStrings
 import org.agentos.internal.IConsentListener
 import org.agentos.internal.IConsentService
 import org.agentos.runtime.consent.ConsentChoice
@@ -69,7 +70,7 @@ object ConsentHost {
             main.post {
                 queue.remove(id)
                 if (r?.notice != null && r.end == ConsentEnd.ANSWERED) {
-                    runCatching { Toast.makeText(app, r.notice, Toast.LENGTH_LONG).show() }
+                    runCatching { Toast.makeText(app, AndroidStrings(app).get(r.notice), Toast.LENGTH_LONG).show() }
                 }
                 if (shownFor == id) closeDialog()
                 render()

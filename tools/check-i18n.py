@@ -37,7 +37,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # 汉字、部首、假名、CJK 标点、全角形式（中文引号「」『』也在 3000–303F）
 CJK = re.compile("[\u2e80-\u2fdf\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]")
 
-SKIP_DIRS = {".git", ".gradle", ".kotlin", ".idea", "build", "node_modules", ".mavis", "xhs-post", "reference", "spikes", "tests"}
+# `.worktrees/` holds the other checkouts of this repository (AGENTS.md section 7); they are not part of this tree and may be on any branch.
+SKIP_DIRS = {".git", ".gradle", ".kotlin", ".idea", "build", "node_modules", ".mavis", ".worktrees", "xhs-post", "reference", "spikes", "tests"}
 SOURCE_EXTS = (".kt", ".java")
 
 WAIVER = "i18n-ok"

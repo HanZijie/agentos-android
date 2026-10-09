@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      只申请两个短信权限（都是运行时权限；Android 15 起对非应用商店安装的 App 属于“受限设置”，用户要在应用信息里先点“允许受限制的设置”）：
+      READ_SMS 读系统短信库，SEND_SMS 用 SmsManager 发送。不是默认短信应用，所以没有 RECEIVE_SMS / SEND_RESPOND_VIA_MESSAGE / WRITE_SMS，
+      也没有 SMS_DELIVER 一类接收器。sent / delivered 回调是 PendingIntent 发给自己的显式广播，不需要接收权限。
+      本 App 不联网。
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- 没有电话功能的设备（平板、模拟器的某些镜像）也能安装：此时 sms_compose 以外的工具会返回明确错误 -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
+    <application
+        android:name=".SmsApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Sms">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Binder MCP 服务（docs/extensions.md 4.1）：AgentOS 用 queryIntentServices(PLUGIN) 发现它，
+          读 assets/agent-plugin/ 里的插件包；只有持有 BIND_MCP_SERVICE（signature，AgentOS 独有）的调用方才能 bind。
+        -->
+        <service
+            android:name=".agent.SmsMcpService"
+            android:exported="true"
+            android:permission="org.agentos.permission.BIND_MCP_SERVICE">
+            <intent-filter>
+                <action android:name="org.agentos.intent.action.PLUGIN" />
+            </intent-filter>
+            <meta-data
+                android:name="org.agentos.plugin.assets"
+                android:value="agent-plugin" />
+        </service>
+
+        <!-- SmsManager 的 sent / delivered 回调：只接收自己发出的 PendingIntent，不导出 -->
+        <receiver
+            android:name=".platform.SmsStatusReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

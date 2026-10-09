@@ -90,10 +90,12 @@ interface AgentOsGateway {
 }
 
 /**
- * 备忘录**自己选择**的最小工具范围（docs/third-party-acp.md 5）：只让 AgentOS 用这两个工具，所以备忘文字里的注入指令碰不到别的工具。
+ * 备忘录**自己选择**的最小工具范围（docs/third-party-acp.md 5）：只让 AgentOS 用这三个工具，所以备忘文字里的注入指令碰不到别的工具。
+ * 实际可用 = 这里 ∩ AgentOS 当前目录：待办插件没装 / 没启用时 `todo_create` 会被忽略（不报错），提示词里对应有“没有这个工具就留在备忘里”的降级。
  * 这不是 AgentOS 的要求（别的第三方 App 可以不带 toolScope），只是备忘录对自己的约束，不要去掉。
  */
 val NotesToolScope: List<ToolRef> = listOf(
     ToolRef("alarm", "alarm_create"),
     ToolRef("calendar", "event_create"),
+    ToolRef("todo", "todo_create"),
 )

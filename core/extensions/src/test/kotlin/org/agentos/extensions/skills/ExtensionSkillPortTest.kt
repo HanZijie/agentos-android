@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.agentos.extensions.ExtMessages
 import org.agentos.extensions.registry.InstalledAppView
 import org.agentos.extensions.registry.PersistedRegistry
 import org.agentos.extensions.registry.PluginAssets
@@ -14,12 +15,14 @@ import org.agentos.extensions.registry.PluginScanLogic
 import org.agentos.extensions.registry.PluginServiceInfo
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.PolicyScope
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.testing.FakeApprovalPolicyPort
 import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ExtensionSkillPortTest {
@@ -198,11 +201,19 @@ class ExtensionSkillPortTest {
         assertEquals("", byId.getValue("nodesc").description, "listed without a description")
         assertEquals(1_024, byId.getValue("big").description.length, "cut to the limit")
         assertFalse(byId.getValue("big").description.contains("  "), "whitespace collapsed")
-        val problems = port.problems.value.getValue("org.x.mix/agent-plugin").map { it.message }
+        val problems = port.problems.value.getValue("org.x.mix/agent-plugin")
+        val byDir = problems.groupBy({ it.location }, { it.message })
         for (dir in listOf("nofront", "unfinished", "garbage", "badname", "nodesc", "binary", "unreadable", "missing", "bad dir!")) {
-            assertTrue(problems.any { it.contains("Skill $dir：") }, "a problem for $dir in $problems")
+            assertTrue(byDir[dir].orEmpty().isNotEmpty(), "a problem for $dir in $problems")
         }
-        assertTrue(problems.none { it.contains("Skill good：") })
+        assertNull(byDir["good"], "no problem for the good skill")
+        // key + arguments (the directory is the location, never part of a sentence)
+        assertEquals(listOf(MessageRef.of(ExtMessages.SKILL_NO_FRONTMATTER)), byDir["nofront"])
+        assertEquals(listOf(MessageRef.of(ExtMessages.SKILL_FILE_NOT_TEXT)), byDir["binary"])
+        assertEquals(listOf(MessageRef.of(ExtMessages.SKILL_FILE_UNREADABLE)), byDir["unreadable"])
+        assertEquals(listOf(MessageRef.of(ExtMessages.SKILL_FILE_MISSING)), byDir["missing"])
+        assertTrue(MessageRef.of(ExtMessages.SKILL_DIR_INVALID, "bad dir!") in byDir.getValue("bad dir!"))
+        assertTrue(byDir.getValue("badname").any { it.key == ExtMessages.SKILL_NAME_INVALID })
         // 好的那个照常能读
         assertTrue(port.read("good").text.endsWith("body"))
     }

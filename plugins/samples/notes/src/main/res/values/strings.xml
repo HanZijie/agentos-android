@@ -5,6 +5,8 @@
     <!-- 通用 -->
     <string name="action_back">返回</string>
     <string name="action_more">更多</string>
+    <string name="menu_language">语言</string>
+    <string name="language_unavailable">这台设备没有“应用语言”设置</string>
     <string name="action_cancel">取消</string>
     <string name="action_undo">撤销</string>
     <string name="action_clear">清除</string>
@@ -173,7 +175,7 @@
     <string name="agent_too_long">太长了，请选一段</string>
     <string name="agent_empty">这条备忘录还没有内容</string>
     <string name="agent_panel_title">让 AgentOS 安排</string>
-    <string name="agent_panel_subtitle">把备忘里的时间变成日程或闹钟</string>
+    <string name="agent_panel_subtitle">把备忘里的安排变成日程、待办或闹钟</string>
     <string name="agent_stop">停止</string>
     <string name="agent_close">完成</string>
     <string name="agent_start">开始</string>
@@ -191,7 +193,7 @@
     <plurals name="agent_ready_chars">
         <item quantity="other">共 %d 字</item>
     </plurals>
-    <string name="agent_ready_privacy">文字会交给 AgentOS 处理，只用来找时间。创建日程或闹钟时要不要先问你，取决于你在 AgentOS 里对这些工具的设置。</string>
+    <string name="agent_ready_privacy">文字会交给 AgentOS 处理，只用来找出要安排的事。创建日程、待办或闹钟时要不要先问你，取决于你在 AgentOS 里对这些工具的设置。</string>
 
     <!-- Checking / WaitingAuthorization -->
     <string name="agent_checking">正在连接 AgentOS……</string>
@@ -207,6 +209,7 @@
     <!-- 工具卡片 -->
     <string name="agent_item_event">日程</string>
     <string name="agent_item_alarm">闹钟</string>
+    <string name="agent_item_todo">待办</string>
     <string name="agent_item_other">其他操作</string>
     <string name="agent_item_status_awaiting">等待你在 AgentOS 里确认</string>
     <string name="agent_item_status_creating">创建中</string>
@@ -220,19 +223,26 @@
     <string name="agent_alarm_weekends">周末</string>
     <string name="agent_alarm_weekly">每%s</string>
     <string name="agent_alarm_unlabeled">未命名闹钟</string>
+    <string name="agent_todo_due">截止 %s</string>
+    <!-- 星期名之间的分隔符（跟语言走，不在代码里判断语言） -->
+    <string name="agent_day_separator">、</string>
 
     <!-- Done -->
     <string name="agent_done_title">已安排好</string>
     <string name="agent_done_title_stopped">已停止</string>
-    <string name="agent_done_nothing_title">没有创建任何日程或闹钟</string>
+    <string name="agent_done_nothing_title">没有创建任何日程、待办或闹钟</string>
     <string name="agent_done_nothing_fallback">AgentOS 没有在这段文字里找到可以安排的时间。</string>
     <plurals name="agent_done_events">
         <item quantity="other">%d 个日程</item>
+    </plurals>
+    <plurals name="agent_done_todos">
+        <item quantity="other">%d 个待办</item>
     </plurals>
     <plurals name="agent_done_alarms">
         <item quantity="other">%d 个闹钟</item>
     </plurals>
     <string name="agent_done_headline_both">已创建 %1$s、%2$s</string>
+    <string name="agent_done_headline_three">已创建 %1$s、%2$s、%3$s</string>
     <string name="agent_done_headline_one">已创建 %1$s</string>
 
     <!-- Error -->
@@ -253,7 +263,7 @@
     <string name="agent_error_disconnected_title">和 AgentOS 的连接断了</string>
     <string name="agent_error_disconnected_message">已经创建的项目会保留。可以再试一次，但别重复创建。</string>
     <string name="agent_error_interrupted_title">上一次的任务中断了</string>
-    <string name="agent_error_interrupted_message">备忘录在后台被系统回收，任务丢失。可能已经创建了一部分，请到日历和闹钟里看一眼。不会自动重试。</string>
+    <string name="agent_error_interrupted_message">备忘录在后台被系统回收，任务丢失。可能已经创建了一部分，请到日历、待办和闹钟里看一眼。不会自动重试。</string>
     <string name="agent_error_failed_title">出错了</string>
     <string name="agent_error_failed_message">AgentOS 没能完成这件事。可以再试一次。</string>
     <string name="agent_error_detail">原因：%s</string>

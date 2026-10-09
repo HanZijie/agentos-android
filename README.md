@@ -138,7 +138,9 @@ Agent 通过三个示例 App 提供的 MCP 工具，分别创建备忘录、日�
 > [!IMPORTANT]
 > 需要一台**已 root** 的 Android 15–17 手机，装好 Magisk 或 KernelSU。真机验证过的组合是 Pixel 8（Magisk 30.7，Android 15）；模拟器上跑过 Android 15 / 16 / 17；KernelSU 和 Android 16 / 17 真机还没验证过。
 
-**1. 构建模块 zip。** 目前还没有发布版本，需要从源码打包（JDK 21、Android SDK、Node 22.19+，详见[开发指南](docs/development.md)）：
+**最短路径：** 从 [Releases](https://github.com/HanZijie/agentos-android/releases) 下载**所有文件**到同一个文件夹，运行 `sh install.sh`。它会校验文件、刷入模块、重启、装好 AgentOS 和示例 App。**脚本做不了的部分**（解锁 / root、USB 调试、授予 root、模型 key、启用插件、短信权限）和**出问题怎么办**，逐条写在 [docs/install.md](docs/install.md)。下面是从源码自己打包的方式：
+
+**1. 构建模块 zip。** 从源码打包（JDK 21、Android SDK、Node 22.19+，详见[开发指南](docs/development.md)）：
 
 ```bash
 python3 tools/package-module.py --variant debug   # 产物在 build/module/agentos-<ver>.zip
@@ -331,6 +333,7 @@ AgentOS 目前是用于验证产品形态与技术路径的原型。
 | [docs/development.md](docs/development.md) | 开发指南：环境、常用命令、打包模块 zip、模块与源码位置、示例 App、项目发布证书 |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | 文件级目录、构建与产物（含依赖版本锁定）、8 项验证、依赖顺序图、28 个工作包与 M1–M6 出口条件、从 agenroid 迁移、风险 |
 | [docs/m1-acceptance.md](docs/m1-acceptance.md) | 验收清单：真机与模拟器的验证记录、发现并修好的缺陷、没验证的部分 |
+| [docs/install.md](docs/install.md) | 安装指南：脚本解决不了的部分（root、USB 调试、授权、key、插件、短信权限）、升级、故障排查 |
 | [docs/sample-apps.md](docs/sample-apps.md) | 闹钟、日历、备忘录三个示例 App：工具清单、数据、构建 |
 | [docs/spikes/](docs/spikes/) | 各项验证的结论：S1（模块安装 APK）、S2（保活与 root 监督）、S3（ACP over Binder）、S8（Pi Agent core 在 QuickJS 里）；实验工程在 `spikes/`，不参与主构建 |
 | [core/protocol/acp-profile-v1.md](core/protocol/acp-profile-v1.md) | 对外协议，以此为准 |

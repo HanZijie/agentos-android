@@ -21,7 +21,7 @@ class ConsentActivity : Activity(), QueueEmptyAware {
         val root = LinearLayout(this).apply {
             gravity = Gravity.CENTER
             setBackgroundColor(getColor(R.color.ui_background))
-            addView(Ui.text(context, 15f, R.color.ui_text_secondary).apply { text = "工具确认" })
+            addView(Ui.text(context, 15f, R.color.ui_text_secondary).apply { setText(R.string.consent_activity_title) })
         }
         setContentView(root)
         Ui.applyInsets(root)

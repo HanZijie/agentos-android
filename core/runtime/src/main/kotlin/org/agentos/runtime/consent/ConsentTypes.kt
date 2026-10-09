@@ -1,5 +1,6 @@
 package org.agentos.runtime.consent
 
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.ToolRisk
 import org.agentos.runtime.ports.ToolSource
@@ -24,8 +25,8 @@ enum class ConsentChoice {
     DENY,
 }
 
-/** 一个可选项，连同界面上显示的文字（文案在这里定，界面不改）。[destructive] 为 true 的是拒绝类，界面用次要样式。 */
-data class ConsentOption(val choice: ConsentChoice, val label: String, val destructive: Boolean = false)
+/** 一个可选项，连同界面上显示的文案（key，见 [ConsentMessages]；用哪种语言由界面定）。[destructive] 为 true 的是拒绝类，界面用次要样式。 */
+data class ConsentOption(val choice: ConsentChoice, val label: MessageRef, val destructive: Boolean = false)
 
 /** 界面显示的醒目程度：只读 / 写 / 高风险。 */
 enum class ConsentSeverity { NORMAL, ELEVATED, CRITICAL }
@@ -39,14 +40,15 @@ data class ConsentCaller(val kind: CallerKind, val uid: Int, val packageName: St
 
 /**
  * 一条待确认请求的**显示模型**：纯数据，界面按它画。所有来自第三方的文字（工具名、参数、插件名、服务器名）都已经清理过
- * （去控制字符和不可见格式字符——包括双向文字控制符，折叠空白，截断），并且只放在它们自己的字段里；界面自己的文案（[title]、[initiatorLine]、
- * [sourceLine]、[riskLabel]、[riskDescription]、[ConsentOption.label]）由协调器生成。第三方文字不会进入界面自己的文案的“控制位置”：
- * 它们被「」包起来、只占一行、有长度上限。
+ * （去控制字符和不可见格式字符——包括双向文字控制符，折叠空白，截断，引号类字符换成 ASCII 单引号），并且只放在它们自己的字段里；
+ * 界面自己的文案（[title]、[initiatorLine]、[sourceLine]、[riskLabel]、[riskDescription]、[ConsentOption.label]）**核心层不写成文字**，只给
+ * [MessageRef]（文案 key + 参数，key 见 [ConsentMessages]），由 app 层按界面语言的模板填出来。第三方文字只出现在 [MessageRef.args] 里，
+ * 模板用引号或括号把它们框起来、只占一行、有长度上限；所有语言的定界符都已从参数里去掉（[org.agentos.runtime.i18n.FrameChars]），第三方伪造不了结尾。
  *
- * @property title 标题：`要允许「<工具显示名>」吗？`
- * @property initiatorLine 发起者一行：`由 <调用方> 发起`（第三方 App：知道包名时 `由 <名字> 发起（<包名>）`，包名一定在、名字先被截断；不知道包名时 `由 <名字> 发起`；
- *   界面可用 [caller] 换成 App 名和图标；电脑端：`由电脑端发起`；AgentOS 自己：`由 AgentOS 自己发起`）
- * @property sourceLine 来源一行：`来自插件 X · 服务器 Y`；不属于任何插件的工具为 null
+ * @property title 标题：[ConsentMessages.TITLE]（工具显示名）。中文 `要允许「…」吗？`，英文 `Allow “…”?`
+ * @property initiatorLine 发起者一行：第三方 App 知道包名时 [ConsentMessages.INITIATOR_APP]（名字、包名；包名一定在、名字先被截断），
+ *   只有一个名字时 [ConsentMessages.INITIATOR_NAMED]；界面可用 [caller] 换成 App 名和图标；电脑端、AgentOS 自己、运行时是固定 key
+ * @property sourceLine 来源一行：[ConsentMessages.SOURCE]（插件名、服务器名）；不属于任何插件的工具为 null
  * @property toolDisplayName 工具显示名（title 优先，否则原始名），已清理，单行
  * @property toolName 模型调用的工具名（已清理）
  * @property argumentsPreview 参数摘要（已清理、已截断到显示上限）
@@ -62,10 +64,10 @@ data class ConsentView(
     val requestId: String,
     val sessionId: String,
     val taskId: String,
-    val title: String,
-    val initiatorLine: String,
+    val title: MessageRef,
+    val initiatorLine: MessageRef,
     val caller: ConsentCaller,
-    val sourceLine: String?,
+    val sourceLine: MessageRef?,
     val source: ToolSource?,
     val toolDisplayName: String,
     val toolName: String,
@@ -73,8 +75,8 @@ data class ConsentView(
     val argumentsTruncated: Boolean,
     val risk: ToolRisk,
     val severity: ConsentSeverity,
-    val riskLabel: String,
-    val riskDescription: String,
+    val riskLabel: MessageRef,
+    val riskDescription: MessageRef,
     val options: List<ConsentOption>,
     val createdAtMillis: Long,
     val deadlineMillis: Long,
@@ -102,7 +104,7 @@ enum class ConsentEnd {
  * 请求结案。[choice] 只在 [ConsentEnd.ANSWERED] 时有值；[notice] 是要告诉用户的一句话（例如“始终允许”没能保存、这次按“允许一次”处理），
  * 没有为 null。
  */
-data class ConsentResolution(val end: ConsentEnd, val choice: ConsentChoice? = null, val notice: String? = null)
+data class ConsentResolution(val end: ConsentEnd, val choice: ConsentChoice? = null, val notice: MessageRef? = null)
 
 /**
  * 确认界面（**Android 接缝，由 D 实现**）。协调器只负责“现在有哪些待确认”和“谁该被通知”；前台时 App 把待确认渲染成对话框，

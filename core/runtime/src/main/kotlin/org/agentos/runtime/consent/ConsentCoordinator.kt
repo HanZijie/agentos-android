@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.Clock
 import org.agentos.runtime.ports.ConsentDecision
 import org.agentos.runtime.ports.ConsentPort
@@ -152,7 +153,7 @@ class ConsentCoordinator(
                             decision = ConsentDecision.Allow()
                             resolution = ConsentResolution(
                                 ConsentEnd.ANSWERED, choice,
-                                notice = if (saved == null) null else "没能保存“始终允许”（$saved），这次已允许，下次还会询问。",
+                                notice = saved?.let { MessageRef.of(it) },
                             )
                         }
                     }
@@ -196,22 +197,22 @@ class ConsentCoordinator(
 
     // ------------------------------------------------------------------ 内部
 
-    /** 写回“始终允许”；成功返回 null，失败返回给用户看的原因（不含参数）。 */
+    /** 写回“始终允许”；成功返回 null，失败返回给用户看的提示的 key（[ConsentMessages.NOTICE_UNSAVED_NO_SOURCE] 等，不含参数）。 */
     private suspend fun saveAlways(request: ConsentRequest): String? {
-        val source = request.source ?: return "没有来源插件"
+        val source = request.source ?: return ConsentMessages.NOTICE_UNSAVED_NO_SOURCE
         val result = try {
             withTimeoutOrNull(config.writeTimeoutMillis) { approvals.setAlways(source, request.risk) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             log.warn(TAG, "saving always-allow failed: ${e.javaClass.simpleName}")
-            return "保存时出错"
-        } ?: return "保存超时"
+            return ConsentMessages.NOTICE_UNSAVED_ERROR
+        } ?: return ConsentMessages.NOTICE_UNSAVED_TIMEOUT
         return when (result) {
             ApprovalWriteResult.Saved -> null
             is ApprovalWriteResult.Failed -> {
                 log.warn(TAG, "saving always-allow failed: ${result.reason.take(80)}")
-                "策略暂时不可写"
+                ConsentMessages.NOTICE_UNSAVED_POLICY
             }
         }
     }

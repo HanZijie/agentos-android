@@ -21,6 +21,7 @@ import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.RiskPolicy
 import org.agentos.runtime.errors.ErrorCode
 import org.agentos.runtime.errors.ErrorInfo
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
 import org.agentos.runtime.ports.CatalogTool
@@ -128,7 +129,7 @@ object ExtWire {
             put("problems", buildJsonArray { p.problems.forEach { add(problemJson(it)) } })
             put("unsupported", buildJsonArray {
                 m?.unsupported.orEmpty().forEach {
-                    add(buildJsonObject { put("kind", it.kind.name.lowercase()); put("location", it.location); put("detail", it.reason) })
+                    add(buildJsonObject { put("kind", it.kind.name.lowercase()); put("location", it.location); put("detail", messageJson(it.reason)) })
                 }
             })
             put("servers", buildJsonArray {
@@ -156,7 +157,17 @@ object ExtWire {
         }
     }
 
-    private fun problemJson(p: PluginProblem) = buildJsonObject { put("code", p.code); put("message", p.message) }
+    private fun problemJson(p: PluginProblem) = buildJsonObject {
+        put("code", p.code)
+        put("message", messageJson(p.message))
+        put("location", p.location?.let { JsonPrimitive(it) } ?: JsonNull)
+    }
+
+    /** 核心层给用户的一句话（key + 参数，`ExtMessages`）：`{"key":…,"args":[…]}`，界面按自己的语言渲染（`ExtCoreMessages`）。 */
+    fun messageJson(m: MessageRef): JsonObject = buildJsonObject {
+        put("key", m.key)
+        put("args", JsonArray(m.args.map { JsonPrimitive(it) }))
+    }
 
     /** [pluginJson] 的全部键，按输出顺序。 */
     val PLUGIN_KEYS = listOf(

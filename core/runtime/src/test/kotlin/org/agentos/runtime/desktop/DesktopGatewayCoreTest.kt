@@ -348,6 +348,9 @@ class DesktopGatewayCoreTest {
     fun `too many connections are refused with busy`() {
         start(DesktopGatewayConfig(maxConnections = 1))
         val (raw, token) = paired()
+        // the gateway writes the handshake reply first and registers the connection a moment later (same lock, but the client does not take it):
+        // wait until it is registered, or the next connection can still be let in (seen on a CI runner)
+        runBlocking { withTimeout(5_000) { while (gateway.connections().isEmpty()) delay(10) } }
         val extra = Raw()
         val reply = extra.next()!!
         assertEquals(RpcCodes.BUSY, reply.errorCode())

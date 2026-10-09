@@ -1,5 +1,7 @@
 package org.agentos.extensions.registry
 
+import org.agentos.runtime.i18n.MessageRef
+import org.agentos.extensions.ExtMessages
 import org.agentos.runtime.broker.ApprovalMode
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.DefaultCapabilityBroker
@@ -58,7 +60,7 @@ class MemoryLostTest {
             val rec = r.record(id)
             assertEquals(PluginStatus.SIGNATURE_UNCONFIRMED, rec.status, id)
             assertTrue(rec.activeServers.isEmpty())
-            assertTrue(rec.problems.any { it.code == "signature_unconfirmed" })
+            assertEquals(MessageRef.of(ExtMessages.SIGNATURE_UNCONFIRMED), rec.problems.single { it.code == "signature_unconfirmed" }.message)
             assertEquals(PersistedPlugin.UNCONFIRMED, rec.trustedSigner)
         }
         // 策略：清空并停用（原来的“始终允许”也作废）

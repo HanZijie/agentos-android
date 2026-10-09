@@ -61,6 +61,7 @@ import org.agentos.sample.notes.ui.theme.containerColor
 internal fun cardSummary(note: Note): String {
     val plain = MarkdownParser.plainText(note.content, 180)
     val title = note.displayTitle
+    // i18n-ok: 摘要开头与标题重复时要一并剥掉的分隔符（含全角冒号），是文本分析，不是界面文案
     return if (title.isNotEmpty() && plain.startsWith(title)) plain.removePrefix(title).trimStart(' ', '\n', '·', '-', ':', '：') else plain
 }
 

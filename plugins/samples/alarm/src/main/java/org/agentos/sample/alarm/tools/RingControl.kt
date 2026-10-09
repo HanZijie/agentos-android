@@ -14,6 +14,6 @@ interface RingControl {
     /** 关闭正在响的闹钟；返回被关闭的闹钟，没有在响返回 null。 */
     fun dismiss(): Alarm?
 
-    /** 让正在响的闹钟贪睡；返回该闹钟，没有在响返回 null。 */
-    fun snooze(): Alarm?
+    /** 让正在响的闹钟贪睡；返回该闹钟，没有在响返回 null。[minutes] 非空时只对这一次贪睡生效，空则用闹钟自己的贪睡时长。 */
+    fun snooze(minutes: Int? = null): Alarm?
 }

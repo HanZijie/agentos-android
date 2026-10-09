@@ -198,7 +198,10 @@ class SessionMcpServersAcpTest {
         pair.initialize()
         rt.host.fakeSessionTools.unreachable = setOf("down")
         val s = pair.newSession(mcpServers = listOf(http("up"), http("down", "https://down.private-host.example/mcp")))
-        val servers = pair.infoMetas().last()["mcpServers"]!!.jsonArray
+        // the outcome of each server is a separate session_info_update notification, not part of the session/new response: on a slow machine
+        // it can arrive after newSession() has returned (seen on a CI runner), so wait for it instead of reading the list at once
+        rt.until { pair.infoMetas().any { "mcpServers" in it } }
+        val servers = pair.infoMetas().last { "mcpServers" in it }["mcpServers"]!!.jsonArray
         val byName = servers.associateBy { it.jsonObject["name"]!!.jsonPrimitive.content }
         assertEquals("true", byName.getValue("up").jsonObject["connected"]!!.jsonPrimitive.content)
         assertEquals("1", byName.getValue("up").jsonObject["toolCount"]!!.jsonPrimitive.content)

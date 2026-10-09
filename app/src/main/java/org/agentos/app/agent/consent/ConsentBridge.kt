@@ -10,6 +10,9 @@ import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.os.RemoteCallbackList
 import android.util.Log
+import org.agentos.app.R
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.ui.consent.AuthorizationLabels
 import org.agentos.app.ui.consent.ConsentActivity
 import org.agentos.internal.IConsentListener
@@ -35,6 +38,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class ConsentBridge(private val context: Context, private val log: (String) -> Unit = { Log.w(TAG, it) }) : ConsentSurface, AuthorizationSurface {
     @Volatile private var coordinator: ConsentCoordinator? = null
+    /** 通知文字按当前界面语言（`:agent` 进程的 Resources 跟随应用语言）；每次现取，不缓存文字。 */
+    private val strings: Strings = AndroidStrings(context)
     /** 监听者所在的主进程死了（被杀、崩溃）时，还没答复的请求转成通知：用户不会因为界面没了就收不到确认。 */
     private val listeners = object : RemoteCallbackList<IConsentListener>() {
         override fun onCallbackDied(callback: IConsentListener?) {
@@ -168,9 +173,9 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
             val deny = action(id, view.requestId, ConsentChoice.DENY)
             val b = Notification.Builder(context, channel)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(card.title)
-                .setContentText(listOfNotNull(card.initiatorLine, card.sourceLine).joinToString(" · "))
-                .setStyle(Notification.BigTextStyle().bigText(listOfNotNull(card.initiatorLine, card.sourceLine, card.riskDescription.ifEmpty { null }, card.argumentsPreview.ifEmpty { null }).joinToString("\n")))
+                .setContentTitle(strings.get(card.title))
+                .setContentText(listOfNotNull(strings.get(card.initiatorLine), card.sourceLine?.let { strings.get(it) }).joinToString(" · "))
+                .setStyle(Notification.BigTextStyle().bigText(listOfNotNull(strings.get(card.initiatorLine), card.sourceLine?.let { strings.get(it) }, strings.get(card.riskDescription).ifEmpty { null }, card.argumentsPreview.ifEmpty { null }).joinToString("\n")))
                 .setCategory(Notification.CATEGORY_ALARM)
                 .setContentIntent(open)
                 .setOngoing(true)
@@ -205,11 +210,11 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
                 .putExtra(ConsentActionReceiver.EXTRA_AUTH_DENY, true)
                 .setPackage(context.packageName)
             val denyPi = PendingIntent.getBroadcast(context, id * 4 + 3, deny, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val text = AuthorizationLabels.notificationText(req)
-            val big = listOfNotNull(text, AuthorizationLabels.signatureChangedLine(req), AuthorizationLabels.EXPLANATION).joinToString("\n")
+            val text = AuthorizationLabels.notificationText(req, strings)
+            val big = listOfNotNull(text, AuthorizationLabels.signatureChangedLine(req, strings), AuthorizationLabels.explanation(strings)).joinToString("\n")
             val b = Notification.Builder(context, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(AuthorizationLabels.title(req, label))
+                .setContentTitle(AuthorizationLabels.title(req, label, strings))
                 .setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(big))
                 .setCategory(Notification.CATEGORY_ALARM)
@@ -220,7 +225,7 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
                 .setWhen(req.arrivalMillis)
                 .setTimeoutAfter((req.deadlineMillis - System.currentTimeMillis()).coerceAtLeast(1_000))
             // 只有“拒绝”；允许要点开通知，在对话框里看清包名和签名
-            b.addAction(Notification.Action.Builder(null as Icon?, AuthorizationLabels.DENY, denyPi).build())
+            b.addAction(Notification.Action.Builder(null as Icon?, strings.get(R.string.auth_deny), denyPi).build())
             nm().notify(TAG, id, b.build())
         } catch (e: Exception) {
             log("authorization notification failed: ${e.javaClass.simpleName}")
@@ -235,7 +240,7 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
         val pi = PendingIntent.getBroadcast(
             context, id * 4 + choice.ordinal, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val label = if (choice == ConsentChoice.DENY) "拒绝" else "允许一次"
+        val label = strings.get(if (choice == ConsentChoice.DENY) R.string.consent_option_deny else R.string.consent_option_allow_once)
         return Notification.Action.Builder(null as Icon?, label, pi).build()
     }
 
@@ -247,10 +252,10 @@ class ConsentBridge(private val context: Context, private val log: (String) -> U
     private fun ensureChannels() {
         val m = nm()
         if (m.getNotificationChannel(CHANNEL) == null) {
-            m.createNotificationChannel(NotificationChannel(CHANNEL, "工具确认", NotificationManager.IMPORTANCE_HIGH))
+            m.createNotificationChannel(NotificationChannel(CHANNEL, strings.get(R.string.consent_channel_normal), NotificationManager.IMPORTANCE_HIGH))
         }
         if (m.getNotificationChannel(CHANNEL_HIGH) == null) {
-            m.createNotificationChannel(NotificationChannel(CHANNEL_HIGH, "高风险工具确认", NotificationManager.IMPORTANCE_HIGH))
+            m.createNotificationChannel(NotificationChannel(CHANNEL_HIGH, strings.get(R.string.consent_channel_high), NotificationManager.IMPORTANCE_HIGH))
         }
     }
 
