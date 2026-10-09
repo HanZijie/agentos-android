@@ -679,24 +679,30 @@ class ExtensionToolHost(
         }
     }
 
+    /**
+     * 重建目录和路由。**读策略、算目录、写目录必须在同一把锁里**：策略变了会重建一次，刷新完成也会重建一次，两个线程交错时，
+     * 读到旧策略的那一次如果最后写入，目录就停在旧策略上；而策略已经变过了，之后不会再有通知，没有任何东西会再重建它。
+     * 在锁里读策略，后拿到锁的一定读到不比先拿到的更旧的值，最后写入的就是最新策略的结果。
+     * （[knownEntries] 自己也用 [lock]，这把锁是可重入的。）
+     */
     private fun rebuildCatalog() {
-        val tools = ArrayList<CatalogTool>()
-        val newRoutes = HashMap<String, Route>()
-        for (e in knownEntries(approvals.policy.value)) {
-            if (!e.enabled) continue
-            tools += CatalogTool(
-                name = e.name,
-                description = (e.info.description ?: e.info.title ?: "").take(config.maxDescriptionChars),
-                inputSchema = e.info.inputSchema,
-                risk = e.risk,
-                provider = e.rt.key.pluginId,
-                title = e.info.title?.take(config.maxTitleChars),
-                source = e.source,
-            )
-            newRoutes[e.name] = Route(e.rt.key, e.pluginName, e.info.name)
-        }
-        tools.sortBy { it.name }
         synchronized(lock) {
+            val tools = ArrayList<CatalogTool>()
+            val newRoutes = HashMap<String, Route>()
+            for (e in knownEntries(approvals.policy.value)) {
+                if (!e.enabled) continue
+                tools += CatalogTool(
+                    name = e.name,
+                    description = (e.info.description ?: e.info.title ?: "").take(config.maxDescriptionChars),
+                    inputSchema = e.info.inputSchema,
+                    risk = e.risk,
+                    provider = e.rt.key.pluginId,
+                    title = e.info.title?.take(config.maxTitleChars),
+                    source = e.source,
+                )
+                newRoutes[e.name] = Route(e.rt.key, e.pluginName, e.info.name)
+            }
+            tools.sortBy { it.name }
             routes = newRoutes
             val current = catalogFlow.value
             if (current.tools != tools) catalogFlow.value = ToolCatalog(current.version + 1, tools)

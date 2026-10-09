@@ -1,17 +1,27 @@
 # 可以在电脑上跑的测试（docs/implementation-plan.md 第 2 节 CI）：
 # - Gradle：core/runtime、core/extensions 等模块的单元测试与 Android Lint
-# - core/pi-runtime：Pi Agent core 的打包与契约测试（W3 起）
-# - tests/acp-conformance：官方 TypeScript ACP 客户端的一致性测试：经 stdio（W4 起），经电脑上的网关 + tools/acp-bridge，
-#   以及网关的配对与安全用例（W9 起）。手机上的用例（AGENTOS_ACP_DEVICE）需要设备，CI 里自动跳过
-# 后两项在对应工程出现之前自动跳过。
-# - tools/check-i18n.py：中英文资源对齐与字面量门禁（docs/next-apps-plan.md 7.2 R9），秒级
+# - core/pi-runtime：Pi Agent core 的打包与契约测试；打包产物（pi-agent.js、model-catalog.json）上传一次，ACP 一致性测试直接用
+# - tests/acp-conformance：官方 TypeScript ACP 客户端的一致性测试：经 stdio，经电脑上的网关 + tools/acp-bridge，
+#   以及网关的配对与安全用例。手机上的用例（AGENTOS_ACP_DEVICE）需要设备，CI 里自动跳过
+# - Python 脚本：tools/check-i18n.py（中英文资源对齐与字面量门禁，docs/next-apps-plan.md 7.2 R9）、tools/tests、
+#   tests/device/acp-channel/unit（假模型端点、验收驱动；不需要设备），都是秒级
+#
+# 这里没有“文件存在才执行”的守卫：缺文件（改名、误删）必须让任务变红，而不是静默变成什么都没跑的绿。
 name: portable-tests
 
 on:
   push:
     # 只在 main 上跑 push；功能分支靠 pull_request，避免同一个提交跑两遍
     branches: [main]
+    # 只有“全部改动的文件都匹配”时才跳过。README 和文档里的图片/视频不影响任何测试；
+    # docs/*.md 不在其中：有测试把它们当契约读（docs/sample-apps.md；contracts/*.md 也不在忽略范围内）
+    paths-ignore:
+      - "README*.md"
+      - "docs/assets/**"
   pull_request:
+    paths-ignore:
+      - "README*.md"
+      - "docs/assets/**"
   workflow_dispatch:
 
 permissions:
@@ -27,10 +37,10 @@ env:
   NODE_VERSION: "22"
 
 jobs:
-  i18n:
-    name: 中英文资源与字面量门禁（tools/check-i18n.py，不需要 Android SDK）
+  scripts:
+    name: Python 脚本检查（i18n 门禁、tools 单测、设备脚本单测；不需要 Android SDK）
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -38,11 +48,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 脚本自己的单元测试
+      # 三步互相独立：前一步红了后面的也照跑，一次看全
+      - name: tools 脚本自己的单元测试
+        if: ${{ !cancelled() }}
         run: python3 -m unittest discover -s tools/tests -p 'test_*.py' -v
 
       - name: check-i18n
+        if: ${{ !cancelled() }}
         run: python3 tools/check-i18n.py
+
+      - name: 设备测试脚本的单元测试（tests/device/acp-channel/unit）
+        if: ${{ !cancelled() }}
+        working-directory: tests/device/acp-channel
+        run: python3 -m unittest discover -s unit -p 'test_*.py' -v
 
   gradle:
     name: Gradle 单元测试与 Lint
@@ -88,97 +106,80 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
-        if: hashFiles('core/pi-runtime/package-lock.json') != ''
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: core/pi-runtime/package-lock.json
 
       - name: 安装依赖
-        if: hashFiles('core/pi-runtime/package-lock.json') != ''
         run: npm ci
 
       - name: 打包 pi-agent.js 与 model-catalog.json
-        if: hashFiles('core/pi-runtime/build.mjs') != ''
         run: node build.mjs
 
       - name: 契约测试
-        if: hashFiles('core/pi-runtime/package-lock.json') != ''
-        run: npm run --if-present test
+        run: npm test
+
+      # 只在这里打包一次；ACP 一致性测试（真实 Pi）直接用这份，不再自己 npm ci + build
+      - name: 上传 Pi 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-assets
+          path: |
+            app/src/main/assets/pi-agent.js
+            app/src/main/assets/model-catalog.json
+          if-no-files-found: error
+          retention-days: 1
 
   acp-conformance:
     name: ACP 一致性测试（stdio、电脑端网关 + acp-bridge；FakeAgentCore 与真实 Pi）
+    needs: pi-runtime
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-java@v4
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
       # Gradle 配置全部项目时 AGP 需要 Android SDK
       - uses: android-actions/setup-android@v3
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         with:
           packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
 
       - uses: actions/setup-node@v4
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            tests/acp-conformance/package-lock.json
-            core/pi-runtime/package-lock.json
+          cache-dependency-path: tests/acp-conformance/package-lock.json
 
       - name: 安装依赖
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         working-directory: tests/acp-conformance
         run: npm ci
 
+      - name: 取 pi-runtime 任务打好的 Pi 产物（pi-agent.js、model-catalog.json）
+        uses: actions/download-artifact@v4
+        with:
+          name: pi-assets
+          path: app/src/main/assets
+
       - name: 构建电脑端 Agent 进程的类路径
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         run: ./gradlew --stacktrace :core:runtime:acpConformanceClasspath -Pagentos.skipPiBundle=true
 
       - name: 桥接命令（tools/acp-bridge，无依赖）
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         run: node tools/acp-bridge/acp-bridge.mjs --version
 
       - name: 一致性测试（FakeAgentCore）
-        if: hashFiles('tests/acp-conformance/package-lock.json') != ''
         working-directory: tests/acp-conformance
         run: npm test
 
-      # W4 收尾（A5）：同一组用例换成真实的 Pi Agent core（PiAdapter + 电脑上的 QuickJS）+ 假模型端点，两个协议族各跑一遍
-      - name: 打包 Pi Agent core（pi-agent.js、model-catalog.json）
-        if: hashFiles('tests/acp-conformance/package-lock.json') != '' && hashFiles('core/pi-runtime/build.mjs') != ''
-        working-directory: core/pi-runtime
-        run: npm ci && node build.mjs
-
+      # 同一组用例换成真实的 Pi Agent core（PiAdapter + 电脑上的 QuickJS）+ 假模型端点，两个协议族各跑一遍
       - name: 一致性测试（真实 Pi + 假模型端点）
-        if: hashFiles('tests/acp-conformance/package-lock.json') != '' && hashFiles('core/pi-runtime/build.mjs') != ''
         working-directory: tests/acp-conformance
         run: |
           AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=anthropic npm test
           AGENTOS_ACP_CORE=pi AGENTOS_ACP_PI_API=openai npm test
-
-  device-test-scripts:
-    name: 设备测试脚本的单元测试（假模型端点、验收驱动；不需要设备）
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: 单元测试（tests/device/acp-channel/unit）
-        working-directory: tests/device/acp-channel
-        run: python3 -m unittest discover -s unit -p 'test_*.py' -v
