@@ -156,7 +156,7 @@ class McpToolResult {
 
 ### 4.5 短信 `sms`
 
-能力型路线：**不当默认短信应用**，`READ_SMS` 读系统短信库，`SmsManager` 发送，发送异步、自维护 `outbox`。权限被限制或未授权时进入“仅撰写”模式（只有 `sms_compose` 可用，其余工具返回明确错误，工具目录不变）。独立示例 App，不是自带插件：读也默认每次确认。安全规则（单收件人、长度上限、短号拒绝、频率限制、去重、验证码默认遮蔽）和 V1 实测结论见 [next-apps-plan.md](next-apps-plan.md) 第 4 节和 `plugins/samples/sms/README.md`。
+能力型路线：**不当默认短信应用**，`READ_SMS` 读系统短信库，`SmsManager` 发送，发送异步、自维护 `outbox`。权限被限制或未授权时进入“仅撰写”模式（只有 `sms_compose` 可用，其余工具返回明确错误，工具目录不变）。独立示例 App，不是自带插件：读也默认每次确认。会话页有“让 AgentOS 安排”按钮：把这个会话里还没处理过的短信原文交给 AgentOS（经 `:sdk:acp-android`），建日程、待办、闹钟；提示词可在面板里编辑（见 [third-party-acp.md](third-party-acp.md) 5b）。安全规则（单收件人、长度上限、短号拒绝、频率限制、去重、验证码默认遮蔽）和 V1 实测结论见 [next-apps-plan.md](next-apps-plan.md) 第 4 节和 `plugins/samples/sms/README.md`。
 
 | 工具 | 必填参数 | 可选参数 | 说明 |
 |---|---|---|---|
