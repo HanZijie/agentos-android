@@ -27,7 +27,7 @@ python3 tools/package-release.py --check /tmp/agentos-dryrun
 export AGENTOS_SIGNING_STORE_FILE=~/.agentos/signing/agentos-release.p12
 export AGENTOS_SIGNING_KEY_ALIAS=agentos-release
 read -rs AGENTOS_SIGNING_STORE_PASSWORD && export AGENTOS_SIGNING_STORE_PASSWORD
-python3 tools/package-release.py --out dist-release        # --out 必须是空目录
+python3 tools/package-release.py --out dist-release        # --out 必须是空目录；dist-release/ 已被 .gitignore 忽略，也可以放到仓库外
 ```
 
 脚本做的事：打包 pi-agent（`core/pi-runtime`）→ `package-module.py`（AgentOS App 签名、模块 zip）→ `package-samples.py`（五个示例 APK 签名，证书必须等于 AgentOS App 的，权限与 `package-samples.permissions.json` 完全一致，release 里没有 debug 接收器）→ 组装文件夹 → 统一的 `SHA256SUMS` → 自检。**任何一步失败都不会产出文件夹。**
