@@ -5,7 +5,7 @@
   第三方文字（插件名、服务器名、App 名…）只经 %1$s 填进来，填之前已清理（Plugins.frame：引号换成 '）；模板只用引号把它们框起来，
   不用括号框第三方文字（括号里只放包名，包名只剩 [A-Za-z0-9_.]）。PluginFramingTest 检查。
 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- ================= 插件列表页 ================= -->
     <string name="plugins_title">插件管理</string>
     <string name="plugins_intro">插件是别的 App 提供给 AgentOS 模型调用的工具。第三方插件默认关闭；启用后，写操作每次都会先向你确认。</string>
@@ -17,7 +17,9 @@
     <string name="plugins_discovered_section">已发现的插件</string>
     <string name="plugins_empty">还没有发现插件。安装了支持 AgentOS 插件的 App 后点“重新扫描”。</string>
     <string name="plugins_rescan">重新扫描</string>
-    <string name="plugins_more_issues">另有 %1$d 项，点开查看</string>
+    <plurals name="plugins_more_issues">
+        <item quantity="other">另有 %1$d 项，点开查看</item>
+    </plurals>
     <string name="plugins_details">详情</string>
     <string name="plugins_card_cd">%1$s，查看详情</string>
     <string name="plugins_reset_title">重置插件策略？</string>
@@ -32,7 +34,6 @@
     <string name="plugins_builtin">AgentOS 自带</string>
     <string name="plugins_signature_line">签名 %1$s</string>
     <string name="plugins_none">（无）</string>
-    <string name="plugins_package_hidden">%1$s（包名里有不合法的字符，已隐藏）</string>
 
     <!-- 状态 -->
     <string name="plugins_status_found_disabled">已发现，未启用</string>
@@ -243,8 +244,8 @@
     <string name="ext_msg_no_usable_server">声明的服务器都不能用，插件没有可用的内容</string>
     <string name="ext_msg_name_conflict">插件名「%1$s」已被占用或是保留的名字</string>
 
-    <string name="ext_msg_skill_no_frontmatter">SKILL.md 没有 frontmatter（文件要以 --- 开头，写上 name 和 description）</string>
-    <string name="ext_msg_skill_frontmatter_unclosed">SKILL.md 的 frontmatter 没有结束（缺少第二个 ---），或者太长</string>
+    <string name="ext_msg_skill_no_frontmatter" tools:ignore="TypographyDashes">SKILL.md 没有 frontmatter（文件要以 --- 开头，写上 name 和 description）</string>
+    <string name="ext_msg_skill_frontmatter_unclosed" tools:ignore="TypographyDashes">SKILL.md 的 frontmatter 没有结束（缺少第二个 ---），或者太长</string>
     <string name="ext_msg_skill_key_duplicate">frontmatter 里的 %1$s 重复了，只用第一个</string>
     <string name="ext_msg_skill_name_missing">frontmatter 里没有 name</string>
     <string name="ext_msg_skill_description_missing">frontmatter 里没有 description</string>

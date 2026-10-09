@@ -138,7 +138,7 @@ class PluginFramingTest {
     private fun isPlainBracket(cp: Int) = FrameChars.isBracket(cp) && !FrameChars.isQuote(cp)
 
     /** 只有这几条模板把占位符直接放在括号里：包名（只剩 [A-Za-z0-9_.]）、整句核心信息（参数已去括号）。想加括号就要先想清楚参数里能不能有括号。 */
-    private val bracketed = setOf("plugins_who", "plugins_unsupported_body", "plugins_package_hidden", "callers_package_hidden")
+    private val bracketed = setOf("plugins_who", "plugins_unsupported_body", "callers_package_hidden")
 
     private fun ownNames(s: ResStrings) = s.stringNames.filter { it.startsWith("plugins_") || it.startsWith("plugin_detail_") || it.startsWith("callers_") || it.startsWith("ext_msg_") }
 

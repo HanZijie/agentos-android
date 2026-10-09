@@ -369,6 +369,13 @@ class PluginsLogicTest {
         assertEquals(listOf("Notes · 导出", "Notes · 导入"), titles)
     }
 
+    @Test
+    fun theMoreIssuesLineIsPlural() {
+        assertEquals("1 more item, tap to view", en.plural(R.plurals.plugins_more_issues, 1, 1))
+        assertEquals("4 more items, tap to view", en.plural(R.plurals.plugins_more_issues, 4, 4))
+        assertEquals("另有 4 项，点开查看", zh.plural(R.plurals.plugins_more_issues, 4, 4))
+    }
+
     // ------------------------------------------------------------ 工具
 
     private fun tool(risk: String, approval: String = "ask", may: Boolean = true, extra: String = "") =

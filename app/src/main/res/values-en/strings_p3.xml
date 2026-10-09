@@ -3,7 +3,7 @@
   P3 (plugin management, authorized apps and usage, validation messages of core/extensions). English; the default (Chinese) is values/strings_p3.xml, keys correspond one to one.
   Third-party text (plugin / server / app names) only enters through %1$s and is sanitised first (Plugins.frame: quotes become '); templates frame it with quotes only.
 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- ================= Plugin list ================= -->
     <string name="plugins_title">Plugins</string>
     <string name="plugins_intro">Plugins are tools that other apps offer to the AgentOS model. Third-party plugins are off by default; once enabled, every write action still asks you first.</string>
@@ -15,7 +15,10 @@
     <string name="plugins_discovered_section">Discovered plugins</string>
     <string name="plugins_empty">No plugins found yet. After installing an app that provides AgentOS plugins, tap “Rescan”.</string>
     <string name="plugins_rescan">Rescan</string>
-    <string name="plugins_more_issues">%1$d more, tap to view</string>
+    <plurals name="plugins_more_issues">
+        <item quantity="one">%1$d more item, tap to view</item>
+        <item quantity="other">%1$d more items, tap to view</item>
+    </plurals>
     <string name="plugins_details">Details</string>
     <string name="plugins_card_cd">%1$s, view details</string>
     <string name="plugins_reset_title">Reset plugin policy?</string>
@@ -29,7 +32,6 @@
     <string name="plugins_builtin">Built into AgentOS</string>
     <string name="plugins_signature_line">Signature %1$s</string>
     <string name="plugins_none">(none)</string>
-    <string name="plugins_package_hidden">%1$s (the package name has invalid characters, hidden)</string>
 
     <string name="plugins_status_found_disabled">Found, not enabled</string>
     <string name="plugins_status_unreachable">Enabled, but the plugin service cannot be reached</string>
@@ -241,8 +243,8 @@
     <string name="ext_msg_no_usable_server">None of the declared servers can be used, so the plugin has nothing usable</string>
     <string name="ext_msg_name_conflict">The plugin name “%1$s” is already taken or is a reserved name</string>
 
-    <string name="ext_msg_skill_no_frontmatter">SKILL.md has no frontmatter (the file must start with --- and define name and description)</string>
-    <string name="ext_msg_skill_frontmatter_unclosed">The frontmatter of SKILL.md does not end (the second --- is missing) or is too long</string>
+    <string name="ext_msg_skill_no_frontmatter" tools:ignore="TypographyDashes">SKILL.md has no frontmatter (the file must start with --- and define name and description)</string>
+    <string name="ext_msg_skill_frontmatter_unclosed" tools:ignore="TypographyDashes">The frontmatter of SKILL.md does not end (the second --- is missing) or is too long</string>
     <string name="ext_msg_skill_key_duplicate">%1$s is repeated in the frontmatter; only the first one is used</string>
     <string name="ext_msg_skill_name_missing">The frontmatter has no name</string>
     <string name="ext_msg_skill_description_missing">The frontmatter has no description</string>

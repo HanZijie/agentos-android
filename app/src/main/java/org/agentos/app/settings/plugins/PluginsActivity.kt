@@ -78,7 +78,7 @@ class PluginsActivity : PluginPage() {
         Plugins.toolSummary(p, strings).takeIf { it.isNotEmpty() }?.let { addView(Ui.paragraph(context, it)) }
         val issues = Plugins.issues(p, strings)
         issues.take(Plugins.LIST_ISSUES).forEach { addView(Ui.paragraph(context, it, R.color.ui_warn)) }
-        if (issues.size > Plugins.LIST_ISSUES) addView(Ui.paragraph(context, strings.get(R.string.plugins_more_issues, issues.size - Plugins.LIST_ISSUES)))
+        if (issues.size > Plugins.LIST_ISSUES) addView(Ui.paragraph(context, (issues.size - Plugins.LIST_ISSUES).let { strings.plural(R.plurals.plugins_more_issues, it, it) }))
         addView(Ui.buttons(context, strings.get(R.string.plugins_details) to { openDetail(p) }))
         clickable(this, strings.get(R.string.plugins_card_cd, p.title)) { openDetail(p) }
     }
