@@ -140,7 +140,9 @@ Key frames, left to right: the instruction typed before sending; the Thursday 15
 > [!IMPORTANT]
 > You need a **rooted** Android 15–17 phone with Magisk or KernelSU installed. The combination verified on a real device is a Pixel 8 (Magisk 30.7, Android 15). Android 15 / 16 / 17 have run on emulators. KernelSU and Android 16 / 17 real devices are not verified yet.
 
-**1. Build the module zip.** There is no published release yet, so build it from source (JDK 21, Android SDK and Node 22.19+; see the [development guide](docs/development.md), in Chinese):
+**Shortest path:** download **all files** from [Releases](https://github.com/HanZijie/agentos-android/releases) into one folder and run `sh install.sh`. It verifies the files, flashes the module, reboots, and installs AgentOS and the sample apps. **What the script cannot do** (unlocking / rooting, USB debugging, granting root, the model key, enabling plugins, the SMS permission) and **what to do when something goes wrong** are listed step by step in [docs/install.md](docs/install.md) (Chinese first, English below). To package it yourself from source:
+
+**1. Build the module zip.** Build it from source (JDK 21, Android SDK and Node 22.19+; see the [development guide](docs/development.md), in Chinese):
 
 ```bash
 python3 tools/package-module.py --variant debug   # output: build/module/agentos-<ver>.zip
@@ -335,6 +337,7 @@ Work packages start by dependency and do not wait for the previous milestone to 
 | [docs/development.md](docs/development.md) | Development guide: environment, common commands, packaging the module zip, modules and source layout, sample apps, the release certificate |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | File-level layout, build and artifacts (with pinned dependency versions), 8 validations, dependency graph, 28 work packages and M1–M6 exit criteria, migration from agenroid, risks |
 | [docs/m1-acceptance.md](docs/m1-acceptance.md) | Acceptance checklist: real-device and emulator verification records, defects found and fixed, what is not verified |
+| [docs/install.md](docs/install.md) | Install guide: what the script cannot do (root, USB debugging, grants, key, plugins, SMS permission), upgrading, troubleshooting |
 | [docs/sample-apps.md](docs/sample-apps.md) | The alarm, calendar and notes sample apps: tool lists, data, build |
 | [docs/spikes/](docs/spikes/) | Conclusions of each validation: S1 (module installs an APK), S2 (keep-alive and root supervision), S3 (ACP over Binder), S8 (Pi Agent core in QuickJS). The experiment projects live in `spikes/` and are not part of the main build |
 | [core/protocol/acp-profile-v1.md](core/protocol/acp-profile-v1.md) | The external protocol; this is the source of truth |
