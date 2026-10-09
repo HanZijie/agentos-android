@@ -53,10 +53,11 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import org.agentos.sample.sms.R
 import org.agentos.sample.sms.SmsGraph
 import org.agentos.sample.sms.data.SmsMode
+import org.agentos.sample.sms.ui.schedule.SchedulePanel
 import org.agentos.sample.sms.ui.theme.SmsTheme
 
 /**
- * 主界面：四个页签——状态（权限与引导）、会话（只读浏览）、Agent 发送记录、设置。不做完整客户端。
+ * 主界面：四个页签——状态（权限与引导）、会话（只读浏览，会话页有“让 AgentOS 安排”）、Agent 发送记录、设置。不做完整客户端。
  * `adb shell am start -n org.agentos.sample.sms/.ui.MainActivity --ei tab 2`（0 状态 1 会话 2 Agent 发送 3 设置）可直接打开某个页签。
  */
 class MainActivity : ComponentActivity() {
@@ -67,6 +68,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestedTab = intent.tabExtra()
         val graph = SmsGraph.get(this)
+        // 进程被回收时上一轮“让 AgentOS 安排”丢了：在面板里如实说明（只在进程启动后的第一次生效）
+        graph.agentSchedule.restoreInterrupted()
         setContent {
             SmsTheme { SmsRoot(graph, requestedTab) }
         }
@@ -177,6 +180,8 @@ private fun SmsRoot(graph: SmsGraph, requestedTab: Int?) {
                 )
             }
         }
+        // “让 AgentOS 安排”的面板放在这一层：旋转屏幕、切页签、退出会话都不影响进行中的一轮
+        SchedulePanel(graph.agentSchedule)
         // 内容从状态栏后面滚过时，给状态栏一层底色，图标和文字不会叠在一起
         Box(
             Modifier
