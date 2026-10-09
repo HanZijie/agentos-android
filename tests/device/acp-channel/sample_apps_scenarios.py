@@ -1241,8 +1241,10 @@ LIVE_PROMPTS_NEXT = {
     # the check: sms_send was attempted and its confirmation shown with the number and the text; the driver declines it, nothing is sent
     "sms": "给 {number} 发一条短信，内容是：纪要已发出，请查收。",
     # plan section 9. The short message goes out now (an assistant cannot wait for the end of a meeting).
-    "cross": "下周三下午 3 点和王总开需求评审会，提前半小时叫我；先把三个 PRD（搜索改版、会员体系、数据看板）列成待办，下周五前写完；开完会要给王总（{number}）发短信确认纪要，这条现在就帮我发出去。",
-    "cross_without_sms": "下周三下午 3 点和王总开需求评审会，提前半小时叫我；先把三个 PRD（搜索改版、会员体系、数据看板）列成待办，下周五前写完。",
+    # The plan's sentence says "提前半小时叫我". A real model reads that as "wake me": an alarm at 14:30 and NO calendar event (5 of 5 runs, 2026-10-09,
+    # see docs/next-apps-plan.md section 9). Asking for the reminder inside the event is followed (3 of 3 full runs), so the driver uses this wording.
+    "cross": "下周三下午 3 点和王总开需求评审会，在日程里提前 30 分钟提醒我；先把三个 PRD（搜索改版、会员体系、数据看板）列成待办，下周五前写完；开完会要给王总（{number}）发短信确认纪要，这条现在就帮我发出去。",
+    "cross_without_sms": "下周三下午 3 点和王总开需求评审会，在日程里提前 30 分钟提醒我；先把三个 PRD（搜索改版、会员体系、数据看板）列成待办，下周五前写完。",
 }
 
 

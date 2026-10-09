@@ -1453,7 +1453,7 @@ class LiveNextTest(unittest.TestCase):
             self.assertIn(fact, todo)
         for fact in ("5556", "短信", "纪要已发出，请查收"):
             self.assertIn(fact, sms)
-        for fact in ("下周三", "下午 3 点", "王总", "提前半小时", "三个 PRD", "搜索改版", "会员体系", "数据看板", "待办", "下周五前", "发短信", "5556", "现在"):
+        for fact in ("下周三", "下午 3 点", "王总", "在日程里", "提前 30 分钟", "三个 PRD", "搜索改版", "会员体系", "数据看板", "待办", "下周五前", "发短信", "5556", "现在"):
             self.assertIn(fact, cross)
         for p in (todo, sms, cross):
             self.assertGreaterEqual(len(__import__("re").findall(r"[\u4e00-\u9fff]", p)), 12, p)
