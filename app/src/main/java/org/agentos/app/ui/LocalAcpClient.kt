@@ -116,7 +116,7 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
         var stopReason: String? = null
         return try {
             s.prompt(listOf(ContentBlock.Text(text))).collect { event ->
-                val (update, stop) = event.toUi()
+                val (update, stop) = event.toUi(strings)
                 if (update != null) onUpdate(update)
                 if (stop != null) stopReason = stop
             }

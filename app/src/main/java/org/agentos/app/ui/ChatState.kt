@@ -1,5 +1,8 @@
 package org.agentos.app.ui
 
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
+
 /**
  * Everything the conversation screen shows. Facts about sessions and tasks live in the runtime
  * (architecture principle 3); this is only the view of the current conversation in this process.
@@ -38,7 +41,10 @@ sealed interface ChatItem {
         val status: ToolStatus,
         val detail: String?,
         val expanded: Boolean = false,
-    ) : ChatItem
+    ) : ChatItem {
+        /** [title] is empty when the agent sent a tool call without a name: the placeholder is picked when drawn, in the language of the screen. */
+        fun displayTitle(strings: Strings): String = title.ifBlank { strings.get(R.string.chat_tool_default_title) }
+    }
 
     data class Notice(override val id: Long, val kind: Kind, val title: String, val hint: String? = null) : ChatItem {
         enum class Kind { INFO, CANCELLED, ERROR }
@@ -72,26 +78,38 @@ object ChatReducer {
                     title = u.title ?: existing.title,
                     status = u.status ?: existing.status,
                     detail = u.detail ?: existing.detail,
-                ) ?: ChatItem.Tool(id, u.callId, u.title ?: "工具调用", null, u.status ?: ToolStatus.PENDING, u.detail)
+                ) ?: ChatItem.Tool(id, u.callId, u.title.orEmpty(), null, u.status ?: ToolStatus.PENDING, u.detail)
             }
             is AgentUpdate.Ignored -> st
         }
     }
 
-    fun finished(s: ChatState, outcome: TurnOutcome): ChatState {
+    /** A failed turn: the error already carries its words (AgentErrors), so no [Strings] are needed. */
+    fun finished(s: ChatState, outcome: TurnOutcome.Failed): ChatState =
+        closeTurn(s, ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.ERROR, outcome.error.title, outcome.error.hint))
+
+    /** [strings]: the words of the notice a stop reason leaves in the conversation. */
+    fun finished(s: ChatState, outcome: TurnOutcome, strings: Strings): ChatState = when (outcome) {
+        is TurnOutcome.Failed -> finished(s, outcome)
+        is TurnOutcome.Finished -> closeTurn(s, stopNotice(s, outcome.stopReason, strings))
+    }
+
+    private fun closeTurn(s: ChatState, notice: ChatItem.Notice?): ChatState {
         val closed = s.copy(items = s.items.map { if (it is ChatItem.Agent && it.streaming) it.copy(streaming = false) else it }, turn = ChatState.Turn.IDLE)
-        val notice: ChatItem.Notice? = when (outcome) {
-            is TurnOutcome.Finished -> when (outcome.stopReason) {
-                "end_turn" -> null
-                "cancelled" -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.CANCELLED, "已取消")
-                "max_turn_requests" -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.INFO, "工具调用轮次超过上限，已停止", "可以接着说“继续”")
-                "max_tokens" -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.INFO, "回复达到了长度上限", "可以接着说“继续”")
-                "refusal" -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.INFO, "模型拒绝回答这个请求")
-                else -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.INFO, "本轮结束（${outcome.stopReason}）")
-            }
-            is TurnOutcome.Failed -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.ERROR, outcome.error.title, outcome.error.hint)
-        }
         return if (notice == null) closed else closed.copy(items = closed.items + notice, nextId = s.nextId + 1)
+    }
+
+    private fun stopNotice(s: ChatState, stopReason: String, strings: Strings): ChatItem.Notice? = when (stopReason) {
+        "end_turn" -> null
+        "cancelled" -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.CANCELLED, strings.get(R.string.chat_notice_cancelled))
+        "max_turn_requests" -> ChatItem.Notice(
+            s.nextId, ChatItem.Notice.Kind.INFO, strings.get(R.string.chat_notice_max_turn_requests), strings.get(R.string.chat_notice_max_turn_requests_hint),
+        )
+        "max_tokens" -> ChatItem.Notice(
+            s.nextId, ChatItem.Notice.Kind.INFO, strings.get(R.string.chat_notice_max_tokens), strings.get(R.string.chat_notice_max_tokens_hint),
+        )
+        "refusal" -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.INFO, strings.get(R.string.chat_notice_refusal))
+        else -> ChatItem.Notice(s.nextId, ChatItem.Notice.Kind.INFO, strings.get(R.string.chat_notice_turn_ended, stopReason))
     }
 
     fun notice(s: ChatState, kind: ChatItem.Notice.Kind, title: String, hint: String? = null): ChatState =

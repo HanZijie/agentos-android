@@ -1,12 +1,14 @@
 package org.agentos.app.onboarding
 
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
 import org.agentos.app.settings.BatteryText
 import org.agentos.app.settings.SecurityText
 
 /**
  * First-run guide (F2 step 3, W8): what each step shows and whether it is done, from facts the
  * Activity collects. Pure Kotlin (OnboardingTest). Every step can be skipped; only the model is
- * needed for a first conversation.
+ * needed for a first conversation. The words live in `strings_p2.xml` (`onboarding_*`), read through [Strings].
  */
 object Onboarding {
     const val PREFS = "agentos_ui"
@@ -28,52 +30,52 @@ object Onboarding {
 
     data class Step(val id: Id, val title: String, val detail: String, val done: Boolean?, val action: String?)
 
-    fun steps(f: Facts): List<Step> = listOf(
+    fun steps(f: Facts, strings: Strings): List<Step> = listOf(
         Step(
-            Id.WELCOME, "欢迎使用 AgentOS",
-            "AgentOS 是常驻在这台手机上的 Agent 服务：本 App 和其他 App 都能通过 ACP 调用它，模型用你自己的 key。\n\n" +
-                SecurityText.welcome(f.rooted),
+            Id.WELCOME, strings.get(R.string.onboarding_welcome_title),
+            strings.get(R.string.onboarding_welcome_detail, SecurityText.welcome(f.rooted, strings)),
             done = true, action = null,
         ),
         Step(
-            Id.MODEL, "选择模型并填写 key",
-            when {
-                f.modelConfigured == null -> "正在读取当前设置…"
-                f.modelConfigured && f.modelUsable == true -> "已配置，可以开始对话。"
-                f.modelConfigured -> "已保存，但暂时不可用，打开看看原因。"
-                else -> "MiniMax（国际 / 国内）等厂商预设只需要填 key；也可以填自建的兼容端点。不配置就没法对话。"
-            },
+            Id.MODEL, strings.get(R.string.onboarding_model_title),
+            strings.get(
+                when {
+                    f.modelConfigured == null -> R.string.onboarding_model_loading
+                    f.modelConfigured && f.modelUsable == true -> R.string.onboarding_model_ready
+                    f.modelConfigured -> R.string.onboarding_model_saved_unusable
+                    else -> R.string.onboarding_model_none
+                },
+            ),
             done = f.modelConfigured?.let { it && f.modelUsable == true },
-            action = if (f.modelConfigured == true) "修改" else "去设置",
+            action = strings.get(if (f.modelConfigured == true) R.string.onboarding_model_change else R.string.onboarding_model_set),
         ),
         Step(
-            Id.NOTIFICATIONS, "允许通知",
-            "Agent 在后台执行任务时会显示一条常驻通知；以后需要你确认的操作也会通过通知询问。",
-            done = f.notificationsGranted, action = if (f.notificationsGranted) null else "允许",
+            Id.NOTIFICATIONS, strings.get(R.string.onboarding_notifications_title),
+            strings.get(R.string.onboarding_notifications_detail),
+            done = f.notificationsGranted, action = if (f.notificationsGranted) null else strings.get(R.string.onboarding_allow),
         ),
         Step(
-            Id.ASSISTANT, "设为默认助理（可选）",
-            if (f.assistantHeld) "AgentOS 已是默认助理。"
-            else "设为默认助理后，长按电源键即可唤起。这个入口由后续版本（W13）提供；现在可以先打开系统设置看看。",
-            done = f.assistantHeld, action = if (f.assistantHeld) null else "打开系统设置",
+            Id.ASSISTANT, strings.get(R.string.onboarding_assistant_title),
+            strings.get(if (f.assistantHeld) R.string.onboarding_assistant_held else R.string.onboarding_assistant_detail),
+            done = f.assistantHeld, action = if (f.assistantHeld) null else strings.get(R.string.onboarding_assistant_open),
         ),
         Step(
-            Id.BATTERY, "允许忽略电池优化",
-            BatteryText.GUIDE_STEP,
-            done = f.batteryExempt, action = if (f.batteryExempt) null else "允许",
+            Id.BATTERY, strings.get(R.string.onboarding_battery_title),
+            BatteryText.guideStep(strings),
+            done = f.batteryExempt, action = if (f.batteryExempt) null else strings.get(R.string.onboarding_allow),
         ),
         Step(
-            Id.PLUGINS, "已发现的插件",
-            when (f.pluginCount) {
-                null, 0 -> "还没有发现插件。安装了内嵌 AgentOS 插件的 App 之后，会在这里和设置页的插件管理里出现（M3a）。"
-                else -> "发现了 ${f.pluginCount} 个插件，可以在设置页里启用。"
+            Id.PLUGINS, strings.get(R.string.onboarding_plugins_title),
+            when (val n = f.pluginCount) {
+                null, 0 -> strings.get(R.string.onboarding_plugins_none)
+                else -> strings.plural(R.plurals.onboarding_plugins_found, n, n)
             },
             done = null, action = null,
         ),
     )
 
     /** Steps still worth the user's attention (not done, and not informational). */
-    fun pending(f: Facts): List<Id> = steps(f).filter { it.done == false }.map { it.id }
+    fun pending(f: Facts, strings: Strings): List<Id> = steps(f, strings).filter { it.done == false }.map { it.id }
 
     /**
      * The guide always asks for the battery optimisation exemption (architecture F2 step 3, F11 item 4): if the

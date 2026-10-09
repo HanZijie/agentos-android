@@ -20,11 +20,11 @@ class AgentUpdateAndErrorsTest {
     fun mapsMessageAndThoughtChunks() {
         assertEquals(
             AgentUpdate.MessageChunk("hello"),
-            AgentUpdate.fromSdk(SessionUpdate.AgentMessageChunk(ContentBlock.Text("hello"))),
+            AgentUpdate.fromSdk(SessionUpdate.AgentMessageChunk(ContentBlock.Text("hello")), ResStrings.zh),
         )
         assertEquals(
             AgentUpdate.ThoughtChunk("hmm"),
-            AgentUpdate.fromSdk(SessionUpdate.AgentThoughtChunk(ContentBlock.Text("hmm"))),
+            AgentUpdate.fromSdk(SessionUpdate.AgentThoughtChunk(ContentBlock.Text("hmm")), ResStrings.zh),
         )
     }
 
@@ -36,7 +36,8 @@ class AgentUpdateAndErrorsTest {
                 title = "create_event",
                 kind = ToolKind.EDIT,
                 status = ToolCallStatus.PENDING,
-            )
+            ),
+            ResStrings.zh,
         )
         assertEquals(AgentUpdate.ToolCallStarted("call-1", "create_event", "edit", ToolStatus.PENDING, null), started)
 
@@ -45,15 +46,36 @@ class AgentUpdateAndErrorsTest {
                 toolCallId = ToolCallId("call-1"),
                 status = ToolCallStatus.COMPLETED,
                 content = listOf(ToolCallContent.Content(ContentBlock.Text("created"))),
-            )
+            ),
+            ResStrings.zh,
         )
         assertEquals(AgentUpdate.ToolCallUpdated("call-1", null, ToolStatus.COMPLETED, "created"), patch)
     }
 
     @Test
     fun blankToolTitleGetsAName() {
-        val u = AgentUpdate.fromSdk(SessionUpdate.ToolCall(toolCallId = ToolCallId("c"), title = " "))
-        assertEquals("工具调用", (u as AgentUpdate.ToolCallStarted).title)
+        val u = AgentUpdate.fromSdk(SessionUpdate.ToolCall(toolCallId = ToolCallId("c"), title = " "), ResStrings.zh) as AgentUpdate.ToolCallStarted
+        // the placeholder is picked when the item is drawn (ChatItem.Tool.displayTitle), in the language of the screen
+        val item = ChatReducer.update(ChatReducer.userSent(ChatState(), "x"), u).items.last() as ChatItem.Tool
+        for ((strings: Strings, name) in listOf(ResStrings.zh to "工具调用", ResStrings.en to "Tool call")) assertEquals(name, item.displayTitle(strings))
+    }
+
+    @Test
+    fun contentThatIsNotTextShowsAPlaceholderInTheLanguageOfTheScreen() {
+        val blocks = listOf(
+            ContentBlock.Image(data = "AAAA", mimeType = "image/png"),
+            ContentBlock.Audio(data = "AAAA", mimeType = "audio/wav"),
+            ContentBlock.ResourceLink(name = "report.pdf", uri = "file:///report.pdf"),
+        )
+        fun texts(strings: Strings) = blocks.map { (AgentUpdate.fromSdk(SessionUpdate.AgentMessageChunk(it), strings) as AgentUpdate.MessageChunk).text }
+        assertEquals(listOf("［图片］", "［音频］", "［链接：report.pdf］"), texts(ResStrings.zh))
+        assertEquals(listOf("[Image]", "[Audio]", "[Link: report.pdf]"), texts(ResStrings.en))
+        // the same words in a tool call's detail
+        val detail = AgentUpdate.fromSdk(
+            SessionUpdate.ToolCallUpdate(toolCallId = ToolCallId("c"), content = listOf(ToolCallContent.Content(blocks[0]))),
+            ResStrings.en,
+        ) as AgentUpdate.ToolCallUpdated
+        assertEquals("[Image]", detail.detail)
     }
 
     private val zh: Strings = ResStrings.zh

@@ -13,10 +13,13 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import org.agentos.app.R
+import org.agentos.app.i18n.Strings
 
 /**
  * Pure logic of the BYOK settings (F9): parse what IAgentControl v2 returns, build what it accepts,
- * explain its errors. No Android types, so it is unit-tested on the JVM (ByokTest).
+ * explain its errors. No Android types (user text comes through [Strings], `byok_*` in `strings_p2.xml`),
+ * so it is unit-tested on the JVM (SettingsLogicTest).
  * The key never passes through here: it goes straight from the password field to setModelSource.
  */
 object Byok {
@@ -140,24 +143,24 @@ object Byok {
      * which the runtime allows only when the endpoint is unchanged (same preset provider, or the same
      * custom baseUrl); otherwise a key is required.
      */
-    fun validate(form: Form, keyEntered: Boolean, current: Source?): Invalid? {
+    fun validate(form: Form, keyEntered: Boolean, current: Source?, strings: Strings): Invalid? {
         when (form) {
             is Form.Preset -> {
-                if (form.provider.isBlank()) return Invalid("provider", "请选择模型厂商")
-                if (form.model.isBlank()) return Invalid("model", "请选择模型")
+                if (form.provider.isBlank()) return Invalid("provider", strings.get(R.string.byok_pick_provider))
+                if (form.model.isBlank()) return Invalid("model", strings.get(R.string.byok_pick_model))
             }
             is Form.Custom -> {
-                if (form.api != ANTHROPIC && form.api != OPENAI) return Invalid("api", "请选择协议")
+                if (form.api != ANTHROPIC && form.api != OPENAI) return Invalid("api", strings.get(R.string.byok_pick_api))
                 val url = form.baseUrl.trim()
-                if (url.isEmpty()) return Invalid("baseUrl", "请填写 API 地址")
+                if (url.isEmpty()) return Invalid("baseUrl", strings.get(R.string.byok_need_url))
                 if (!isAllowedEndpoint(url)) {
-                    return Invalid("baseUrl", "地址必须以 https:// 开头（http 只允许本机），且不能带用户名、? 参数或 # 片段")
+                    return Invalid("baseUrl", strings.get(R.string.byok_url_rule))
                 }
-                if (form.model.isBlank()) return Invalid("model", "请填写模型名")
-                if (form.model.any { it.isWhitespace() }) return Invalid("model", "模型名不能含空格")
+                if (form.model.isBlank()) return Invalid("model", strings.get(R.string.byok_need_model_name))
+                if (form.model.any { it.isWhitespace() }) return Invalid("model", strings.get(R.string.byok_model_no_space))
             }
         }
-        if (!keyEntered && !sameEndpoint(form, current)) return Invalid("key", "换了厂商或地址，需要重新填写 key")
+        if (!keyEntered && !sameEndpoint(form, current)) return Invalid("key", strings.get(R.string.byok_key_required))
         return null
     }
 
@@ -206,42 +209,43 @@ object Byok {
     // ------------------------------------------------------------------ errors
 
     /** "agentos.byok.<code>: …" from IAgentControl → a sentence for the user. Never echoes input values. */
-    fun errorText(message: String?): String {
+    fun errorText(message: String?, strings: Strings): String {
         val code = message?.takeIf { it.startsWith("agentos.byok.") }?.removePrefix("agentos.byok.")?.substringBefore(':')?.trim()
         return when (code) {
-            "invalid_source" -> "设置内容不完整或格式不对"
-            "unknown_provider" -> "没有这个模型厂商（目录可能已更新），请重新选择"
-            "unknown_model" -> "这个厂商没有这个模型，请重新选择"
-            "unsupported_api" -> "不支持这个协议，只能选 Anthropic Messages 或 OpenAI Chat Completions"
-            "invalid_endpoint" -> "API 地址不合法：必须是 https://（http 只允许本机），不能带用户名、? 参数或 # 片段"
-            "invalid_thinking_level" -> "思考强度不在可选范围内"
-            "invalid_key" -> "key 的格式不对：不能含空格或换行，最长 4096 个字符"
-            "key_required" -> "换了厂商或地址，需要重新填写 key"
-            "catalog_unavailable" -> "厂商目录读不出来，请重新安装 AgentOS"
-            "storage_failed" -> "保存失败（存储或 Android Keystore 出错），请重试"
-            null -> "保存失败，请重试"
-            else -> "保存失败（$code）"
+            "invalid_source" -> strings.get(R.string.byok_err_invalid_source)
+            "unknown_provider" -> strings.get(R.string.byok_err_unknown_provider)
+            "unknown_model" -> strings.get(R.string.byok_err_unknown_model)
+            "unsupported_api" -> strings.get(R.string.byok_err_unsupported_api)
+            "invalid_endpoint" -> strings.get(R.string.byok_err_invalid_endpoint)
+            "invalid_thinking_level" -> strings.get(R.string.byok_err_invalid_thinking_level)
+            "invalid_key" -> strings.get(R.string.byok_err_invalid_key)
+            "key_required" -> strings.get(R.string.byok_key_required)
+            "catalog_unavailable" -> strings.get(R.string.byok_err_catalog_unavailable)
+            "storage_failed" -> strings.get(R.string.byok_err_storage_failed)
+            null -> strings.get(R.string.byok_err_save_failed)
+            else -> strings.get(R.string.byok_err_save_failed_code, code)
         }
     }
 
-    fun problemText(problem: String): String = when (problem) {
-        "config_unreadable", "config_newer_format" -> "保存的设置读不出来，请重新设置"
-        "key_unreadable" -> "key 无法解密（例如数据被恢复到了另一台手机），请重新填写 key"
-        "key_endpoint_mismatch" -> "App 更新后厂商地址变了，请重新填写 key"
-        "model_not_in_catalog" -> "这个模型已不在最新目录里，沿用保存的参数，仍然可用"
-        "catalog_unavailable" -> "厂商目录读不出来"
+    fun problemText(problem: String, strings: Strings): String = when (problem) {
+        "config_unreadable", "config_newer_format" -> strings.get(R.string.byok_problem_config_unreadable)
+        "key_unreadable" -> strings.get(R.string.byok_problem_key_unreadable)
+        "key_endpoint_mismatch" -> strings.get(R.string.byok_problem_key_endpoint_mismatch)
+        "model_not_in_catalog" -> strings.get(R.string.byok_problem_model_not_in_catalog)
+        "catalog_unavailable" -> strings.get(R.string.byok_problem_catalog_unavailable)
         else -> problem
     }
 
-    fun thinkingText(level: String): String = when (level) {
-        "off" -> "关闭"
-        "minimal" -> "最少"
-        "low" -> "低"
-        "medium" -> "中"
-        "high" -> "高"
+    fun thinkingText(level: String, strings: Strings): String = when (level) {
+        "off" -> strings.get(R.string.byok_thinking_off)
+        "minimal" -> strings.get(R.string.byok_thinking_minimal)
+        "low" -> strings.get(R.string.byok_thinking_low)
+        "medium" -> strings.get(R.string.byok_thinking_medium)
+        "high" -> strings.get(R.string.byok_thinking_high)
         else -> level
     }
 
+    /** Protocol names are product names: not translated. */
     fun apiText(api: String): String = when (api) {
         ANTHROPIC -> "Anthropic Messages"
         OPENAI -> "OpenAI Chat Completions"

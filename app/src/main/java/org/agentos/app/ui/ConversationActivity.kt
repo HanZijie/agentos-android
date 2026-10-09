@@ -25,6 +25,8 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.agentos.app.R
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 
 /**
  * The App's own conversation screen (W8): streaming output, cancel, thinking (collapsible), tool calls.
@@ -32,6 +34,7 @@ import org.agentos.app.R
  * streamed chunk touches a single TextView.
  */
 class ConversationActivity : Activity() {
+    private val strings: Strings by lazy { AndroidStrings(this) }
     private lateinit var controller: ChatController
     private lateinit var scroll: ScrollView
     private lateinit var messages: A11yThrottleFrame
@@ -315,7 +318,7 @@ class ConversationActivity : Activity() {
                     }
                 )
                 val arrow = if (item.detail.isNullOrBlank()) "" else if (item.expanded) " ▾" else " ▸"
-                view.findViewWithTag<TextView>("header").text = "🔧 ${item.title} · $status$arrow"
+                view.findViewWithTag<TextView>("header").text = "🔧 ${item.displayTitle(strings)} · $status$arrow"
                 view.findViewWithTag<TextView>("detail").apply {
                     text = item.detail.orEmpty()
                     visibility = if (item.expanded && !item.detail.isNullOrBlank()) View.VISIBLE else View.GONE

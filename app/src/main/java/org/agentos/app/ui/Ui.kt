@@ -84,7 +84,7 @@ object Ui {
             setPadding(dp(ctx, 4), dp(ctx, 8), dp(ctx, 16), dp(ctx, 8))
         }
         bar.addView(textButton(ctx, "←", org.agentos.app.R.color.ui_text) { activity.finish() }.apply {
-            contentDescription = "返回"
+            contentDescription = ctx.getString(org.agentos.app.R.string.ui_back_desc)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
         })
         bar.addView(text(ctx, 20f, org.agentos.app.R.color.ui_text, bold = true).apply { this.text = title })
