@@ -108,6 +108,8 @@ class AgentService : Service() {
         return Notification.Builder(this, CHANNEL_DESKTOP)
             .setContentTitle(Desktop.notificationTitle(strings))
             .setContentText(strings.get(R.string.desktop_notification_text))
+            // the one-line form cuts this sentence at a large font size (English is longer): the expanded form shows all of it
+            .setStyle(Notification.BigTextStyle().bigText(strings.get(R.string.desktop_notification_text)))
             .setSubText(if (busy) strings.get(R.string.desktop_notification_busy) else null)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
