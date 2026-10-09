@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
@@ -333,14 +334,22 @@ class RuntimeEngine internal constructor(
     /**
      * 会话里 `sequence > afterSequence` 的已提交事件，按 sequence 顺序；之后提交的事件陆续发出，直到收集方取消。
      * 先写日志再通知（events.md 6.2），所以不会漏事件，也不会看到未提交的事件。
+     *
+     * 会话被删（session/delete 会删掉它的事件日志）时流正常结束：通知过的事件读不到，只可能是日志被删了，
+     * 以后也不会再有新事件。不结束的话，正在等这个会话终态事件的 prompt 会一直挂着（收集方在通知之后、读日志之前
+     * 被删除抢先时，终态事件就丢了）。
      */
     fun events(sessionId: String, afterSequence: Long = 0): Flow<EventEnvelope> = flow {
         awaitReady()
         var cursor = afterSequence
-        store.watch(sessionId).collect { latest ->
+        var gone = false
+        store.watch(sessionId).transformWhile { latest -> emit(latest); !gone }.collect { latest ->
             while (cursor < latest) {
                 val batch = store.read { it.events.read(sessionId, cursor, 500) }
-                if (batch.isEmpty()) break
+                if (batch.isEmpty()) {
+                    gone = true
+                    break
+                }
                 for (e in batch) emit(e)
                 cursor = batch.last().sequence
             }

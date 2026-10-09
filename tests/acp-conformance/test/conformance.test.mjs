@@ -43,10 +43,13 @@ for (const target of targets()) {
 
     test("initialize declares ACP v1, the capabilities and the AgentOS profile", () => {
       assert.equal(init.protocolVersion, 1);
-      assert.equal(init.agentCapabilities.loadSession, false);
+      // session/load 从 9578ac5（会话生命周期）起已支持；会话相关的完整用例在 core:runtime 的 SessionLifecycleAcpTest 和设备用例里
+      assert.equal(init.agentCapabilities.loadSession, true);
       assert.equal(init.agentCapabilities.promptCapabilities.embeddedContext, true);
       assert.equal(init.agentCapabilities.promptCapabilities.image, false);
-      assert.equal(init.agentCapabilities.mcpCapabilities.http, false);
+      // 只声明 Streamable HTTP，并且只在构建接了会话级工具时（engine.supportsSessionTools；这里的测试代理接了）
+      assert.equal(init.agentCapabilities.mcpCapabilities.http, true);
+      assert.equal(init.agentCapabilities.mcpCapabilities.sse, false);
       assert.equal(init.agentInfo.name, "agentos");
       const meta = init._meta[META];
       assert.equal(meta.profile, 1);
@@ -173,7 +176,11 @@ for (const target of targets()) {
         agent.connection.prompt({ sessionId, prompt: [{ type: "image", data: "AAAA", mimeType: "image/png" }] }),
         (e) => e.code === -32602 && e.data.agentosCode === "unsupported",
       );
-      await assert.rejects(agent.connection.loadSession({ sessionId, cwd: "/sdcard", mcpServers: [] }), (e) => e.code === -32601);
+      // session/load 已支持（见上面的 initialize 用例）；不存在的会话（或别人的会话）一律是 session_not_found，不是“方法不存在”
+      await assert.rejects(
+        agent.connection.loadSession({ sessionId: "ses_00000000000000000000000000", cwd: "/sdcard", mcpServers: [] }),
+        (e) => e.code === -32002 && e.data.agentosCode === "session_not_found",
+      );
       // resource_link 和嵌入的文字资源可以用
       const ok = await agent.connection.prompt({
         sessionId,
@@ -200,12 +207,14 @@ for (const target of targets()) {
         _meta: { [META]: { toolScope: [{ plugin: "calc", tool: "add" }, { plugin: "no-such-plugin", tool: "ghost" }] } },
       });
       assert.match(scoped.sessionId, /^ses_[0-9A-Z]{26}$/);
-      // add 是测试工具，没有来源插件：任何有限制的 scope 都不包含没有来源的工具，所以被拒绝，文字与工具不存在时相同
+      // add 是测试工具，没有来源插件：任何有限制的 scope 都不包含没有来源的工具，所以被拒绝，文字与工具不存在时相同。
+      // 与上面“目录外的工具”用例一样两种文案都算：FakeAgentCore 交给宿主层（Broker：[agentos:tool_not_in_catalog]），
+      // 真实 Pi 不认识 scope 之外的工具、自己返回 "Tool <name> not found"；两者都没有执行它
       const r = await agent.connection.prompt({ sessionId: scoped.sessionId, prompt: directive({ tools: [{ name: "add", arguments: { a: 2, b: 3 } }] }) });
       assert.equal(r.stopReason, "end_turn", "a refused tool does not fail the turn");
       const updates = agent.updatesFor(scoped.sessionId).filter((u) => u.sessionUpdate === "tool_call_update");
       assert.deepEqual(updates.map((u) => u.status), ["failed"]);
-      assert.match(updates[0].content[0].content.text, /^\[agentos:tool_not_in_catalog\] Tool add is not available\.$/);
+      assert.match(updates[0].content[0].content.text, /^\[agentos:tool_not_in_catalog\] Tool add is not available\.$|^Tool add not found$/);
 
       // 空 scope 合法，也是“没有任何工具”
       const empty = await agent.connection.newSession({ cwd: "/sdcard", mcpServers: [], _meta: { [META]: { toolScope: [] } } });

@@ -12,6 +12,7 @@ import org.agentos.runtime.desktop.DesktopListener
 import org.agentos.runtime.desktop.DesktopListenerFactory
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.BindException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -43,14 +44,33 @@ class TcpDesktopListenerFactory(port: Int = 0, private val peerUid: Int = SHELL_
         private set
 
     override fun open(): DesktopListener {
-        val server = ServerSocket()
-        server.reuseAddress = true
-        server.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), port), 50)
+        val server = bindServer()
         port = server.localPort
         return object : DesktopListener {
             override fun accept(): DesktopEndpoint = SocketEndpoint(server.accept(), peerUid)
 
             override fun close() = server.close()
+        }
+    }
+
+    /**
+     * 重新打开（开关关了又开）时，旧监听的 accept 线程可能还没从 accept() 里醒来。Linux 上这时旧的监听 socket
+     * 在内核里还活着，bind 同一个端口会失败（EADDRINUSE），而且这一轮连上来的连接会落进它的积压队列、
+     * 随后被重置。macOS 没有这个现象。等旧 socket 真正释放再 bind；第一次打开（port == 0）不重试。
+     */
+    private fun bindServer(): ServerSocket {
+        val deadline = System.nanoTime() + REBIND_WAIT_NANOS
+        while (true) {
+            val server = ServerSocket()
+            try {
+                server.reuseAddress = true
+                server.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), port), 50)
+                return server
+            } catch (e: BindException) {
+                runCatching { server.close() }
+                if (port == 0 || System.nanoTime() >= deadline) throw e
+                Thread.sleep(2)
+            }
         }
     }
 
@@ -65,5 +85,7 @@ class TcpDesktopListenerFactory(port: Int = 0, private val peerUid: Int = SHELL_
 
     companion object {
         const val SHELL_UID = 2000
+
+        private const val REBIND_WAIT_NANOS = 5_000_000_000L
     }
 }

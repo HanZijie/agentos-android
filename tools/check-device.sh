@@ -126,7 +126,8 @@ elif [ -n "$ZIP" ]; then
     TMPAPK=$(mktemp "${TMPDIR:-/tmp}/agentos-installed.XXXXXX")
     $ADB pull "$(sh_ pm path $PKG | sed -n 's/^package://p' | head -n 1)" "$TMPAPK" >/dev/null 2>&1
     BT=$(ls -d "${ANDROID_HOME:-$HOME/Library/Android/sdk}"/build-tools/* 2>/dev/null | sort | tail -n 1)
-    ICERT=$("$BT/apksigner" verify --print-certs "$TMPAPK" 2>/dev/null | sed -n 's/.*Signer #1 certificate SHA-256 digest: //p')
+    # apksigner 的输出格式随 build-tools 变过：旧的 "Signer #1 certificate ..."，build-tools 37 起 "V2 Signer: certificate ..."；两种都认
+    ICERT=$("$BT/apksigner" verify --print-certs "$TMPAPK" 2>/dev/null | sed -n -E 's/.*(Signer #1|V[0-9]+ Signer):? certificate SHA-256 digest: //p' | head -n 1)
     if [ -n "$ICERT" ] && [ "$ICERT" != "$ZCERT" ]; then
         fail "installed AgentOS App (v$INST) is signed with a different certificate than the zip: the module will stop. Uninstall it first (its data goes with it)"
     elif [ "$INST" -gt "$ZVC" ]; then
