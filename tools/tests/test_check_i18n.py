@@ -164,6 +164,15 @@ class LiteralTests(Repo):
         self.assertEqual(code, 1)
         self.assertIn("[stale-allowlist]", out)
 
+    def test_nested_worktrees_are_not_scanned(self):
+        # AGENTS.md section 7: other checkouts of the repository live in .worktrees/ and may be on a branch with a different allowlist
+        self.kt('val a = "hello"\n')
+        write(self.root, ".worktrees/other/app/src/main/java/B.kt", 'val b = "你好"\n')
+        write(self.root, ".worktrees/other/app/src/main/res/values/strings.xml", res('<string name="x">甲</string>'))
+        write(self.root, ".worktrees/other/app/src/main/res/values-en/strings.xml", res('<string name="x">A，B</string>'))
+        code, out = self.run_check("")
+        self.assertEqual(code, 0, out)
+
     def test_real_repo_passes(self):
         repo = os.path.abspath(os.path.join(HERE, "..", ".."))
         if not os.path.isdir(os.path.join(repo, "app")):
