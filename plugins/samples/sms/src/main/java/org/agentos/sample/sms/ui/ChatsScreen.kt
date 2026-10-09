@@ -25,7 +25,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -36,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -57,6 +61,7 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.agentos.sample.sms.R
+import org.agentos.sample.sms.agentos.SmsLine
 import org.agentos.sample.sms.SmsGraph
 import org.agentos.sample.sms.data.MessageQuery
 import org.agentos.sample.sms.data.SmsAccess
@@ -254,6 +259,10 @@ private fun ConversationScreen(
         }
     }
     val list = messages
+    val processedIds by graph.processed.ids.collectAsState()
+    // 要交给 AgentOS 的：这个会话里收到 / 发出的短信，带“是否已处理”；按钮据此数“未处理”
+    val lines = remember(list, maskCodes, processedIds) { list?.let { SmsLine.from(it, maskCodes, processedIds) }.orEmpty() }
+    val unprocessed = lines.count { !it.processed }
     val listState = rememberLazyListState()
     LaunchedEffect(list?.size) {
         if (!list.isNullOrEmpty()) listState.scrollToItem(list.size - 1)
@@ -289,20 +298,33 @@ private fun ConversationScreen(
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(list, key = { it.id }) { Bubble(it, maskCodes) }
+                    items(list, key = { it.id }) { Bubble(it, maskCodes, it.id in processedIds) }
                 }
             }
         }
         Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp).padding(bottom = padding.calculateBottomPadding())) {
-                Text(
-                    stringResource(R.string.chats_readonly_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                AskAgentButton(
+                    unprocessed = unprocessed,
+                    enabled = lines.isNotEmpty(),
+                    onClick = {
+                        val records = list ?: return@AskAgentButton
+                        val schedule = graph.agentSchedule
+                        schedule.open(schedule.sourceFor(address, records, maskCodes))
+                    },
                 )
                 Spacer(Modifier.height(8.dp))
-                FilledTonalButton(onClick = { graph.gateway.openComposer(address, null) }) {
-                    Text(stringResource(R.string.chats_open_composer), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.chats_readonly_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.size(12.dp))
+                    FilledTonalButton(onClick = { graph.gateway.openComposer(address, null) }) {
+                        Text(stringResource(R.string.chats_open_composer), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
@@ -310,7 +332,7 @@ private fun ConversationScreen(
 }
 
 @Composable
-private fun Bubble(record: SmsRecord, maskCodes: Boolean) {
+private fun Bubble(record: SmsRecord, maskCodes: Boolean, processed: Boolean) {
     val extras = LocalSmsExtras.current
     val incoming = record.box == SmsBox.INBOX
     val body = if (maskCodes) CodeMasker.mask(record.body).text else record.body
@@ -327,12 +349,43 @@ private fun Bubble(record: SmsRecord, maskCodes: Boolean) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
                 Text(body, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(3.dp))
-                Text(
-                    MessageTime.format(record.dateMillis, System.currentTimeMillis(), ZoneId.systemDefault(), Locale.getDefault()),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = (if (incoming) extras.onBubbleIn else extras.onBubbleOut).copy(alpha = 0.65f),
-                )
+                val faint = (if (incoming) extras.onBubbleIn else extras.onBubbleOut).copy(alpha = 0.65f)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        MessageTime.format(record.dateMillis, System.currentTimeMillis(), ZoneId.systemDefault(), Locale.getDefault()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = faint,
+                    )
+                    if (processed) {
+                        Spacer(Modifier.size(8.dp))
+                        Icon(Icons.Rounded.Check, contentDescription = null, tint = faint, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.size(2.dp))
+                        Text(stringResource(R.string.ask_processed_tag), style = MaterialTheme.typography.labelSmall, color = faint, maxLines = 1)
+                    }
+                }
             }
+        }
+    }
+}
+
+/**
+ * 会话页底部的主按钮：把这个会话里**还没处理过**的短信交给 AgentOS，建日程、待办和闹钟（点开是预览面板，可改提示词）。
+ * 右边的小标签数出还有几条没处理；全处理过了写“已全部处理”（仍可点：面板里可以选择把处理过的再处理一遍）。
+ */
+@Composable
+private fun AskAgentButton(unprocessed: Int, enabled: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(8.dp))
+        Text(stringResource(R.string.ask_button), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.size(10.dp))
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f), contentColor = MaterialTheme.colorScheme.onPrimary) {
+            Text(
+                if (unprocessed > 0) pluralStringResource(R.plurals.ask_button_unprocessed, unprocessed, unprocessed) else stringResource(R.string.ask_button_all_done),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            )
         }
     }
 }

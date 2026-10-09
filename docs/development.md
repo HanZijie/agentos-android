@@ -57,7 +57,7 @@ python3 tools/package-module.py --check build/module/agentos-<ver>.zip   # 只�
 
 ## 示例 App
 
-`plugins/samples/` 下有闹钟、日历、备忘录、待办、短信五个示例 App（后两个见 [next-apps-plan.md](next-apps-plan.md)），各自带一个 MCP 服务（Binder，不开 HTTP 端口），用来演示和验收“AgentOS 通过 MCP 完整操作一个 App”。备忘录还引入了 `:sdk:acp-android`，带一个“让 AgentOS 安排”按钮，是“App 调用 Agent”的参考实现。工具清单、数据与构建见 [sample-apps.md](sample-apps.md) 和各 App 目录下的 README。
+`plugins/samples/` 下有闹钟、日历、备忘录、待办、短信五个示例 App（后两个见 [next-apps-plan.md](next-apps-plan.md)），各自带一个 MCP 服务（Binder，不开 HTTP 端口），用来演示和验收“AgentOS 通过 MCP 完整操作一个 App”。备忘录和短信都引入了 `:sdk:acp-android`，各带一个“让 AgentOS 安排”按钮，是“App 调用 Agent”的参考实现（短信的在会话页，提示词可编辑，见 [third-party-acp.md](third-party-acp.md) 5b）。工具清单、数据与构建见 [sample-apps.md](sample-apps.md) 和各 App 目录下的 README。
 
 ```bash
 ./gradlew :plugins:samples:alarm:assembleDebug :plugins:samples:calendar:assembleDebug :plugins:samples:notes:assembleDebug \

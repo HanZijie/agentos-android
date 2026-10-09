@@ -32,7 +32,7 @@
     <string name="guide_note">应用信息里没有这个菜单项？说明系统没有限制本 App，直接授予权限即可。</string>
 
     <string name="disclosure_title">短信内容的去向</string>
-    <string name="disclosure_body">Agent 读取的短信内容会进入会话历史，并发送给你在 AgentOS 里配置的模型端点。发送短信每次都需要你确认，验证码默认遮蔽。本 App 自己不联网，也不是默认短信应用。</string>
+    <string name="disclosure_body">Agent 读取的短信内容会进入会话历史，并发送给你在 AgentOS 里配置的模型端点。你点会话页的“让 AgentOS 安排”时，这个会话里的短信原文（验证码按设置遮蔽）也会交给 AgentOS，用来建日程、待办和闹钟，发送前能看到并修改提示词。发送短信每次都需要你确认，验证码默认遮蔽。本 App 自己不联网，也不是默认短信应用。</string>
     <string name="disclosure_ack">我知道了</string>
 
     <string name="status_agent_title">Agent 能做什么</string>
@@ -100,4 +100,131 @@
     <string name="settings_about">关于</string>
     <string name="about_body">本 App 不是默认短信应用：读取系统短信库，用系统短信服务发送。不支持彩信、群发、删除和标已读。</string>
     <string name="settings_version">版本 %1$s</string>
+
+    <!-- 让 AgentOS 安排（会话页的按钮和底部面板；docs/third-party-acp.md 第 5 节） -->
+    <string name="ask_button">让 AgentOS 安排</string>
+    <string name="ask_button_all_done">已全部处理</string>
+    <plurals name="ask_button_unprocessed">
+        <item quantity="other">%d 条未处理</item>
+    </plurals>
+    <string name="ask_processed_tag">已由 AgentOS 处理</string>
+    <string name="ask_dir_received">收到</string>
+    <string name="ask_dir_sent">发出</string>
+
+    <string name="action_cancel">取消</string>
+    <string name="agent_panel_title">让 AgentOS 安排</string>
+    <string name="agent_panel_subtitle">把短信里的安排变成日程、待办或闹钟</string>
+    <string name="agent_stop">停止</string>
+    <string name="agent_close">完成</string>
+    <string name="agent_start">开始</string>
+    <string name="agent_retry">再试一次</string>
+    <string name="agent_open_prompt">打开提示</string>
+    <string name="agent_open_confirm">打开确认</string>
+    <string name="agent_open_agentos">打开 AgentOS</string>
+    <string name="agent_learn_more">了解 AgentOS</string>
+    <string name="agent_view_calendar">在日历中查看</string>
+    <string name="agent_view_alarm">在闹钟中查看</string>
+    <string name="agent_view_todo">在待办中查看</string>
+
+    <!-- Ready：将发送的短信与可编辑的提示词 -->
+    <plurals name="agent_ready_count">
+        <item quantity="other">将发送 %d 条短信</item>
+    </plurals>
+    <string name="agent_ready_none">没有未处理的短信。打开下面的开关，可以把处理过的再处理一遍。</string>
+    <plurals name="agent_ready_dropped">
+        <item quantity="other">另有 %d 条更早的未处理短信这次不发，下次再处理。</item>
+    </plurals>
+    <plurals name="agent_ready_more">
+        <item quantity="other">……还有 %d 条</item>
+    </plurals>
+    <string name="agent_ready_include">也包含处理过的短信</string>
+    <plurals name="agent_ready_include_count">
+        <item quantity="other">已处理过的有 %d 条</item>
+    </plurals>
+    <string name="agent_ready_privacy">短信原文会交给 AgentOS 处理，只用来找出要安排的事（验证码按设置遮蔽）。创建日程、待办或闹钟时要不要先问你，取决于你在 AgentOS 里对这些工具的设置。</string>
+
+    <string name="agent_prompt_title">提示词</string>
+    <string name="agent_prompt_state_default">默认</string>
+    <string name="agent_prompt_state_custom">已自定义</string>
+    <string name="agent_prompt_edit">编辑</string>
+    <string name="agent_prompt_collapse">收起</string>
+    <string name="agent_prompt_label">任务说明</string>
+    <string name="agent_prompt_hint">这是交给 AgentOS 的任务说明，可以直接修改，或在末尾加上你自己的要求，例如“只安排工作相关的事”，或“待办的优先级一律设为高”。日期时区、安全说明和短信原文由 App 固定附上，不能修改。清空则使用默认说明。</string>
+    <string name="agent_prompt_reset">恢复默认</string>
+    <string name="agent_prompt_count">%1$d / %2$d</string>
+    <string name="sms_prompt_default">从下面的短信里找出需要安排或跟进的事，每件事只落在下面四处之一：\n1. 占用一段时间、有明确日期和时间的（会议、预约、航班、取件时段）：用 event_create 建日程；短信里有地点就填 location。“提前 15 分钟提醒”这类要求属于这个日程，填进 reminder_minutes，不要另建闹钟。\n2. 有明确完成状态、要去办的（缴费、还款、取快递、回电话、提交材料）：用 todo_create 建待办，一件事一条。短信里写了期限就填 due，按紧迫程度填 priority（high、medium 或 low）。\n3. 必须在某个钟点自己响起来的（起床、按时吃药）：才用 alarm_create 建闹钟。\n4. 只是信息的（验证码、到账通知、广告和促销、一般通知）：什么也不建。</string>
+
+    <!-- Checking / WaitingAuthorization -->
+    <string name="agent_checking">正在连接 AgentOS……</string>
+    <string name="agent_header_waiting">等你在 AgentOS 里允许</string>
+    <string name="agent_waiting_title">请在 AgentOS 的提示里允许短信</string>
+    <string name="agent_waiting_message">第一次使用需要你同意，之后不会再问。随时可以在 AgentOS 设置里撤销。</string>
+
+    <!-- Running -->
+    <string name="agent_running_reading">AgentOS 正在读你的短信……</string>
+    <string name="agent_running_says">AgentOS 说</string>
+    <string name="agent_running_approval_hint">AgentOS 在等你确认。点下面的按钮，到它的提示里决定。</string>
+
+    <!-- 工具卡片 -->
+    <string name="agent_item_event">日程</string>
+    <string name="agent_item_alarm">闹钟</string>
+    <string name="agent_item_todo">待办</string>
+    <string name="agent_item_other">其他操作</string>
+    <string name="agent_item_status_awaiting">等待你在 AgentOS 里确认</string>
+    <string name="agent_item_status_creating">创建中</string>
+    <string name="agent_item_status_created">已创建</string>
+    <string name="agent_item_status_denied">你拒绝了</string>
+    <string name="agent_item_status_failed">失败</string>
+    <string name="agent_item_status_cancelled">已取消</string>
+    <string name="agent_alarm_once">仅一次</string>
+    <string name="agent_alarm_every_day">每天</string>
+    <string name="agent_alarm_weekdays">工作日</string>
+    <string name="agent_alarm_weekends">周末</string>
+    <string name="agent_alarm_weekly">每%s</string>
+    <string name="agent_alarm_unlabeled">未命名闹钟</string>
+    <string name="agent_todo_due">截止 %s</string>
+    <!-- 星期名之间的分隔符（跟语言走，不在代码里判断语言） -->
+    <string name="agent_day_separator">、</string>
+
+    <!-- Done -->
+    <string name="agent_done_title">已安排好</string>
+    <string name="agent_done_title_stopped">已停止</string>
+    <string name="agent_done_nothing_title">没有创建任何日程、待办或闹钟</string>
+    <string name="agent_done_nothing_fallback">AgentOS 没有在这些短信里找到可以安排的事。</string>
+    <plurals name="agent_done_events">
+        <item quantity="other">%d 个日程</item>
+    </plurals>
+    <plurals name="agent_done_todos">
+        <item quantity="other">%d 个待办</item>
+    </plurals>
+    <plurals name="agent_done_alarms">
+        <item quantity="other">%d 个闹钟</item>
+    </plurals>
+    <string name="agent_done_headline_both">已创建 %1$s、%2$s</string>
+    <string name="agent_done_headline_three">已创建 %1$s、%2$s、%3$s</string>
+    <string name="agent_done_headline_one">已创建 %1$s</string>
+
+    <!-- Error -->
+    <string name="agent_error_not_installed_title">没有找到 AgentOS</string>
+    <string name="agent_error_not_installed_message">装好 AgentOS 之后，就能让它把短信里的安排直接排进日历、待办和闹钟。</string>
+    <string name="agent_error_no_model_title">AgentOS 还没有配置模型</string>
+    <string name="agent_error_no_model_message">先到 AgentOS 里配置好模型，再回来试一次。</string>
+    <string name="agent_error_denied_title">你拒绝了短信使用 AgentOS</string>
+    <string name="agent_error_denied_message">可以在 AgentOS 设置里改成允许。</string>
+    <string name="agent_error_auth_timeout_title">没有等到你的回应</string>
+    <string name="agent_error_auth_timeout_message">AgentOS 里的授权提示一直没有被处理，已按拒绝记录，10 分钟内不会再询问。可以稍后再试，或到 AgentOS 设置里直接允许短信。</string>
+    <string name="agent_error_busy_title">AgentOS 正忙</string>
+    <string name="agent_error_busy_message">它还在处理短信之前的一个请求。稍等一会儿再试。</string>
+    <string name="agent_error_rate_limited_title">请求太频繁了</string>
+    <string name="agent_error_rate_limited_message">AgentOS 限制了每小时可以发起的次数。过一阵再试。</string>
+    <string name="agent_error_too_large_title">内容太长了</string>
+    <string name="agent_error_too_large_message">缩短提示词，或先处理一部分短信，再点「让 AgentOS 安排」。</string>
+    <string name="agent_error_disconnected_title">和 AgentOS 的连接断了</string>
+    <string name="agent_error_disconnected_message">已经创建的项目会保留。可以再试一次，但别重复创建。</string>
+    <string name="agent_error_interrupted_title">上一次的任务中断了</string>
+    <string name="agent_error_interrupted_message">短信 App 在后台被系统回收，任务丢失。可能已经创建了一部分，请到日历、待办和闹钟里看一眼。不会自动重试。</string>
+    <string name="agent_error_failed_title">出错了</string>
+    <string name="agent_error_failed_message">AgentOS 没能完成这件事。可以再试一次。</string>
+    <string name="agent_error_detail">原因：%s</string>
+    <string name="agent_created_before_error">出错之前已经创建的</string>
 </resources>

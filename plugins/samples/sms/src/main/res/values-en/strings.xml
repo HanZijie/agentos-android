@@ -32,7 +32,7 @@
     <string name="guide_note">No such item in the App info menu? Then the system is not restricting this app — just grant the permissions.</string>
 
     <string name="disclosure_title">Where your messages go</string>
-    <string name="disclosure_body">Message text the agent reads becomes part of the chat history and is sent to the model endpoint you configured in AgentOS. Every send needs your approval, and verification codes are masked by default. This app does not use the network itself and is not your default messaging app.</string>
+    <string name="disclosure_body">Message text the agent reads becomes part of the chat history and is sent to the model endpoint you configured in AgentOS. When you tap \"Schedule with AgentOS\" on a conversation, the raw text of its messages (verification codes masked per your settings) also goes to AgentOS to create events, to-dos and alarms; you see and can change the prompt before it is sent. Every send needs your approval, and verification codes are masked by default. This app does not use the network itself and is not your default messaging app.</string>
     <string name="disclosure_ack">Got it</string>
 
     <string name="status_agent_title">What the agent can do</string>
@@ -102,4 +102,133 @@
     <string name="settings_about">About</string>
     <string name="about_body">This app is not your default messaging app: it reads the system message store and sends through the system SMS service. No MMS, group messages, deleting or marking as read.</string>
     <string name="settings_version">Version %1$s</string>
+
+    <!-- Schedule with AgentOS (button on the conversation page and its bottom panel; docs/third-party-acp.md section 5) -->
+    <string name="ask_button">Schedule with AgentOS</string>
+    <string name="ask_button_all_done">All processed</string>
+    <plurals name="ask_button_unprocessed">
+        <item quantity="one">%d new</item>
+        <item quantity="other">%d new</item>
+    </plurals>
+    <string name="ask_processed_tag">Handled by AgentOS</string>
+    <string name="ask_dir_received">Received</string>
+    <string name="ask_dir_sent">Sent</string>
+
+    <string name="action_cancel">Cancel</string>
+    <string name="agent_panel_title">Schedule with AgentOS</string>
+    <string name="agent_panel_subtitle">Turn the plans in your messages into events, to-dos or alarms</string>
+    <string name="agent_stop">Stop</string>
+    <string name="agent_close">Done</string>
+    <string name="agent_start">Start</string>
+    <string name="agent_retry">Try again</string>
+    <string name="agent_open_prompt">Open the prompt</string>
+    <string name="agent_open_confirm">Open confirmation</string>
+    <string name="agent_open_agentos">Open AgentOS</string>
+    <string name="agent_learn_more">About AgentOS</string>
+    <string name="agent_view_calendar">View in Calendar</string>
+    <string name="agent_view_alarm">View in Alarms</string>
+    <string name="agent_view_todo">View in To-do</string>
+
+    <plurals name="agent_ready_count">
+        <item quantity="one">%d message will be sent</item>
+        <item quantity="other">%d messages will be sent</item>
+    </plurals>
+    <string name="agent_ready_none">There are no unprocessed messages. Turn on the switch below to run the processed ones again.</string>
+    <plurals name="agent_ready_dropped">
+        <item quantity="one">%d older unprocessed message is left for next time.</item>
+        <item quantity="other">%d older unprocessed messages are left for next time.</item>
+    </plurals>
+    <plurals name="agent_ready_more">
+        <item quantity="one">… and %d more</item>
+        <item quantity="other">… and %d more</item>
+    </plurals>
+    <string name="agent_ready_include">Include processed messages</string>
+    <plurals name="agent_ready_include_count">
+        <item quantity="one">%d already processed</item>
+        <item quantity="other">%d already processed</item>
+    </plurals>
+    <string name="agent_ready_privacy">The message text goes to AgentOS, which only looks in it for things to schedule (verification codes are masked per your settings). Whether it asks you before creating an event, to-do or alarm depends on your AgentOS settings for those tools.</string>
+
+    <string name="agent_prompt_title">Prompt</string>
+    <string name="agent_prompt_state_default">Default</string>
+    <string name="agent_prompt_state_custom">Customized</string>
+    <string name="agent_prompt_edit">Edit</string>
+    <string name="agent_prompt_collapse">Collapse</string>
+    <string name="agent_prompt_label">Instructions</string>
+    <string name="agent_prompt_hint">These are the instructions AgentOS gets. Change them, or add your own requirements at the end, for example \"only schedule work things\" or \"set every to-do to high priority\". The date and time zone, the safety notes and the message text are always added by the app and can\'t be changed. Clear the box to use the default.</string>
+    <string name="agent_prompt_reset">Restore default</string>
+    <string name="agent_prompt_count">%1$d / %2$d</string>
+    <string name="sms_prompt_default">Find what in the messages below needs scheduling or following up. Put each thing in exactly one of these four places:\n1. It takes up a stretch of time at a concrete date and time (a meeting, an appointment, a flight, a pickup window): create a calendar event with event_create, and fill location when the message gives a place. A request like \"remind me 15 minutes before\" belongs to that event: put it in reminder_minutes and do NOT also create an alarm for it.\n2. It has a clear done state, something to take care of (pay a bill, collect a parcel, call someone back, hand in a form): create a to-do with todo_create, one per thing. Give it due when the message says by when, and priority (high, medium or low) by how urgent it is.\n3. It must ring at a certain clock time by itself (wake-up, take medicine at 9): only then create an alarm with alarm_create.\n4. It is only information (verification codes, payment notices, ads and promotions, general notices): create nothing.</string>
+
+    <string name="agent_checking">Connecting to AgentOS…</string>
+    <string name="agent_header_waiting">Waiting for your approval</string>
+    <string name="agent_waiting_title">Allow Messages in the AgentOS prompt</string>
+    <string name="agent_waiting_message">The first time needs your approval; it won\'t ask again. You can revoke it any time in AgentOS settings.</string>
+
+    <string name="agent_running_reading">AgentOS is reading your messages…</string>
+    <string name="agent_running_says">AgentOS says</string>
+    <string name="agent_running_approval_hint">AgentOS is waiting for you. Tap the button below and decide in its prompt.</string>
+
+    <string name="agent_item_event">Event</string>
+    <string name="agent_item_alarm">Alarm</string>
+    <string name="agent_item_todo">To-do</string>
+    <string name="agent_item_other">Other action</string>
+    <string name="agent_item_status_awaiting">Waiting for you to confirm in AgentOS</string>
+    <string name="agent_item_status_creating">Creating</string>
+    <string name="agent_item_status_created">Created</string>
+    <string name="agent_item_status_denied">You declined</string>
+    <string name="agent_item_status_failed">Failed</string>
+    <string name="agent_item_status_cancelled">Cancelled</string>
+    <string name="agent_alarm_once">Once</string>
+    <string name="agent_alarm_every_day">Every day</string>
+    <string name="agent_alarm_weekdays">Weekdays</string>
+    <string name="agent_alarm_weekends">Weekends</string>
+    <string name="agent_alarm_weekly">Every %s</string>
+    <string name="agent_alarm_unlabeled">Alarm</string>
+    <string name="agent_todo_due">Due %s</string>
+    <!-- Separator between weekday names (follows the language; no language checks in code) -->
+    <string name="agent_day_separator">", "</string>
+
+    <string name="agent_done_title">All set</string>
+    <string name="agent_done_title_stopped">Stopped</string>
+    <string name="agent_done_nothing_title">Nothing was created</string>
+    <string name="agent_done_nothing_fallback">AgentOS didn\'t find anything to schedule in these messages.</string>
+    <plurals name="agent_done_events">
+        <item quantity="one">%d event</item>
+        <item quantity="other">%d events</item>
+    </plurals>
+    <plurals name="agent_done_todos">
+        <item quantity="one">%d to-do</item>
+        <item quantity="other">%d to-dos</item>
+    </plurals>
+    <plurals name="agent_done_alarms">
+        <item quantity="one">%d alarm</item>
+        <item quantity="other">%d alarms</item>
+    </plurals>
+    <string name="agent_done_headline_both">Created %1$s and %2$s</string>
+    <string name="agent_done_headline_three">Created %1$s, %2$s and %3$s</string>
+    <string name="agent_done_headline_one">Created %1$s</string>
+
+    <string name="agent_error_not_installed_title">AgentOS wasn\'t found</string>
+    <string name="agent_error_not_installed_message">Once AgentOS is installed, it can turn the plans in your messages straight into calendar events, to-dos and alarms.</string>
+    <string name="agent_error_no_model_title">AgentOS has no model configured</string>
+    <string name="agent_error_no_model_message">Set up a model in AgentOS first, then come back and try again.</string>
+    <string name="agent_error_denied_title">You declined access for Messages</string>
+    <string name="agent_error_denied_message">You can allow it again in AgentOS settings.</string>
+    <string name="agent_error_auth_timeout_title">No answer in time</string>
+    <string name="agent_error_auth_timeout_message">The AgentOS prompt wasn\'t answered, so it counts as a refusal and AgentOS won\'t ask again for 10 minutes. Try later, or allow Messages directly in AgentOS settings.</string>
+    <string name="agent_error_busy_title">AgentOS is busy</string>
+    <string name="agent_error_busy_message">It\'s still working on an earlier request from Messages. Try again in a moment.</string>
+    <string name="agent_error_rate_limited_title">Too many requests</string>
+    <string name="agent_error_rate_limited_message">AgentOS limits how many requests an app can make per hour. Try again later.</string>
+    <string name="agent_error_too_large_title">Too much text</string>
+    <string name="agent_error_too_large_message">Shorten the prompt, or handle some of the messages first, then tap \"Schedule with AgentOS\" again.</string>
+    <string name="agent_error_disconnected_title">Lost the connection to AgentOS</string>
+    <string name="agent_error_disconnected_message">Anything already created is kept. You can try again, but check first so nothing is created twice.</string>
+    <string name="agent_error_interrupted_title">The last task was interrupted</string>
+    <string name="agent_error_interrupted_message">Messages was reclaimed by the system in the background and the task was lost. Part of it may already be created — please check Calendar, To-do and Alarms. Nothing is retried automatically.</string>
+    <string name="agent_error_failed_title">Something went wrong</string>
+    <string name="agent_error_failed_message">AgentOS couldn\'t finish this. You can try again.</string>
+    <string name="agent_error_detail">Reason: %s</string>
+    <string name="agent_created_before_error">Created before the error</string>
 </resources>

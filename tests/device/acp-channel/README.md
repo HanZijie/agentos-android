@@ -9,6 +9,8 @@ adb 驱动，在模拟器或真机上跑。只用于测试，不进 zip。
 | `client/` | 第三方身份的测试客户端（`org.agentos.test.acp.client`）：对测试 Agent 跑全部通道场景；W6 里用它以第三方 UID 调 AgentOS 的 `IAcpService`，验证被拒 |
 | `inapp/` | W6：注入 AgentOS **debug 包**的场景执行器（`:acptest` 进程，AgentOS 自己的 UID），对真正的 `:agent` 跑通道和 `AgentService` 用例。release 包里没有 |
 | `run.py` | 主机端驱动：安装、逐个执行场景、拼回 logcat 里的结果（tag `ACPTEST`）、汇总 |
+| `third_party_sms_e2e.py` | 短信“让 AgentOS 安排”的真机验收（真实模型，需要 root）：授权、从原始短信建日程 / 待办 / 闹钟、只发没处理过的、提示词里的用户要求、注入、始终允许、撤销。日历只能整库清理，所以日历里已有数据时拒绝运行，除非 `--allow-calendar-reset` |
+| `sms_demo_seed.py` | 在有 root 的手机上往系统短信库写 10 条演示短信（`seed` / `clean` / `status`），录屏用；只动演示号码的行 |
 
 ## 两套用例
 
