@@ -6,13 +6,29 @@
 #   (file allowlist, no system/ / post-fs-data / sepolicy / binaries, sh -n, module.prop, support
 #   matrix, apks.list hashes). Uses the debug variant: CI has no release certificate, and pm cannot
 #   install an unsigned APK. The zip is a test artifact, not a release (release.yml, W28).
+#
+# When it runs:
+# - push to main: always (except README / docs-asset only commits), so anything the PR filter below
+#   let through is still caught right after the merge.
+# - pull_request: only when something the module scripts or the packaging read has changed. APK
+#   compilation, unit tests and Lint run on every PR in portable-tests.yml, so app/ and core/ changes
+#   need no packaging run on the PR.
 name: module-package
 
 on:
   push:
     # 只在 main 上跑 push；功能分支靠 pull_request，避免同一个提交跑两遍
     branches: [main]
+    # 只有“全部改动的文件都匹配”时才跳过
+    paths-ignore:
+      - "README*.md"
+      - "docs/assets/**"
   pull_request:
+    paths:
+      - "module/**"
+      - "tools/**"
+      - "core/pi-runtime/**"
+      - ".github/workflows/module-package.yml"
   workflow_dispatch:
 
 permissions:
@@ -40,7 +56,7 @@ jobs:
       - name: 语法检查（dash / bash / busybox ash）
         run: |
           for f in module/*.sh module/META-INF/com/google/android/update-binary module/test/*.sh tools/*.sh; do
-            dash -n "$f" && bash -n "$f" && busybox sh -n "$f" || { echo "syntax error: $f"; exit 1; }
+            if ! { dash -n "$f" && bash -n "$f" && busybox sh -n "$f"; }; then echo "syntax error: $f"; exit 1; fi
           done
 
       - name: 安装逻辑与支持矩阵（unit.sh）
@@ -51,9 +67,9 @@ jobs:
         run: |
           for s in dash "bash --posix" "busybox sh"; do SIM_SHELL="$s" sh module/test/service-sim.sh; done
 
-      - name: shellcheck（仅提示）
-        continue-on-error: true
-        run: shellcheck -s sh -S error module/*.sh tools/check-device.sh tools/smoke-test.sh
+      # 门禁：-S error 级别现在是 0 个问题（与上面语法检查是同一批文件）。runner 自带 shellcheck（ubuntu 24.04：0.9.0）
+      - name: shellcheck（-S error）
+        run: shellcheck -s sh -S error module/*.sh module/META-INF/com/google/android/update-binary module/test/*.sh tools/*.sh
 
   package:
     name: 打包 agentos.zip 并做离线检查
