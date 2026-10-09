@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.agentos.app.agent.consent.ConsentWire
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.runtime.consent.AutoConsentResponder
 import org.agentos.runtime.ports.CallerIdentity
 import org.agentos.runtime.ports.CallerKind
@@ -17,6 +19,7 @@ import org.agentos.runtime.ports.ToolRisk
 import org.agentos.runtime.ports.ToolSource
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -43,6 +46,9 @@ import java.util.concurrent.ConcurrentHashMap
 class ConsentDebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val process = AgentProcess.get(context)
+        // 设备测试脚本（tests/device/acp-channel/*.py）按中文整句比对 title / initiatorLine / source 等字段：这里固定用中文渲染，
+        // 不跟界面语言（界面切到英文时脚本的判据不能变）。线上的 wire 格式是 key + 参数，这里只是把它在测试出口展开。
+        val zh: Strings = AndroidStrings.forLocale(context, Locale.SIMPLIFIED_CHINESE)
         val op = intent.getStringExtra("op")
         val responder = process.autoConsent
         val result = try {
@@ -70,6 +76,9 @@ class ConsentDebugReceiver : BroadcastReceiver() {
                     JSONArray(
                         process.consent.pending.value.map {
                             JSONObject(ConsentWire.encodeViewString(it)).put("remainingMs", it.deadlineMillis - System.currentTimeMillis())
+                                .put("title", zh.get(it.title))
+                                .put("initiatorLine", zh.get(it.initiatorLine))
+                                .put("sourceLine", it.sourceLine?.let { ref -> zh.get(ref) } ?: JSONObject.NULL)
                         },
                     ),
                 )
@@ -102,12 +111,12 @@ class ConsentDebugReceiver : BroadcastReceiver() {
                                 .put("requestId", e.requestId)
                                 .put("tool", e.toolName)
                                 .put("risk", e.risk.name)
-                                .put("source", e.sourceLine ?: JSONObject.NULL)
+                                .put("source", e.sourceLine?.let { zh.get(it) } ?: JSONObject.NULL)
                                 .put("args", e.argumentsSummary)
                                 .put("options", JSONArray(e.options.map { it.name }))
                                 .put("answeredWith", e.answeredWith?.name ?: JSONObject.NULL)
                                 .put("end", e.end?.name ?: JSONObject.NULL)
-                                .put("notice", e.notice ?: JSONObject.NULL)
+                                .put("notice", e.notice?.let { zh.get(it) } ?: JSONObject.NULL)
                         },
                     ),
                 )

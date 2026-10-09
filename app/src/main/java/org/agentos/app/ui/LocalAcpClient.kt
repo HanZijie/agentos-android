@@ -46,6 +46,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.acp.AcpServiceContract
 import org.agentos.acp.BinderAcpTransport
 import org.agentos.app.agent.AcpService
@@ -82,6 +84,8 @@ interface AgentConnection {
  */
 class LocalAcpClient(private val context: Context, parent: CoroutineScope) : AgentConnection {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]) + CoroutineName("local-acp"))
+    /** Error notices are rendered in the language of the screen at the moment of the failure. */
+    private val strings: Strings = AndroidStrings(context)
     private val mutex = Mutex()
     private val state = MutableStateFlow(ChatState.Connection.DISCONNECTED)
     override val connection: StateFlow<ChatState.Connection> = state.asStateFlow()
@@ -127,11 +131,11 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
             val cause = c.transport.channel.closeCauseOrNull
                 ?: withTimeoutOrNull(1_000) { c.transport.channel.closeCause.await() }
             dropConnection(c)
-            TurnOutcome.Failed(AgentErrors.fromClose(cause))
+            TurnOutcome.Failed(AgentErrors.fromClose(strings, cause))
         } catch (e: Exception) {
             Log.w(TAG, "prompt failed: ${e.javaClass.simpleName}")
             if (!c.open) dropConnection(c)
-            TurnOutcome.Failed(AgentErrors.unexpected(e))
+            TurnOutcome.Failed(AgentErrors.unexpected(strings, e))
         }
     }
 
@@ -172,7 +176,7 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
         } catch (e: Exception) {
             if (e is CancellationException && !currentCoroutineContext().isActive) throw e
             dropConnection(c)
-            throw ConnectFailure(AgentErrors.fromClose(c.transport.channel.closeCauseOrNull))
+            throw ConnectFailure(AgentErrors.fromClose(strings, c.transport.channel.closeCauseOrNull))
         }
         if (hadSession) replaced = true
         hadSession = true
@@ -186,15 +190,15 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
         val binding = Binding(context)
         try {
             val binder = binding.bind(TIMEOUT_MS) ?: throw ConnectFailure(
-                if (binding.bound) AgentErrors.connectFailed(null) else AgentErrors.serviceMissing()
+                if (binding.bound) AgentErrors.connectFailed(strings, null) else AgentErrors.serviceMissing(strings)
             )
             val transport = try {
                 BinderAcpTransport.connect(IAcpService.Stub.asInterface(binder), Process.myUid(), connScope, name = "agentos-ui")
             } catch (e: SecurityException) {
-                throw ConnectFailure(AgentErrors.connectFailed(AcpServiceContract.reasonOf(e) ?: "security"))
+                throw ConnectFailure(AgentErrors.connectFailed(strings, AcpServiceContract.reasonOf(e) ?: "security"))
             } catch (e: Exception) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) throw e
-                throw ConnectFailure(AgentErrors.connectFailed(null))
+                throw ConnectFailure(AgentErrors.connectFailed(strings, null))
             }
             val protocol = Protocol(connScope, transport, ProtocolOptions(protocolDebugName = "agentos-ui"))
             val client = Client(protocol)
@@ -217,7 +221,7 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
                 if (e is CancellationException && !currentCoroutineContext().isActive) throw e
                 val cause = transport.channel.closeCauseOrNull
                 shutdown(c, "initialize failed")
-                throw ConnectFailure(if (cause != null) AgentErrors.fromClose(cause) else AgentErrors.connectFailed(null))
+                throw ConnectFailure(if (cause != null) AgentErrors.fromClose(strings, cause) else AgentErrors.connectFailed(strings, null))
             }
             state.value = ChatState.Connection.CONNECTED
             return c
@@ -257,6 +261,7 @@ class LocalAcpClient(private val context: Context, parent: CoroutineScope) : Age
         val data = e.data as? JsonObject
         val details = data?.get("details") as? JsonObject
         return AgentErrors.fromRpc(
+            strings = strings,
             rpcCode = e.code,
             message = e.message,
             agentosCode = data.prim("agentosCode")?.contentOrNull,

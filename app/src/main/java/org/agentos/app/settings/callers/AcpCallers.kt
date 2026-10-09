@@ -126,14 +126,15 @@ object AcpCallers {
 
     /** 点操作后的确认对话框：写明名字、包名、签名摘要前 12 位，和后果。 */
     fun confirm(c: Caller, a: Action): Confirm {
-        val who = "「${c.displayName}」\n${AuthorizationLabels.safePackage(c.packageName).let { "包名：$it" }}\n${AuthorizationLabels.digestLine(c.signingDigest)}"
+        // P1 换了 AuthorizationLabels 的签名（文字带 Strings）：这里只把调用点换成不带语言的助手，输出和以前一字不差；整个页面的中英文是 P3
+        val who = "「${c.displayName}」\n包名：${AuthorizationLabels.safePackage(c.packageName)}\n签名：${AuthorizationLabels.digestHex(c.signingDigest) ?: "（无法读取）"}"
         return when (a) {
             Action.REVOKE -> Confirm(
                 "撤销授权？", "$who\n\n它现有的连接会立即断开，进行中的任务会取消。10 分钟内它再请求会直接被拒绝，之后会重新询问你。", "撤销",
             )
             Action.DENY -> Confirm("拒绝？", "$who\n\n10 分钟内它再请求会直接被拒绝，之后会重新询问你。", "拒绝")
             Action.ALLOW -> Confirm(
-                "改为允许？", "$who\n\n${AuthorizationLabels.EXPLANATION}\n\n只有确认这个 App 来自你信任的来源时才允许。", "允许",
+                "改为允许？", "$who\n\n它可以让 AgentOS 替你回答问题；它用到的工具，每次都会再问你。\n\n只有确认这个 App 来自你信任的来源时才允许。", "允许",
             )
             Action.REMOVE -> Confirm("移除记录？", "$who\n\n移除后，它下次请求使用 AgentOS 时会重新询问你。", "移除")
         }

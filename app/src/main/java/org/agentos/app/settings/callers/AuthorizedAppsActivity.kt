@@ -73,7 +73,7 @@ class AuthorizedAppsActivity : Activity() {
     private fun card(c: AcpCallers.Caller, now: Long): LinearLayout = Ui.card(this).apply {
         addView(Ui.text(context, 17f, R.color.ui_text, bold = true).apply { text = c.displayName })
         addView(Ui.paragraph(context, "包名：${AuthorizationLabels.safePackage(c.packageName)}"))
-        addView(Ui.paragraph(context, AuthorizationLabels.digestLine(c.signingDigest)))
+        addView(Ui.paragraph(context, "签名：${AuthorizationLabels.digestHex(c.signingDigest) ?: "（无法读取）"}")) // P1 换了 AuthorizationLabels 的签名；整个页面的中英文是 P3
         addView(Ui.paragraph(context, AcpCallers.stateText(c, now), if (c.state == AcpCallers.State.ALLOWED) R.color.ui_text_secondary else R.color.ui_error))
         addView(Ui.paragraph(context, AcpCallers.lastUsedText(c, now)))
         addView(Ui.paragraph(context, AcpCallers.usageText(c)))

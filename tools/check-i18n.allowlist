@@ -5,7 +5,6 @@
 # AgentOS 主 App（界面归 D 车道）：随 docs/next-apps-plan.md 7.3 的 P1 / P2 / P3 逐个移出。
 # P1 = 确认框、授权框、错误提示（ConsentBridge、AgentErrors、ui/consent/*）；P2 = 首次引导、设置页、模型与 key、状态与安全说明；P3 = 插件管理页、已授权 App 与用量、诊断页。
 app/src/main/java/org/agentos/app/agent/AgentService.kt
-app/src/main/java/org/agentos/app/agent/consent/ConsentBridge.kt
 app/src/main/java/org/agentos/app/onboarding/Onboarding.kt
 app/src/main/java/org/agentos/app/onboarding/OnboardingActivity.kt
 app/src/main/java/org/agentos/app/settings/Battery.kt
@@ -24,21 +23,13 @@ app/src/main/java/org/agentos/app/settings/plugins/PluginDetailActivity.kt
 app/src/main/java/org/agentos/app/settings/plugins/PluginPage.kt
 app/src/main/java/org/agentos/app/settings/plugins/Plugins.kt
 app/src/main/java/org/agentos/app/settings/plugins/PluginsActivity.kt
-app/src/main/java/org/agentos/app/ui/AgentErrors.kt
 app/src/main/java/org/agentos/app/ui/AgentUpdate.kt
 app/src/main/java/org/agentos/app/ui/ChatController.kt
 app/src/main/java/org/agentos/app/ui/ChatState.kt
 app/src/main/java/org/agentos/app/ui/Ui.kt
-app/src/main/java/org/agentos/app/ui/consent/AuthorizationDialog.kt
-app/src/main/java/org/agentos/app/ui/consent/AuthorizationLabels.kt
-app/src/main/java/org/agentos/app/ui/consent/ConsentActivity.kt
-app/src/main/java/org/agentos/app/ui/consent/ConsentDialog.kt
-app/src/main/java/org/agentos/app/ui/consent/ConsentLabels.kt
 
 # 核心层（A 车道）：确认文案（ConsentText）和校验信息，P1 里改成“文案 key + 参数”后移出。
 core/extensions/src/main/kotlin/org/agentos/extensions/ManifestReader.kt
 core/extensions/src/main/kotlin/org/agentos/extensions/registry/PluginScanLogic.kt
 core/extensions/src/main/kotlin/org/agentos/extensions/skills/ExtensionSkillPort.kt
 core/extensions/src/main/kotlin/org/agentos/extensions/skills/SkillFrontmatter.kt
-core/runtime/src/main/kotlin/org/agentos/runtime/consent/ConsentCoordinator.kt
-core/runtime/src/main/kotlin/org/agentos/runtime/consent/ConsentText.kt
