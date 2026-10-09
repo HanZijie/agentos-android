@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.agentos.runtime.i18n.MessageRef
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -116,7 +117,13 @@ class ManifestReaderTest {
         assertEquals(UnsupportedKind.INSECURE_URL, byLocation.getValue("plain").kind)
         assertEquals(UnsupportedKind.INSECURE_URL, byLocation.getValue("creds").kind)
         assertEquals(UnsupportedKind.INSECURE_URL, byLocation.getValue("nohost").kind)
-        assertTrue(m.unsupported.all { it.reason.isNotBlank() && it.location.startsWith("mcp.json › mcpServers.") })
+        assertTrue(m.unsupported.all { it.location.startsWith("mcp.json › mcpServers.") })
+        // the reasons are keys, not sentences: no language in the core
+        assertEquals(MessageRef.of(ExtMessages.STDIO_UNSUPPORTED), byLocation.getValue("local").reason)
+        assertEquals(MessageRef.of(ExtMessages.SSE_UNSUPPORTED), byLocation.getValue("old").reason)
+        assertEquals(MessageRef.of(ExtMessages.URL_NOT_HTTPS), byLocation.getValue("plain").reason)
+        assertEquals(MessageRef.of(ExtMessages.URL_USERINFO), byLocation.getValue("creds").reason)
+        assertEquals(MessageRef.of(ExtMessages.URL_NO_HOST), byLocation.getValue("nohost").reason)
     }
 
     @Test
@@ -125,6 +132,8 @@ class ManifestReaderTest {
             val m = accepted(PluginFiles(plugin(ext = """"com.openai":{"interface":{"displayName":"X","composerIcon":"$bad"}}""")))
             assertNull(m.display!!.iconPath, bad)
             assertEquals(UnsupportedKind.UNSAFE_PATH, m.unsupported.single().kind, bad)
+            // the icon path is a third-party argument of the message, not part of a sentence
+            assertEquals(MessageRef.of(ExtMessages.ICON_PATH_UNSAFE, bad.replace("\\\\", "\\")), m.unsupported.single().reason, bad)
             assertEquals("X", m.displayName)
         }
         val logo = accepted(PluginFiles(plugin(ext = """"com.openai":{"interface":{"logo":"./assets/logo.svg"}}""")))
@@ -138,6 +147,7 @@ class ManifestReaderTest {
         val ext = """"org.agentos":{"mcpServers":{"notes":{"service":"p.A"}}}"""
         val errors = rejected(PluginFiles(plugin(ext = ext), mcp(""""notes":{"type":"streamable-http","url":"https://x.test/"}""")))
         assertEquals(listOf(ManifestErrorCode.DUPLICATE_SERVER), errors.map { it.code })
+        assertEquals(MessageRef.of(ExtMessages.DUPLICATE_SERVER, "notes"), errors.single().message)
         // 即使 mcp.json 里那条本来是“不支持”的 stdio，也算占用了名字
         val stdio = rejected(PluginFiles(plugin(ext = ext), mcp(""""notes":{"type":"stdio","command":"x"}""")))
         assertEquals(listOf(ManifestErrorCode.DUPLICATE_SERVER), stdio.map { it.code })
@@ -149,6 +159,7 @@ class ManifestReaderTest {
         val errors = rejected(PluginFiles(plugin(ext = ext)), PluginOrigin.IMPORTED)
         assertEquals(listOf(ManifestErrorCode.BINDER_NOT_ALLOWED), errors.map { it.code })
         assertTrue(errors.single().location.contains("org.agentos.mcpServers"))
+        assertEquals(MessageRef.of(ExtMessages.BINDER_NOT_ALLOWED), errors.single().message)
         // 空对象也算“出现”
         assertEquals(listOf(ManifestErrorCode.BINDER_NOT_ALLOWED), rejected(PluginFiles(plugin(ext = """"org.agentos":{"mcpServers":{}}""")), PluginOrigin.IMPORTED).map { it.code })
         accepted(PluginFiles(plugin(ext = ext)), PluginOrigin.INSTALLED_APP)
@@ -197,7 +208,16 @@ class ManifestReaderTest {
         assertTrue(where.any { it == "mcp.json › \$schema" })
         assertTrue(where.any { it == "mcp.json › x" })
         assertTrue(where.any { it == "mcp.json › mcpServers.a.type" })
-        assertTrue(errors.all { it.code == ManifestErrorCode.SCHEMA && it.message.isNotBlank() })
+        assertTrue(errors.all { it.code == ManifestErrorCode.SCHEMA })
+        val byWhere = errors.associate { it.location to it.message }
+        assertEquals(MessageRef.of(ExtMessages.MISSING_REQUIRED, "\$schema"), byWhere.getValue("plugin.json › \$schema"))
+        assertEquals(MessageRef.of(ExtMessages.NAME_PATTERN), byWhere.getValue("plugin.json › name"))
+        assertEquals(MessageRef.of(ExtMessages.MUST_BE_STRING), byWhere.getValue("plugin.json › version"))
+        assertEquals(MessageRef.of(ExtMessages.PLUGIN_FIELD_NOT_ALLOWED), byWhere.getValue("plugin.json › extra"))
+        assertEquals(MessageRef.of(ExtMessages.SECTION_MUST_BE_OBJECT), byWhere.getValue("plugin.json › extensions.x"))
+        assertEquals(MessageRef.of(ExtMessages.MISSING_REQUIRED, "\$schema"), byWhere.getValue("mcp.json › \$schema"))
+        assertEquals(MessageRef.of(ExtMessages.FIELD_NOT_ALLOWED), byWhere.getValue("mcp.json › x"))
+        assertEquals(MessageRef.of(ExtMessages.SERVER_TYPE_UNKNOWN, "ftp"), byWhere.getValue("mcp.json › mcpServers.a.type"))
     }
 
     @Test

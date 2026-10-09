@@ -1,5 +1,6 @@
 package org.agentos.extensions.registry
 
+import org.agentos.extensions.ExtMessages
 import org.agentos.extensions.ManifestErrorCode
 import org.agentos.extensions.McpServerDecl
 import org.agentos.extensions.ToolId
@@ -7,6 +8,7 @@ import org.agentos.extensions.ToolNaming
 import org.agentos.runtime.broker.ApprovalMode
 import org.agentos.runtime.broker.ApprovalPolicy
 import org.agentos.runtime.broker.PolicyScope
+import org.agentos.runtime.i18n.MessageRef
 import org.agentos.runtime.ports.ToolSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -117,6 +119,11 @@ class PluginScanLogicTest {
             rec.rejectedServers.associate { it.name to it.reason },
         )
         assertEquals(4, rec.problems.count { it.code == "server_rejected" })
+        // key + arguments (server name, service class), no sentence
+        val byServer = rec.problems.filter { it.code == "server_rejected" }.associate { it.message.args.first() to it.message }
+        assertEquals(MessageRef.of(ExtMessages.SERVER_REJECTED_NOT_EXPORTED, "hidden", "org.x.p.Hidden"), byServer.getValue("hidden"))
+        assertEquals(MessageRef.of(ExtMessages.SERVER_REJECTED_MISSING_PERMISSION, "open", "org.x.p.Open", perm), byServer.getValue("open"))
+        assertEquals(MessageRef.of(ExtMessages.SERVER_REJECTED_NOT_IN_PACKAGE, "foreign", "com.evil.Service"), byServer.getValue("foreign"))
     }
 
     @Test
@@ -127,7 +134,7 @@ class PluginScanLogicTest {
         assertEquals(PluginStatus.UNAVAILABLE, rec.status)
         assertEquals(UnavailableReason.NO_USABLE_SERVER, rec.unavailableReason)
         assertEquals(1, rec.rejectedServers.size, "kept in the registry with its reasons")
-        assertTrue(rec.problems.any { it.code == "no_usable_server" })
+        assertEquals(MessageRef.of(ExtMessages.NO_USABLE_SERVER), rec.problems.single { it.code == "no_usable_server" }.message)
 
         val withSkills = scan(listOf(app("org.x.p", "p", services = bad, pluginJson = pluginJson("p", mapOf("a" to "org.x.p.A")), skills = listOf("skills/s/SKILL.md"))))
         assertEquals(PluginStatus.READY, withSkills.record("org.x.p/agent-plugin").status)
@@ -156,9 +163,13 @@ class PluginScanLogicTest {
         assertEquals(PluginStatus.UNAVAILABLE, broken.status)
         assertEquals(UnavailableReason.MANIFEST_REJECTED, broken.unavailableReason)
         assertTrue(broken.manifestErrors.any { it.code == ManifestErrorCode.SCHEMA })
-        assertTrue(broken.problems.isNotEmpty() && broken.problems.all { it.message.isNotBlank() })
+        // the reasons travel as key + arguments with the location of the field; the page renders them
+        assertTrue(broken.problems.isNotEmpty() && broken.problems.all { it.message.key in ExtMessages.ALL && it.location != null })
+        assertEquals(broken.manifestErrors.map { it.message to it.location }, broken.problems.map { it.message to it.location })
         assertNull(broken.name)
         assertEquals(UnavailableReason.ASSETS_MISSING, r.record("org.x.empty/agent-plugin").unavailableReason)
+        assertEquals(MessageRef.of(ExtMessages.ASSETS_NO_PLUGIN_JSON, "agent-plugin"), r.record("org.x.empty/agent-plugin").problems.single().message)
+        assertEquals(MessageRef.of(ExtMessages.ASSETS_NOT_DECLARED), r.record("org.x.nodir/").problems.single().message)
         assertEquals(UnavailableReason.ASSETS_MISSING, r.record("org.x.nodir/").unavailableReason)
         assertTrue(r.registry.plugins.all { it.activeServers.isEmpty() })
         assertEquals(3, r.persisted.plugins.size, "remembered too, so a later fix is seen as an update, not a new plugin")
@@ -185,7 +196,7 @@ class PluginScanLogicTest {
         assertEquals(PluginStatus.SIGNATURE_CHANGED, rec.status)
         assertEquals("sig-1", rec.trustedSigner)
         assertTrue(rec.activeServers.isEmpty(), "no server is usable before the user confirms")
-        assertTrue(rec.problems.any { it.code == "signature_changed" })
+        assertEquals(MessageRef.of(ExtMessages.SIGNATURE_CHANGED), rec.problems.single { it.code == "signature_changed" }.message)
         assertEquals(
             listOf(
                 RegistryEvent.SignatureChanged("org.x.notes/agent-plugin", "notes", "sig-1", "sig-2"),
@@ -320,6 +331,7 @@ class PluginScanLogicTest {
         assertEquals(PluginStatus.READY, both.record("org.x.zzz/agent-plugin").status, "the existing owner wins although its id sorts later")
         val loser = both.record("org.x.aaa/agent-plugin")
         assertEquals(UnavailableReason.NAME_CONFLICT, loser.unavailableReason)
+        assertEquals(MessageRef.of(ExtMessages.NAME_CONFLICT, "shared"), loser.problems.single { it.code == "name_conflict" }.message)
         assertTrue(loser.activeServers.isEmpty())
         // 没有“原来的主人”时 id 小的赢，与扫描顺序无关
         val fresh1 = scan(listOf(app("org.x.aaa", "shared"), app("org.x.zzz", "shared")))
@@ -371,5 +383,6 @@ class PluginScanLogicTest {
         val r = scan(listOf(app("org.x.p", "p", services = listOf(anchor("org.x.p.A")), pluginJson = dup, mcpJson = mcp)))
         val rec = r.record("org.x.p/agent-plugin")
         assertEquals(listOf(ManifestErrorCode.DUPLICATE_SERVER), rec.manifestErrors.map { it.code })
+        assertEquals(MessageRef.of(ExtMessages.DUPLICATE_SERVER, "a"), rec.manifestErrors.single().message)
     }
 }

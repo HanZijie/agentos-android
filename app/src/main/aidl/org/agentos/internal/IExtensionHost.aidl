@@ -27,12 +27,13 @@ import org.agentos.internal.IExtensionCallback;
  *    "status":"ready"|"unavailable"|"signature_changed"|"signature_unconfirmed"（PluginStatus）,
  *    "unavailableReason":"assets_missing"|"manifest_rejected"|"no_usable_server"|"name_conflict"|null,
  *    "builtin": bool, "enabled": bool（插件级是否启用）, "approval":"ask"|"always"|null（插件级审批方式，null = 没设，按 ask）,
- *    "problems":[{"code","message"}]（中文，给插件页显示）, "unsupported":[{"kind","location","detail"}]（PluginManifest.unsupported）,
+ *    "problems":[{"code","message":{"key","args":[…]},"location"|null}]（message 是文案 key + 参数，ExtMessages；界面按自己的语言渲染，不是文字）,
+ *    "unsupported":[{"kind","location","detail":{"key","args":[…]}}]（PluginManifest.unsupported；detail 同 message）,
  *    "servers":[{"name", "service"（完整类名，Binder 服务器；否则 null）, "url"（https，远端服务器；否则 null）,
  *                "state":"idle"|"connected"|"unreachable"|"disabled", "error"（或 null）, "toolCount"}],
  *    "rejectedServers":[{"name","service","reason":"not_in_package"|"not_exported"|"missing_permission"}],
  *    "toolCount", "skillCount",
- *    "skillProblems":[{"code","message"}]（ExtensionSkillPort.problems：frontmatter 缺失 / 非法、SKILL.md 读不到等，A10）}
+ *    "skillProblems":[{"code","message":{"key","args"},"location"}]（ExtensionSkillPort.problems：frontmatter 缺失 / 非法、SKILL.md 读不到等，A10；location 是 Skill 的目录名）}
  *   签名变化（signature_changed）或记忆丢失（signature_unconfirmed）时已停用，要用户先 confirmSignature 再启用。
  *
  * 已知工具（listTools 的一项；setToolEnabled / setToolApproval / setToolApprovalBySource 的返回值）：与 core:extensions 的
