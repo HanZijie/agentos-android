@@ -32,6 +32,7 @@ import org.agentos.runtime.quota.CallerQuotaConfig
 import org.agentos.runtime.quota.PromptOutcome
 import org.agentos.runtime.quota.PromptUsage
 import org.agentos.runtime.scheduler.SchedulerConfig
+import org.agentos.runtime.store.TaskState
 import org.agentos.runtime.testing.FakeScripts
 import org.agentos.runtime.testing.TestRuntime
 import java.util.Collections
@@ -283,7 +284,10 @@ class ThirdPartyAcpTest {
         pair.initialize()
         val session = pair.newSession()
         val running = async { runCatching { pair.prompt(session, directive("chunks" to JsonPrimitive(1), "text" to JsonPrimitive("a"), "awaitAbort" to JsonPrimitive(true))) } }
-        rt.until { rt.engine.quota.usage(TestRuntime.APP).activePrompts == 1 }
+        // 等到任务真的在运行，而不是名额刚被占上：名额在放行时就占了，那时提交还没做完；提交途中连接关闭的话，
+        // AgentSide.prompt 会把这一轮当作被取消、名额随之释放（慢的 CI 机器上偶发），而这个用例要的是“断开不取消”
+        rt.until { rt.engine.activeTask(TestRuntime.APP, session.sessionId.value)?.state == TaskState.RUNNING }
+        assertEquals(1, rt.engine.quota.usage(TestRuntime.APP).activePrompts)
         pair.disconnect()
         running.await()
 
