@@ -118,6 +118,7 @@ SAMPLES = {
 }
 
 SMS_PERMISSIONS = ["android.permission.READ_SMS", "android.permission.SEND_SMS"]
+CALENDAR_PERMISSIONS = ["android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR"]
 
 
 def model_name(sample, tool):

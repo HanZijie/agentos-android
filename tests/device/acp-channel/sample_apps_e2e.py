@@ -23,7 +23,8 @@ of everything (not installed, enabled, reset or driven) and the report says "ski
 
 Flow (every part writes its checks into the result JSON, `results/raw/sample-apps-*.json`; exit code 0 when all checks pass):
   1. install (unless --no-install), start each sample app once, grant AgentOS what it needs, battery-optimisation exemption for AgentOS while it
-     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入"); the sms app also gets READ_SMS / SEND_SMS (`pm grant`).
+     runs (a turn of more than about 10 s in the background is otherwise frozen, README "电脑端接入"); the sms app also gets READ_SMS / SEND_SMS and the calendar app READ_CALENDAR / WRITE_CALENDAR (`pm grant`;
+     the calendar permissions are revoked again at the end unless they were already granted).
   2. desktop access on from the foreground UI (inapp `desktop-access`: it runs `ensureTestModel` and puts the loopback fake model endpoint on
      the phone), THEN the model: the fake endpoint (scripted) or, with --live, the real MiniMax preset minimax-cn / MiniMax-M3 (key through stdin,
      removed afterwards). `setup.model` reads DesktopGatewayDebugReceiver `status` and checks the model source before anything is asked.
@@ -185,6 +186,7 @@ class RealEnv:
         self.state_dir = tempfile.TemporaryDirectory(prefix="e2e-bridge-")
         self.apps = list(L.SAMPLES)         # the sample apps this run drives (run_acceptance narrows it: no sms on a real phone)
         self.had_exemption = False
+        self.calendar_granted_by_us = []
         self.live_key = None
         self.tunnel_requests = None
 
@@ -203,6 +205,14 @@ class RealEnv:
             # restricted-settings rule, sms README V1 row 1/5). The sms steps revoke them once and restore them.
             for perm in L.SMS_PERMISSIONS:
                 adb.sh("pm grant %s %s" % (L.SAMPLES["sms"].package, perm), check=False)
+        if "calendar" in self.apps:
+            # the calendar reads and writes the system calendar provider: READ_CALENDAR / WRITE_CALENDAR are runtime permissions the user grants in the app
+            # (docs/next-apps-plan.md D6: no root pre-grant, the test script uses `pm grant`). They are revoked again in finish(), unless they were granted before.
+            pkg = L.SAMPLES["calendar"].package
+            have = adb.sh("dumpsys package %s" % pkg, check=False)
+            self.calendar_granted_by_us = [p for p in L.CALENDAR_PERMISSIONS if ("%s: granted=true" % p) not in have]
+            for perm in L.CALENDAR_PERMISSIONS:
+                adb.sh("pm grant %s %s" % (pkg, perm), check=False)
         time.sleep(2)
         adb.sh("input keyevent KEYCODE_HOME", check=False)
         adb.sh("pm grant %s android.permission.POST_NOTIFICATIONS" % R.APP_PKG, check=False)
@@ -283,6 +293,8 @@ class RealEnv:
             self.tunnel.stop()
         if not self.had_exemption:
             self.adb.sh("cmd deviceidle whitelist -%s" % R.APP_PKG, check=False)
+        for perm in getattr(self, "calendar_granted_by_us", []):
+            self.adb.sh("pm revoke %s %s" % (L.SAMPLES["calendar"].package, perm), check=False)
         self.state_dir.cleanup()
 
     def leak_scan(self, report):
