@@ -2,40 +2,4 @@
 # 只能缩小：文件里的中文清掉以后，必须把它从这里删掉，否则脚本报 stale-allowlist。新增文件不要加到这里。
 # 生成方式：python3 tools/check-i18n.py --list-hits
 
-# AgentOS 主 App（界面归 D 车道）：随 docs/next-apps-plan.md 7.3 的 P1 / P2 / P3 逐个移出。
-# P1 = 确认框、授权框、错误提示（ConsentBridge、AgentErrors、ui/consent/*）；P2 = 首次引导、设置页、模型与 key、状态与安全说明；P3 = 插件管理页、已授权 App 与用量、诊断页。
-app/src/main/java/org/agentos/app/agent/AgentService.kt
-app/src/main/java/org/agentos/app/agent/consent/ConsentBridge.kt
-app/src/main/java/org/agentos/app/onboarding/Onboarding.kt
-app/src/main/java/org/agentos/app/onboarding/OnboardingActivity.kt
-app/src/main/java/org/agentos/app/settings/Battery.kt
-app/src/main/java/org/agentos/app/settings/BatteryText.kt
-app/src/main/java/org/agentos/app/settings/Byok.kt
-app/src/main/java/org/agentos/app/settings/Desktop.kt
-app/src/main/java/org/agentos/app/settings/Jev.kt
-app/src/main/java/org/agentos/app/settings/JevSourceActivity.kt
-app/src/main/java/org/agentos/app/settings/ModelSourceActivity.kt
-app/src/main/java/org/agentos/app/settings/SecurityText.kt
-app/src/main/java/org/agentos/app/settings/SettingsActivity.kt
-app/src/main/java/org/agentos/app/settings/StatusText.kt
-app/src/main/java/org/agentos/app/ui/AgentErrors.kt
-app/src/main/java/org/agentos/app/ui/AgentUpdate.kt
-app/src/main/java/org/agentos/app/ui/ChatController.kt
-app/src/main/java/org/agentos/app/ui/ChatState.kt
-app/src/main/java/org/agentos/app/ui/Ui.kt
-app/src/main/java/org/agentos/app/ui/consent/AuthorizationDialog.kt
-app/src/main/java/org/agentos/app/ui/consent/AuthorizationLabels.kt
-app/src/main/java/org/agentos/app/ui/consent/ConsentActivity.kt
-app/src/main/java/org/agentos/app/ui/consent/ConsentDialog.kt
-app/src/main/java/org/agentos/app/ui/consent/ConsentLabels.kt
-
-# 核心层（A 车道）：确认文案（ConsentText），P1 里改成“文案 key + 参数”后移出（校验信息 core/extensions 已由 P3 移出）。
-core/runtime/src/main/kotlin/org/agentos/runtime/consent/ConsentCoordinator.kt
-core/runtime/src/main/kotlin/org/agentos/runtime/consent/ConsentText.kt
-
-# 示例 App：各 lane 合入后移出（日历 R4：UiData.kt 的“日”；备忘录：中文标点的文本处理和 ScheduleFormat 的顿号，要么改成按 locale 取，要么在那一行或上一行写注释 `i18n-ok: 原因`）。
-plugins/samples/calendar/src/main/java/org/agentos/sample/calendar/ui/UiData.kt
-plugins/samples/notes/src/main/java/org/agentos/sample/notes/data/NoteText.kt
-plugins/samples/notes/src/main/java/org/agentos/sample/notes/markdown/MarkdownParser.kt
-plugins/samples/notes/src/main/java/org/agentos/sample/notes/ui/home/NoteCard.kt
-plugins/samples/notes/src/main/java/org/agentos/sample/notes/ui/schedule/ScheduleFormat.kt
+# 现在是空的：主 App 的 P1 / P2 / P3 和核心层都已清完。

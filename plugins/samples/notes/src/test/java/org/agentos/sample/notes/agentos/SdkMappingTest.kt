@@ -31,8 +31,8 @@ class SdkMappingTest {
         val ref = SdkMapping.toSdk(NotesToolScope[0])
         assertEquals("alarm", ref.plugin)
         assertEquals("alarm_create", ref.tool)
-        assertEquals(listOf("alarm_create", "event_create"), NotesToolScope.map { it.tool })
-        assertEquals(listOf("alarm", "calendar"), NotesToolScope.map { it.plugin })
+        assertEquals(listOf("alarm_create", "event_create", "todo_create"), NotesToolScope.map { it.tool })
+        assertEquals(listOf("alarm", "calendar", "todo"), NotesToolScope.map { it.plugin })
     }
 
     @Test fun `events map field by field`() {

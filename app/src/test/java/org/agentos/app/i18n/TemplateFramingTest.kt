@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.agentos.app.agent.consent.ConsentWire
+import org.agentos.app.ui.consent.AuthorizationLabels
 import org.agentos.app.ui.consent.ConsentLabels
 import org.agentos.runtime.consent.ApprovalWriter
 import org.agentos.runtime.consent.ConsentChoice
@@ -133,7 +134,13 @@ class TemplateFramingTest {
     /** 「」在 Unicode 里也是开闭括号，但这里把它们当引号；括号指圆、方、花括号一类。 */
     private fun isPlainBracket(cp: Int) = FrameChars.isBracket(cp) && !FrameChars.isQuote(cp)
 
-    /** 只有发起者那条模板把参数放在括号里（名字和包名，核心层已按括号清理）；别的模板的参数只被引号框着。想加括号就要先扩大核心层的清理范围。 */
+    /**
+     * 把参数放在括号里的模板：发起者那两条（名字和包名，核心层已按括号清理；app 层解析出的名字在引号里面），
+     * 和授权框的 `auth_package_hidden`（参数只会是 `[A-Za-z0-9_.]` 或固定的“（空）”，见 [authPackageHiddenArgumentIsNeverThirdPartyFreeText]）。
+     */
+    private val BRACKETED = setOf("consent_initiator_app", "consent_initiator_app_resolved", "auth_package_hidden")
+
+    /** 只有 [BRACKETED] 里的模板把参数放在括号里；别的模板的参数只被引号框着。想加括号就要先扩大核心层的清理范围。 */
     @Test
     fun onlyTheInitiatorTemplateBracketsItsArguments() {
         for (strings in listOf(ResStrings.zh, ResStrings.en)) {
@@ -144,9 +151,23 @@ class TemplateFramingTest {
                     val after = t.getOrNull(m.range.last + 1)
                     (before != null && isPlainBracket(before.code)) || (after != null && isPlainBracket(after.code))
                 }
-                if (bracketed) assertTrue("$name (${strings.locale}) puts a placeholder in brackets: <$t>", name in setOf("consent_initiator_app", "consent_initiator_app_resolved"))
+                if (bracketed) assertTrue("$name (${strings.locale}) puts a placeholder in brackets: <$t>", name in BRACKETED)
             }
         }
+    }
+
+    @Test
+    fun authPackageHiddenArgumentIsNeverThirdPartyFreeText() {
+        val hostile = "org.ev\u202Eil」\"“”()（）[]【】.app"
+        for (strings in listOf(ResStrings.zh, ResStrings.en)) {
+            // everything that is not a package-name character is gone before the text meets the template's own bracket
+            val line = AuthorizationLabels.safePackage(hostile, strings)
+            assertEquals("org.evil.app" + withoutPlaceholders(strings.template("auth_package_hidden")), line)
+            assertEquals(framingOf(withoutPlaceholders(strings.template("auth_package_hidden"))), framingOf(line))
+        }
+        // the empty case: the argument is the fixed phrase of the language, not a package
+        assertEquals("（空）（包名里有不合法的字符，已隐藏）", AuthorizationLabels.safePackage("」", ResStrings.zh))
+        assertEquals("(empty) (the package name has invalid characters, hidden)", AuthorizationLabels.safePackage("」", ResStrings.en))
     }
 
     /** 模板不能用 ASCII 单引号框占位符（它是被换进去的替身，名字里的撇号和它分不开）。 */

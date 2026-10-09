@@ -20,6 +20,20 @@ object CoreMessages {
         ConsentMessages.INITIATOR_SELF to Entry(R.string.consent_initiator_self, 0),
         ConsentMessages.INITIATOR_SYSTEM to Entry(R.string.consent_initiator_system, 0),
         ConsentMessages.SOURCE to Entry(R.string.consent_source, 2),
+        ConsentMessages.RISK_READ to Entry(R.string.consent_risk_read, 0),
+        ConsentMessages.RISK_WRITE to Entry(R.string.consent_risk_write, 0),
+        ConsentMessages.RISK_HIGH to Entry(R.string.consent_risk_high, 0),
+        ConsentMessages.RISK_DESC_READ to Entry(R.string.consent_risk_desc_read, 0),
+        ConsentMessages.RISK_DESC_WRITE to Entry(R.string.consent_risk_desc_write, 0),
+        ConsentMessages.RISK_DESC_HIGH to Entry(R.string.consent_risk_desc_high, 0),
+        ConsentMessages.OPTION_ALLOW_ONCE to Entry(R.string.consent_option_allow_once, 0),
+        ConsentMessages.OPTION_ALLOW_FOR_SESSION to Entry(R.string.consent_option_allow_for_session, 0),
+        ConsentMessages.OPTION_ALWAYS_ALLOW to Entry(R.string.consent_option_always_allow, 0),
+        ConsentMessages.OPTION_DENY to Entry(R.string.consent_option_deny, 0),
+        ConsentMessages.NOTICE_UNSAVED_NO_SOURCE to Entry(R.string.consent_notice_unsaved_no_source, 0),
+        ConsentMessages.NOTICE_UNSAVED_ERROR to Entry(R.string.consent_notice_unsaved_error, 0),
+        ConsentMessages.NOTICE_UNSAVED_TIMEOUT to Entry(R.string.consent_notice_unsaved_timeout, 0),
+        ConsentMessages.NOTICE_UNSAVED_POLICY to Entry(R.string.consent_notice_unsaved_policy, 0),
     )
 
     fun entry(key: String): Entry? = table[key]

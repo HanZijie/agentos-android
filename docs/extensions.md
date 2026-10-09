@@ -203,8 +203,10 @@ AgentOS App 自己也按第 4.1 节的方式内嵌一个插件：`assets/agent-p
 |---|---|---|
 | Intent / 分享 | 写 | 打开 App、发起分享 |
 | 通知 | 读 / 写 | 读取、回复通知，需要用户授予通知使用权 |
-| 日历、联系人 | 读 / 写 | 通过系统 Content Provider |
+| 联系人 | 读 / 写 | 通过系统 Content Provider |
 | shell | 高风险 | 默认关闭；命令在 Runner 里执行，不在 AgentOS App 里执行 |
+
+**日历不在自带插件里**（docs/next-apps-plan.md D1）：系统日历（`CalendarContract`，含 Google 账号和 CalDAV 账号同步进来的日程）由示例 App 日历（`plugins/samples/calendar`）提供。两套日历工具并存会让模型选错或重复建，所以自带插件不再做日历工具组。代价是系统日历能力随这个 App 是否安装而定，不是“装上当天就有”。同理，短信（读系统短信库、`SmsManager` 发送）是独立示例 App `sms`，不放进自带插件：自带插件的 `readOnlyHint` 会被信任为“读”（免确认），短信列表不应该免确认。
 
 ---
 

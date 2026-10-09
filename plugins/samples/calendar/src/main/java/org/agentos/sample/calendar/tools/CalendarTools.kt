@@ -73,7 +73,11 @@ class CalendarTools(
 
     private val calendarList = tool(
         "calendar_list",
-        "List calendars: id, name, color (#RRGGBB), visible flag (whether the app UI shows it), is_default and event_count. " +
+        "List calendars: id, name, color (#RRGGBB), visible flag (whether the app UI shows it), is_default (the calendar event_create writes to when calendar_id is omitted), event_count, " +
+            "and where the calendar lives: `account` (account name, empty for device-only calendars), `account_type` (raw Android account type), " +
+            "`source` ('google', 'caldav', 'local' = not synced to any account, or 'other' = an account type this app does not recognise, e.g. Exchange or a phone-maker account), " +
+            "`writable` (false = read-only, events cannot be added or changed) and `storage` ('app' = this app's own calendars, 'system' = the phone's calendar database shared with other calendar apps). " +
+            "Events written to account calendars (google, caldav, other) are synced to the cloud by the system. " +
             "Returns `total`; when `truncated` is true call again with offset = `next_offset`.",
         objectSchema(
             properties = listOf(
@@ -85,13 +89,15 @@ class CalendarTools(
     ) { a ->
         val limit = limit(a, MAX_LIMIT)
         val offset = offset(a)
-        val all = repo.calendars.value
-        paged("calendars", all.drop(offset).take(limit).map { calendarJson(it) }, all.size, offset, limit) { }
+        val all = repo.reloadCalendars()
+        val defaultId = repo.defaultWriteCalendar().id
+        paged("calendars", all.drop(offset).take(limit).map { calendarJson(it, defaultId) }, all.size, offset, limit) { }
     }
 
     private val calendarCreate = tool(
         "calendar_create",
-        "Create a new calendar. `name` must be unique (case-insensitive). `color` is an optional '#RRGGBB' value; a palette color is picked when omitted. Returns the new calendar.",
+        "Create a new device-only calendar in this app (source 'local'). Account calendars (Google, CalDAV...) cannot be created here because they live on the account's server: this tool never creates one and fails if asked to. " +
+            "`name` must be unique (case-insensitive). `color` is an optional '#RRGGBB' value; a palette color is picked when omitted. Returns the new calendar.",
         objectSchema(
             listOf("name"),
             listOf("name" to stringProp("Calendar name, max 60 characters."), "color" to stringProp("Color as #RRGGBB.")),
@@ -105,7 +111,8 @@ class CalendarTools(
 
     private val calendarUpdate = tool(
         "calendar_update",
-        "Rename a calendar, change its color, or show/hide it in the app UI (hidden calendars stay readable through these tools). Only the given fields change. Returns the calendar.",
+        "Rename a calendar, change its color, or show/hide it in the app UI (hidden calendars stay readable through these tools). Only the given fields change. " +
+            "Account and system calendars can only be shown/hidden here (`visible`); renaming or recoloring them fails. Returns the calendar.",
         objectSchema(
             listOf("id"),
             listOf(
@@ -124,7 +131,8 @@ class CalendarTools(
 
     private val calendarDelete = tool(
         "calendar_delete",
-        "Delete a calendar together with ALL of its events. This cannot be undone. Returns the number of events deleted. The default calendar cannot be deleted.",
+        "Delete a device-only calendar of this app together with ALL of its events. This cannot be undone. Returns the number of events deleted. " +
+            "Account and system calendars (google, caldav, other, or any calendar with storage 'system') are refused: they are owned by the account, not by this app. The app's default calendar cannot be deleted.",
         objectSchema(listOf("id"), listOf("id" to stringProp("Calendar id from calendar_list."))),
         delete,
     ) { a ->
@@ -145,6 +153,8 @@ class CalendarTools(
             "All times are ISO-8601 with UTC offset; input without an offset is read in the device time zone (see `timezone` in the result). " +
             "`from` defaults to the start of today and `to` to from + 30 days; a date-only `to` includes that whole day. " +
             "All-day events start at 00:00 of their first day and end at 23:59:59 of their last day. Events of hidden calendars are included. " +
+            "Covers every calendar, including account calendars synced to this phone (Google, CalDAV...); if the app has no calendar permission this fails and the user must grant it in the Calendar app. " +
+            "Recurring events that use a rule this app cannot express are reported with recurrence 'custom' and the original `rrule`. " +
             "`query` keeps only events whose title, location or description contains it (case-insensitive). " +
             "The result carries `total`; a page is also cut early to fit the message size limit, so when `truncated` is true call again with offset = `next_offset` to read on.",
         objectSchema(
@@ -162,7 +172,7 @@ class CalendarTools(
         val from = a.string("from")?.let { boundary(it, "from", isEnd = false) } ?: startOfToday()
         val to = a.string("to")?.let { boundary(it, "to", isEnd = true) } ?: Instant.ofEpochMilli(from).atZone(zone).plusDays(30).toInstant().toEpochMilli()
         if (to <= from) throw ToolError("'to' must be after 'from'")
-        val calendarId = a.string("calendar_id")?.also { requireCalendar(it) }
+        val calendarId = a.string("calendar_id")?.let { requireCalendar(it) }
         val limit = limit(a, DEFAULT_LIMIT)
         val offset = offset(a)
         val all = repo.occurrences(from, to, calendarId = calendarId, query = a.string("query"))
@@ -188,7 +198,8 @@ class CalendarTools(
             "`end` defaults to start + 1 hour. All-day events: set all_day=true (or pass a date-only start); only the date part counts, `end` is the last day (inclusive; an end at exactly 00:00 of a later day is treated as exclusive); default one day. " +
             "reminder_minutes = minutes before the start to notify (all-day: minutes before 09:00 of the first day), e.g. [10, 60]. " +
             "recurrence repeats the event (weekly = same weekday, monthly = same day of month, clamped to month end) until `recurrence_until` (date or ISO-8601, inclusive; default: forever). " +
-            "Check event_list for conflicts first when scheduling a meeting. Uses the default calendar unless calendar_id is given.",
+            "Check event_list for conflicts first when scheduling a meeting. Writes to the default write calendar (see `is_default` in calendar_list; the user can choose it, otherwise the first writable, visible account calendar, otherwise this app's own local calendar) unless calendar_id is given. " +
+            "Events written to an account calendar are synced to the cloud by the system and may take a while to show up on other devices. A reminder is delivered by the system Calendar app for system/account calendars and by this app for its own local calendars.",
         eventSchema(requireTitleStart = true),
         create,
     ) { a ->
@@ -197,7 +208,7 @@ class CalendarTools(
         val startP = IsoTime.parse(a.string("start", required = true)!!, zone, "start")
         val endP = a.string("end")?.let { IsoTime.parse(it, zone, "end") }
         val allDay = a.bool("all_day") ?: startP.dateOnly
-        val calendarId = a.string("calendar_id")?.also { requireCalendar(it) } ?: repo.defaultCalendar.id
+        val calendarId = a.string("calendar_id")?.let { requireCalendar(it) } ?: repo.defaultWriteCalendar().id
         val recurrence = a.string("recurrence")?.let { parseRecurrence(it) } ?: Recurrence.NONE
         val base = EventSeries(
             id = "", calendarId = calendarId, title = title,
@@ -222,12 +233,14 @@ class CalendarTools(
     private val eventUpdate = tool(
         "event_update",
         "Update an event; only the given fields change. For a recurring event the WHOLE series is changed (an occurrence id from event_list also targets the series). " +
+            "Changes to events in account calendars are synced to the cloud. An event with recurrence 'custom' cannot be updated (the call fails and nothing changes). Moving an event to another calendar only works between this app's own local calendars. " +
             "Same field formats as event_create. Changing `start` without `end` keeps the duration. Pass recurrence_until or color as null to clear them; recurrence='none' makes the event non-recurring. Returns the updated event.",
         eventSchema(requireTitleStart = false),
         update,
     ) { a ->
         val id = a.string("id", required = true)!!
         val s = repo.event(id) ?: throw ToolError("Event not found: $id")
+        if (s.recurrence == Recurrence.CUSTOM) throw CalendarException(CalendarRepository.customMessage(s))
         val zone = zone
         val fieldNames = listOf(
             "title", "start", "end", "all_day", "location", "description", "calendar_id",
@@ -242,7 +255,7 @@ class CalendarTools(
             title = a.string("title") ?: s.title,
             description = a.string("description") ?: s.description,
             location = a.string("location") ?: s.location,
-            calendarId = a.string("calendar_id")?.also { requireCalendar(it) } ?: s.calendarId,
+            calendarId = a.string("calendar_id")?.let { requireCalendar(it) } ?: s.calendarId,
             reminders = a.intList("reminder_minutes") ?: s.reminders,
             recurrence = a.string("recurrence")?.let { parseRecurrence(it) } ?: s.recurrence,
             color = if (a.isNull("color")) null else a.string("color")?.let { parseColor(it) } ?: s.color,
@@ -273,7 +286,8 @@ class CalendarTools(
 
     private val eventDelete = tool(
         "event_delete",
-        "Delete an event permanently. For a recurring event the WHOLE series is deleted (an occurrence id also targets the series). Returns what was deleted.",
+        "Delete an event permanently. For a recurring event the WHOLE series is deleted (an occurrence id also targets the series). " +
+            "High risk for account calendars (Google, CalDAV...): the deletion is synced to the account and removes the event on the user's other devices; there is no undo. Returns what was deleted.",
         objectSchema(listOf("id"), listOf("id" to stringProp("Event id or occurrence id."))),
         delete,
     ) { a ->
@@ -291,11 +305,13 @@ class CalendarTools(
     private val eventSearch = tool(
         "event_search",
         "Search events by case-insensitive substring in title, location or description, across all time. One result per event series: the next upcoming occurrence, or the last one if none is upcoming. Upcoming results come first (soonest first), then past ones (most recent first). " +
+            "Covers all calendars, including account calendars synced to this phone. For recurring events in account calendars the upcoming/last occurrence is looked up within about two years of today. " +
             "The result carries `total`; when `truncated` is true call again with offset = `next_offset` to read on.",
         objectSchema(
             listOf("query"),
             listOf(
                 "query" to stringProp("Text to look for."),
+                "calendar_id" to stringProp("Only search this calendar."),
                 "limit" to intProp("Max items to return, default 50, max 200.", 1, MAX_LIMIT),
                 "offset" to intProp("Number of results to skip, for paging. Default 0.", 0),
             ),
@@ -305,7 +321,8 @@ class CalendarTools(
         val q = a.string("query", required = true)!!
         val limit = limit(a, DEFAULT_LIMIT)
         val offset = offset(a)
-        val found = repo.search(q, limit = Int.MAX_VALUE)
+        val calendarId = a.string("calendar_id")?.let { requireCalendar(it) }
+        val found = repo.search(q, limit = Int.MAX_VALUE, calendarId = calendarId)
         eventsResult(found, limit, offset) { put("query", q) }
     }
 
@@ -322,7 +339,7 @@ class CalendarTools(
         ),
         readOnly,
     ) { a ->
-        val calendarId = a.string("calendar_id")?.also { requireCalendar(it) }
+        val calendarId = a.string("calendar_id")?.let { requireCalendar(it) }
         val today = Instant.ofEpochMilli(repo.time.nowMs()).atZone(zone).toLocalDate()
         val from = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val to = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -333,7 +350,7 @@ class CalendarTools(
     private val freeSlots = tool(
         "free_slots",
         "Find free time slots on one day. `date` is YYYY-MM-DD in the device time zone; the working window is day_start..day_end (HH:mm, default 09:00..18:00; day_end may be 24:00). " +
-            "Busy time comes from all timed events of all calendars, including expanded recurring events and events crossing midnight; all-day events are ignored unless include_all_day=true. " +
+            "Busy time comes from all timed events of all calendars (account calendars included), including expanded recurring events and events crossing midnight; events marked 'free' or declined are ignored, and all-day events are ignored unless include_all_day=true. " +
             "Returns the slots that are at least duration_minutes long (`total` slots; when `truncated` is true call again with offset = `next_offset`), " +
             "plus the busy intervals that were considered (`busy_total`; the list is shortened if very long, `busy_truncated`).",
         objectSchema(
@@ -357,12 +374,12 @@ class CalendarTools(
         val ds = parseClock(a.string("day_start") ?: "09:00", "day_start")
         val de = parseClock(a.string("day_end") ?: "18:00", "day_end")
         if (de <= ds) throw ToolError("day_end must be after day_start")
-        val calendarId = a.string("calendar_id")?.also { requireCalendar(it) }
+        val calendarId = a.string("calendar_id")?.let { requireCalendar(it) }
         val includeAllDay = a.bool("include_all_day") ?: false
         val winStart = atClock(date, ds, zone)
         val winEnd = atClock(date, de, zone)
         if (winEnd <= winStart) throw ToolError("day_end must be after day_start (the window is empty on this day)")
-        val busyOcc = repo.occurrences(winStart, winEnd, calendarId = calendarId).filter { includeAllDay || !it.allDay }
+        val busyOcc = repo.occurrences(winStart, winEnd, calendarId = calendarId).filter { (includeAllDay || !it.allDay) && it.series.busy }
         val spans = busyOcc.map { FreeSlots.Span(it.startMs, it.endMs) }
         val slots = FreeSlots.compute(spans, winStart, winEnd, minutes * 60_000L)
         val offset = offset(a)
@@ -446,17 +463,21 @@ class CalendarTools(
 
     private fun parseColor(text: String): Int = Palette.parse(text) ?: throw ToolError("Invalid color \"$text\": use #RRGGBB")
 
-    private fun requireCalendar(id: String) {
-        if (repo.calendar(id) == null) throw ToolError("Calendar not found: $id")
-    }
+    /** 校验日历存在（系统日历没权限时抛 [org.agentos.sample.calendar.data.CalendarPermissionException]），返回规范化后的 id。 */
+    private fun requireCalendar(id: String): String = repo.requireCalendar(id).id
 
-    internal fun calendarJson(c: CalendarInfo): JsonObject = buildJsonObject {
+    internal fun calendarJson(c: CalendarInfo, defaultWriteId: String = repo.defaultWriteCalendar().id): JsonObject = buildJsonObject {
         put("id", c.id)
         put("name", c.name)
         put("color", Palette.format(c.color))
         put("visible", c.visible)
-        put("is_default", c.isDefault)
-        put("event_count", repo.eventCount(c.id))
+        put("is_default", c.id == defaultWriteId)
+        put("event_count", runCatching { repo.eventCount(c.id) }.getOrDefault(0))
+        put("account", c.account)
+        put("account_type", c.accountType)
+        put("source", c.source.wire)
+        put("writable", c.writable)
+        put("storage", if (c.system) "system" else "app")
     }
 
     private fun eventsResult(all: List<Occurrence>, limit: Int, offset: Int, extra: JsonObjectBuilder.() -> Unit): JsonObject =
@@ -512,6 +533,7 @@ class CalendarTools(
             put("reminder_minutes", JsonArray(s.reminders.map { JsonPrimitive(it) }))
             put("recurrence", s.recurrence.wire)
             put("recurrence_until", s.recurrenceUntilUtc?.let { IsoTime.format(it, zone) })
+            if (s.recurrence == Recurrence.CUSTOM) put("rrule", s.rrule)
             put("timezone", if (s.allDay) zone.id else s.zoneId)
         }
     }
@@ -526,9 +548,9 @@ class CalendarTools(
             add("all_day" to boolProp("All-day event (only dates matter)."))
             add("location" to stringProp("Place, free text."))
             add("description" to stringProp("Notes, free text."))
-            add("calendar_id" to stringProp("Calendar id from calendar_list. Default: the default calendar."))
+            add("calendar_id" to stringProp("Calendar id from calendar_list (must be writable). Default: the default write calendar (is_default in calendar_list)."))
             add("reminder_minutes" to intArrayProp("Notify this many minutes before the start; up to 5 values, each 0-40320. Example: [10, 60]."))
-            add("recurrence" to stringProp("Repeat rule.", listOf("none", "daily", "weekly", "monthly", "yearly")))
+            add("recurrence" to stringProp("Repeat rule. Results may also show 'custom' for rules this app cannot express; that value cannot be set.", listOf("none", "daily", "weekly", "monthly", "yearly")))
             add("recurrence_until" to stringProp("Last day of the repetition (inclusive), date or ISO-8601. Only with recurrence."))
             add("color" to stringProp("Event color as #RRGGBB; default follows the calendar."))
         },

@@ -207,9 +207,13 @@ class ConsentTextTest {
         val high = viewOf(request("c", risk = ToolRisk.HIGH))
         assertEquals(listOf(ConsentSeverity.NORMAL, ConsentSeverity.ELEVATED, ConsentSeverity.CRITICAL), listOf(read, write, high).map { it.severity })
         assertEquals(3, listOf(read, write, high).map { it.riskLabel }.toSet().size)
-        assertTrue("可能不可恢复" in high.riskDescription)
-        assertFalse("可能不可恢复" in write.riskDescription)
-        assertFalse("可能不可恢复" in read.riskDescription)
+        // the three levels have three different descriptions; the high-risk one is its own message (the wording "may be irreversible" lives in the resources)
+        assertEquals(
+            listOf(ConsentMessages.RISK_DESC_READ, ConsentMessages.RISK_DESC_WRITE, ConsentMessages.RISK_DESC_HIGH),
+            listOf(read, write, high).map { it.riskDescription.key },
+        )
+        assertEquals(listOf(ConsentMessages.RISK_READ, ConsentMessages.RISK_WRITE, ConsentMessages.RISK_HIGH), listOf(read, write, high).map { it.riskLabel.key })
+        assertTrue(listOf(read, write, high).all { it.riskLabel.args.isEmpty() && it.riskDescription.args.isEmpty() })
     }
 
     @Test
@@ -243,7 +247,11 @@ class ConsentTextTest {
             override suspend fun setAlways(source: ToolSource, risk: ToolRisk) = ApprovalWriteResult.Saved
         }
         val v = viewOf(request("r", source = ToolSource("p", "s", "t")), writer = writable)
-        assertEquals(listOf("允许一次", "本次对话内不再询问", "始终允许这个工具", "拒绝"), v.options.map { it.label })
+        assertEquals(
+            listOf(ConsentMessages.OPTION_ALLOW_ONCE, ConsentMessages.OPTION_ALLOW_FOR_SESSION, ConsentMessages.OPTION_ALWAYS_ALLOW, ConsentMessages.OPTION_DENY),
+            v.options.map { it.label.key },
+        )
+        assertTrue(v.options.all { it.label.args.isEmpty() })
         assertEquals(listOf(false, false, false, true), v.options.map { it.destructive })
     }
 }

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_name">Messages</string>
+
+    <!-- Bottom navigation -->
+    <string name="tab_status">Status</string>
+    <string name="tab_chats">Chats</string>
+    <string name="tab_agent">Agent log</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Status -->
+    <string name="status_title_full">Full access</string>
+    <string name="status_title_partial">Partly available</string>
+    <string name="status_title_compose">Compose only</string>
+    <string name="status_body_full">The agent can read, search and send messages; every send needs your approval in AgentOS.</string>
+    <string name="status_body_partial">One SMS permission is missing, so the matching tools return an error.</string>
+    <string name="status_body_compose">No SMS permission: the agent can only hand a draft to the system messaging screen, and you press send yourself.</string>
+    <string name="perm_read">Read messages</string>
+    <string name="perm_send">Send messages</string>
+    <string name="perm_granted">Granted</string>
+    <string name="perm_missing">Not granted</string>
+    <string name="perm_grant_button">Grant SMS permissions</string>
+
+    <string name="guide_title">Can\'t grant it? Allow restricted settings first</string>
+    <string name="guide_intro">Since Android 15 the system restricts SMS permissions for apps that were not installed from an app store. That is a protection, not a bug. Do these three steps once.</string>
+    <string name="guide_step1">Open App info</string>
+    <string name="guide_step2">Tap ⋮ at the top right and choose \"Allow restricted settings\" (you may need to confirm your screen lock)</string>
+    <string name="guide_step3">Come back here and tap \"Grant SMS permissions\"</string>
+    <string name="guide_open_info">Open App info</string>
+    <string name="guide_mock_title">App info</string>
+    <string name="guide_mock_menu">Allow restricted settings</string>
+    <string name="guide_note">No such item in the App info menu? Then the system is not restricting this app — just grant the permissions.</string>
+
+    <string name="disclosure_title">Where your messages go</string>
+    <string name="disclosure_body">Message text the agent reads becomes part of the chat history and is sent to the model endpoint you configured in AgentOS. Every send needs your approval, and verification codes are masked by default. This app does not use the network itself and is not your default messaging app.</string>
+    <string name="disclosure_ack">Got it</string>
+
+    <string name="status_agent_title">What the agent can do</string>
+    <string name="status_agent_can">List chats, read, search, send (high risk, approved every time), check send status, prepare a draft</string>
+    <string name="status_agent_cannot">Cannot: MMS, group messages, delete, mark as read, pick a SIM, answer incoming messages on its own</string>
+
+    <!-- Chats -->
+    <string name="chats_title">Chats</string>
+    <string name="chats_empty_title">No messages</string>
+    <string name="chats_empty_body">The system message store is empty.</string>
+    <string name="chats_no_permission_title">Reading is not allowed</string>
+    <string name="chats_no_permission_body">Grant \"Read messages\" to browse your conversations here (read-only).</string>
+    <string name="chats_go_status">Go to permissions</string>
+    <string name="chats_masked_note">Verification codes are masked per your settings</string>
+    <string name="chats_readonly_note">Read-only view. Use your messaging app to reply.</string>
+    <string name="chats_open_composer">Reply in messaging app</string>
+    <string name="chats_unread" tools:ignore="PluralsCandidate">%1$d unread</string>
+    <string name="back">Back</string>
+    <plurals name="messages_count">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+
+    <!-- Agent send log -->
+    <string name="agent_title">Agent send log</string>
+    <string name="agent_empty_title">The agent hasn\'t sent anything</string>
+    <string name="agent_empty_body">Messages the agent sends through AgentOS are listed here with their status.</string>
+    <string name="agent_summary" tools:ignore="PluralsCandidate">%1$d of %2$d submitted in the last 10 minutes</string>
+    <string name="agent_note">Delivery reports can be late or never arrive; \"Sent\" is often the final state.</string>
+    <string name="state_queued">Submitted</string>
+    <string name="state_sent">Sent</string>
+    <string name="state_delivered">Delivered</string>
+    <string name="state_failed">Failed</string>
+    <string name="reason_radio_off">Radio is off (airplane mode?)</string>
+    <string name="reason_no_service">No network service</string>
+    <string name="reason_generic">The phone or carrier refused the message</string>
+    <string name="reason_limit">Android\'s SMS send limit was hit</string>
+    <string name="reason_short_code">The system does not allow this short number</string>
+    <string name="reason_delivery_failed">Not delivered (the delivery report says it failed)</string>
+    <string name="reason_permission">No permission to send SMS</string>
+    <string name="failed_reason">Reason: %1$s</string>
+    <plurals name="parts_count">
+        <item quantity="one">%1$d part</item>
+        <item quantity="other">%1$d parts</item>
+    </plurals>
+
+    <string name="drafts_title">Drafts waiting for you</string>
+    <string name="drafts_hint">The agent asked to write these in the messaging screen. Android does not let background apps open screens on their own, so if nothing popped up, tap Open.</string>
+    <string name="draft_open">Open</string>
+    <string name="draft_dismiss">Dismiss</string>
+    <string name="draft_no_text">(no text prefilled)</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_safety">Safety</string>
+    <string name="setting_codes_title">Let the agent read verification codes</string>
+    <string name="setting_codes_off">Off: codes show as •••••• — to the agent and in this app\'s chat view.</string>
+    <string name="setting_codes_on">On: codes go into the chat history and to the model endpoint as they are.</string>
+    <string name="setting_short_title">Allow sending to short numbers</string>
+    <string name="setting_short_body">Refused by default (10086, 106…) to avoid premium-rate messages and subscriptions.</string>
+    <string name="setting_rate_title">Send rate limit</string>
+    <string name="setting_rate_body" tools:ignore="PluralsCandidate">At most %1$d per 10 minutes</string>
+    <string name="rate_decrease">Decrease</string>
+    <string name="rate_increase">Increase</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_body">Choose Chinese or English in the system\'s app language settings</string>
+    <string name="settings_about">About</string>
+    <string name="about_body">This app is not your default messaging app: it reads the system message store and sends through the system SMS service. No MMS, group messages, deleting or marking as read.</string>
+    <string name="settings_version">Version %1$s</string>
+</resources>

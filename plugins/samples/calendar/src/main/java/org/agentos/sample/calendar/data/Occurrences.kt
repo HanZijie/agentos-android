@@ -20,6 +20,8 @@ object Occurrences {
 
     fun expand(series: EventSeries, fromMs: Long, toMs: Long, zone: ZoneId, maxCount: Int = MAX_PER_SERIES): List<Occurrence> {
         if (toMs <= fromMs) return emptyList()
+        // custom 重复规则只会出现在系统日历里，那边的展开归 Provider；这里（本机展开器）读不懂，只当作单次，不去猜
+        if (series.recurrence == Recurrence.CUSTOM) return expand(series.copy(recurrence = Recurrence.NONE), fromMs, toMs, zone, maxCount).map { it.copy(series = series) }
         return if (series.allDay) expandAllDay(series, fromMs, toMs, zone, maxCount) else expandTimed(series, fromMs, toMs, zone, maxCount)
     }
 
@@ -55,10 +57,7 @@ object Occurrences {
     }
 
     /** 把 id（series id 或 `series@key`）拆开。 */
-    fun splitId(id: String): Pair<String, String?> {
-        val at = id.indexOf('@')
-        return if (at < 0) id to null else id.substring(0, at) to id.substring(at + 1)
-    }
+    fun splitId(id: String): Pair<String, String?> = CalendarIds.split(id)
 
     /** 在系列里找 key 对应的那一次出现；key 为 null 或找不到时返回 null。 */
     fun findByKey(series: EventSeries, key: String, zone: ZoneId): Occurrence? {
@@ -92,7 +91,7 @@ object Occurrences {
     private fun zoneOf(id: String, fallback: ZoneId): ZoneId = runCatching { ZoneId.of(id) }.getOrDefault(fallback)
 
     private fun shift(base: LocalDateTime, r: Recurrence, n: Long): LocalDateTime = when (r) {
-        Recurrence.NONE -> base
+        Recurrence.NONE, Recurrence.CUSTOM -> base
         Recurrence.DAILY -> base.plusDays(n)
         Recurrence.WEEKLY -> base.plusWeeks(n)
         Recurrence.MONTHLY -> base.plusMonths(n)
@@ -100,7 +99,7 @@ object Occurrences {
     }
 
     private fun shift(base: LocalDate, r: Recurrence, n: Long): LocalDate = when (r) {
-        Recurrence.NONE -> base
+        Recurrence.NONE, Recurrence.CUSTOM -> base
         Recurrence.DAILY -> base.plusDays(n)
         Recurrence.WEEKLY -> base.plusWeeks(n)
         Recurrence.MONTHLY -> base.plusMonths(n)
@@ -108,7 +107,7 @@ object Occurrences {
     }
 
     private fun periodsBetween(r: Recurrence, a: LocalDate, b: LocalDate): Long = when (r) {
-        Recurrence.NONE -> 0
+        Recurrence.NONE, Recurrence.CUSTOM -> 0
         Recurrence.DAILY -> ChronoUnit.DAYS.between(a, b)
         Recurrence.WEEKLY -> ChronoUnit.DAYS.between(a, b) / 7
         Recurrence.MONTHLY -> ChronoUnit.MONTHS.between(a.withDayOfMonth(1), b.withDayOfMonth(1))

@@ -389,6 +389,7 @@ object MarkdownParser {
         private fun bareUrl(i: Int): Int? {
             var end = i
             while (end < src.length && !src[end].isWhitespace() && src[end] != '<' && src[end] != '>') end++
+            // i18n-ok: 裸链接结尾要剥掉的半角 / 全角标点集合，是文本分析，与界面语言无关
             while (end > i && src[end - 1] in ".,;:!?)]}'\"，。；：！？）】") end--
             if (end - i <= "https://".length) return null
             val url = src.substring(i, end)

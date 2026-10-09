@@ -13,6 +13,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.agentos.app.R
 import org.agentos.app.agent.consent.ConsentWire.AuthRequest
+import org.agentos.app.i18n.AndroidStrings
+import org.agentos.app.i18n.Strings
 import org.agentos.app.ui.Ui
 
 /**
@@ -32,6 +34,7 @@ class AuthorizationDialog private constructor(
     private val onAnswer: (allow: Boolean) -> Unit,
 ) {
     private val handler = Handler(Looper.getMainLooper())
+    private val strings: Strings = AndroidStrings(activity)
     private var dialog: AlertDialog? = null
     private lateinit var countdown: TextView
     private val buttons = ArrayList<Button>()
@@ -62,7 +65,7 @@ class AuthorizationDialog private constructor(
     private var lastCountdown = ""
 
     private fun tick() {
-        val text = AuthorizationLabels.countdown(request.deadlineMillis, System.currentTimeMillis())
+        val text = AuthorizationLabels.countdown(request.deadlineMillis, System.currentTimeMillis(), strings)
         if (text != lastCountdown) {
             lastCountdown = text
             countdown.text = text
@@ -78,29 +81,29 @@ class AuthorizationDialog private constructor(
         }
         column.addView(
             Ui.text(activity, 12f, R.color.ui_user_text, bold = true).apply {
-                text = "第三方 App 请求授权"
+                text = strings.get(R.string.auth_badge)
                 setPadding(dp(10), dp(3), dp(10), dp(3))
                 background = Ui.rounded(accent, dp(10).toFloat())
             },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
         column.addView(Ui.text(activity, 19f, R.color.ui_text, bold = true).apply {
-            text = AuthorizationLabels.title(request, resolvedLabel)
+            text = AuthorizationLabels.title(request, resolvedLabel, strings)
             setPadding(0, dp(10), 0, dp(6))
         })
-        column.addView(line(AuthorizationLabels.packageLine(request), R.color.ui_text))
-        column.addView(line(AuthorizationLabels.digestLine(request.signingDigest), R.color.ui_text))
-        AuthorizationLabels.signatureChangedLine(request)?.let {
+        column.addView(line(AuthorizationLabels.packageLine(request, strings), R.color.ui_text))
+        column.addView(line(AuthorizationLabels.digestLine(request.signingDigest, strings), R.color.ui_text))
+        AuthorizationLabels.signatureChangedLine(request, strings)?.let {
             column.addView(Ui.text(activity, 14f, R.color.ui_error, bold = true).apply {
                 text = it
                 setPadding(0, dp(8), 0, dp(2))
             })
         }
         column.addView(Ui.text(activity, 14f, R.color.ui_text_secondary).apply {
-            text = AuthorizationLabels.EXPLANATION
+            text = AuthorizationLabels.explanation(strings)
             setPadding(0, dp(12), 0, dp(2))
         })
-        ConsentLabels.queueNote(queueSize)?.let { column.addView(line(it, R.color.ui_text_secondary)) }
+        ConsentLabels.queueNote(queueSize, strings)?.let { column.addView(line(it, R.color.ui_text_secondary)) }
         countdown = Ui.text(activity, 12f, R.color.ui_text_secondary).apply {
             setPadding(0, dp(10), 0, dp(6))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -111,7 +114,7 @@ class AuthorizationDialog private constructor(
         var denyButton: Button? = null
         for (allow in listOf(true, false)) {
             val b = Button(activity).apply {
-                text = if (allow) AuthorizationLabels.ALLOW else AuthorizationLabels.DENY
+                text = strings.get(if (allow) R.string.auth_allow else R.string.auth_deny)
                 isAllCaps = false
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 setTextColor(activity.getColor(if (allow) R.color.ui_text else R.color.ui_user_text))
@@ -142,7 +145,7 @@ class AuthorizationDialog private constructor(
         if (answered) return
         answered = true
         buttons.forEach { it.isEnabled = false; it.alpha = 0.5f }
-        countdown.text = "已提交…"
+        countdown.text = strings.get(R.string.consent_submitted)
         onAnswer(allow)
     }
 

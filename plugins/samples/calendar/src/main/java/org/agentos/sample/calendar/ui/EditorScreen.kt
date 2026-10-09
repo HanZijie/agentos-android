@@ -84,6 +84,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.agentos.sample.calendar.R
+import org.agentos.sample.calendar.data.CalendarIds
+import org.agentos.sample.calendar.data.CalendarInfo
 import org.agentos.sample.calendar.data.EventSeries
 import org.agentos.sample.calendar.data.Recurrence
 import org.agentos.sample.calendar.reminder.ReminderNotifications
@@ -179,10 +181,11 @@ private class Draft(val original: EventSeries?, data: CalendarData, defaultCalen
 fun EditorScreen(
     data: CalendarData,
     fmt: Fmt,
-    eventId: String?,
+    original: EventSeries?,
     prefillStartMs: Long?,
     prefillAllDay: Boolean,
     selectedDate: LocalDate,
+    defaultCalendarId: String,
     save: (EventSeries, onError: (String) -> Unit, onDone: (EventSeries) -> Unit) -> Unit,
     delete: (EventSeries) -> Unit,
     onClose: () -> Unit,
@@ -190,10 +193,7 @@ fun EditorScreen(
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
-    val original = remember(eventId) { eventId?.let { id -> data.events.firstOrNull { it.id == id.substringBefore('@') } } }
-    val draft = remember(eventId) {
-        Draft(original, data, data.calendars.firstOrNull { it.isDefault }?.id ?: data.calendars.first().id, prefillStartMs, prefillAllDay, selectedDate)
-    }
+    val draft = remember(original?.id) { Draft(original, data, defaultCalendarId, prefillStartMs, prefillAllDay, selectedDate) }
     val initial = remember(draft) { draft.snapshot() }
     val dirty = draft.snapshot() != initial
     var confirmDiscard by remember { mutableStateOf(false) }
@@ -326,22 +326,48 @@ fun EditorScreen(
                 SectionCard {
                     var menu by remember { mutableStateOf(false) }
                     val cal = data.calendar(draft.calendarId)
+                    // 新建：任何可写的日历；已有的本机日程：只能在本机日历之间搬；已有的账号 / 系统日历日程不能搬家（仓库会拒绝）
+                    val choices = remember(data.calendars, original) {
+                        data.calendars.filter { c ->
+                            c.writable && when {
+                                original == null -> true
+                                CalendarIds.isSystem(original.calendarId) -> c.id == original.calendarId
+                                else -> !c.system
+                            }
+                        }
+                    }
                     Box {
-                        IconRow(Icons.Rounded.CalendarMonth, Modifier.clickable { menu = true }) {
+                        IconRow(Icons.Rounded.CalendarMonth, Modifier.clickable(enabled = choices.size > 1) { menu = true }, minHeight = 60.dp) {
                             Box(Modifier.size(12.dp).clip(CircleShape).background(Color(cal?.color ?: 0)))
                             Spacer(Modifier.width(10.dp))
-                            Text(cal?.name.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Icon(Icons.Rounded.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(Modifier.weight(1f)) {
+                                Text(cal?.name.orEmpty(), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (cal != null) Text(fmt.originLabel(cal), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (choices.size > 1) Icon(Icons.Rounded.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         DropdownMenu(menu, { menu = false }) {
-                            for (c in data.calendars) {
+                            for (c in choices) {
                                 DropdownMenuItem(
-                                    text = { Text(c.name) },
+                                    text = {
+                                        Column {
+                                            Text(c.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(fmt.originLabel(c), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    },
                                     leadingIcon = { Box(Modifier.size(12.dp).clip(CircleShape).background(Color(c.color))) },
                                     onClick = { draft.calendarId = c.id; menu = false },
                                 )
                             }
                         }
+                    }
+                    if (cal != null && cal.isAccountCalendar) {
+                        Text(
+                            stringResource(R.string.editor_account_hint, cal.account.ifBlank { fmt.sourceLabel(cal) }),
+                            Modifier.padding(start = 54.dp, end = 16.dp, bottom = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     HorizontalDivider(Modifier.padding(start = 54.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.Top) {
@@ -382,7 +408,7 @@ fun EditorScreen(
                             Icon(Icons.Rounded.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         DropdownMenu(repeatMenu, { repeatMenu = false }) {
-                            for (r in Recurrence.entries) {
+                            for (r in Recurrence.settable) {
                                 DropdownMenuItem(text = { Text(fmt.recurrenceLabel(r)) }, onClick = { draft.recurrence = r; repeatMenu = false })
                             }
                         }
@@ -498,7 +524,7 @@ fun EditorScreen(
         )
     }
     if (confirmDelete && original != null) {
-        DeleteEventDialog(original, onDismiss = { confirmDelete = false }, onConfirm = { confirmDelete = false; delete(original) })
+        DeleteEventDialog(original, data.calendar(original.calendarId), fmt, onDismiss = { confirmDelete = false }, onConfirm = { confirmDelete = false; delete(original) })
     }
 }
 
@@ -542,15 +568,21 @@ private fun androidx.compose.foundation.layout.RowScope.PlainField(value: String
     )
 }
 
+/** 删除确认。账号日历里的删除会同步到云端，文案里写明是哪个账号；没有撤销。 */
 @Composable
-fun DeleteEventDialog(event: EventSeries, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+fun DeleteEventDialog(event: EventSeries, calendar: CalendarInfo?, fmt: Fmt, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val account = calendar?.takeIf { it.isAccountCalendar }?.let { it.account.ifBlank { fmt.sourceLabel(it) } }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.delete_event_title)) },
         text = {
             Text(
-                if (event.isRecurring) stringResource(R.string.delete_series_message, event.title)
-                else stringResource(R.string.delete_event_message, event.title),
+                when {
+                    account != null && event.isRecurring -> stringResource(R.string.delete_series_account_message, event.title, account)
+                    account != null -> stringResource(R.string.delete_event_account_message, event.title, account)
+                    event.isRecurring -> stringResource(R.string.delete_series_message, event.title)
+                    else -> stringResource(R.string.delete_event_message, event.title)
+                },
             )
         },
         confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) } },

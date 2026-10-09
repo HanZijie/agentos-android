@@ -12,7 +12,7 @@ import org.agentos.sample.calendar.CalendarGraph
  */
 class CalendarMcpService : McpBinderService() {
     override val serverName: String = "calendar"
-    override val serverVersion: String = "1.0.0"
+    override val serverVersion: String = "1.1.0"
 
     override fun onRegisterTools(registry: McpToolRegistry) {
         for (tool in CalendarGraph.tools(applicationContext).all()) {

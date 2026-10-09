@@ -166,7 +166,7 @@ class CalendarToolsTest {
         assertEquals("none", e.s("recurrence"))
         assertEquals(0, e.arr("reminder_minutes").size)
         assertEquals("Asia/Shanghai", e.s("timezone"))
-        assertEquals(1, repo.events.value.size)
+        assertEquals(1, repo.localEvents.value.size)
     }
 
     @Test fun eventCreateWithEverything() {
@@ -227,7 +227,7 @@ class CalendarToolsTest {
         fails("event_create", """{"title":"A","start":"2026-10-08T15:00:00+08:00","all_day":"perhaps"}""", "all_day")
         fails("event_create", """{"title":"A","start":"2026-10-08T15:00:00+08:00","recurrence":"daily","recurrence_until":"2026-10-01"}""", "recurrence_until")
         fails("event_create", """{"title":{"a":1},"start":"2026-10-08T15:00:00+08:00"}""", "title")
-        assertTrue("nothing was stored", repo.events.value.isEmpty())
+        assertTrue("nothing was stored", repo.localEvents.value.isEmpty())
     }
 
     @Test fun eventGetByIdAndOccurrenceId() {
@@ -282,7 +282,7 @@ class CalendarToolsTest {
         val r = ok("event_update", """{"id":"$occ","title":"Daily sync","start":"2026-10-10T10:00:00+08:00"}""")
         assertEquals("the returned item is that occurrence", occ.substringBefore('@') + "@20261010T020000Z", r.s("id"))
         assertEquals("Daily sync", r.s("title"))
-        assertEquals(1, repo.events.value.size)
+        assertEquals(1, repo.localEvents.value.size)
         val all = ok("event_list", """{"from":"2026-10-01","to":"2026-10-31","limit":200}""").arr("events")
         assertEquals("series start moved to Oct 10 10:00, until Oct 20 → 11 occurrences", 11, all.size)
         assertTrue(all.titles().all { it == "Daily sync" })
@@ -332,7 +332,7 @@ class CalendarToolsTest {
         assertTrue(r["deleted"]!!.jsonPrimitive.boolean)
         assertEquals("Gone", r.s("title"))
         assertFalse(r["was_recurring"]!!.jsonPrimitive.boolean)
-        assertTrue(repo.events.value.isEmpty())
+        assertTrue(repo.localEvents.value.isEmpty())
         fails("event_delete", """{"id":"${e.s("id")}"}""", "not found")
         fails("event_delete", "{}", "id")
         fails("event_delete", """{"id":"nope"}""", "not found")
@@ -343,7 +343,7 @@ class CalendarToolsTest {
         val r = ok("event_delete", """{"id":"${e.s("series_id")}@20261012T010000Z"}""")
         assertTrue(r["was_recurring"]!!.jsonPrimitive.boolean)
         assertEquals(e.s("series_id"), r.s("series_id"))
-        assertTrue(repo.events.value.isEmpty())
+        assertTrue(repo.localEvents.value.isEmpty())
     }
 
     // ---- event_list ----

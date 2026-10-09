@@ -49,7 +49,7 @@ class AutoConsentResponder(
         val atMillis: Long,
         val answeredWith: ConsentChoice? = null,
         val end: ConsentEnd? = null,
-        val notice: String? = null,
+        val notice: MessageRef? = null,
     )
 
     @Volatile var mode: Mode = Mode.OFF

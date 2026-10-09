@@ -6,6 +6,8 @@ import org.agentos.sample.alarm.data.AlarmRepository
 import org.agentos.sample.alarm.data.SqliteAlarmStore
 import org.agentos.sample.alarm.ring.AlarmNotifications
 import org.agentos.sample.alarm.ring.RingController
+import org.agentos.sample.alarm.schedule.AndroidSystemAlarmInfo
+import org.agentos.sample.alarm.schedule.SystemAlarmInfo
 import org.agentos.sample.alarm.schedule.SystemAlarmScheduler
 import org.agentos.sample.alarm.tools.AlarmTools
 
@@ -20,7 +22,8 @@ class AlarmGraph private constructor(context: Context) {
         scheduler = scheduler,
     )
     val ring: RingController = RingController
-    val tools: AlarmTools = AlarmTools(repository, ring)
+    val systemAlarms: SystemAlarmInfo = AndroidSystemAlarmInfo(context)
+    val tools: AlarmTools = AlarmTools(repository, ring, systemAlarms)
 
     companion object {
         @Volatile

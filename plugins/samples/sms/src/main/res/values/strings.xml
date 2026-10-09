@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_name">短信</string>
+
+    <!-- 底部导航 -->
+    <string name="tab_status">状态</string>
+    <string name="tab_chats">会话</string>
+    <string name="tab_agent">Agent 发送</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- 状态页 -->
+    <string name="status_title_full">完整模式</string>
+    <string name="status_title_partial">部分可用</string>
+    <string name="status_title_compose">仅撰写模式</string>
+    <string name="status_body_full">Agent 可以读取、搜索和发送短信；每次发送都要你在 AgentOS 里确认。</string>
+    <string name="status_body_partial">缺少一项短信权限，对应的工具会返回错误。</string>
+    <string name="status_body_compose">没有短信权限：Agent 只能用“撰写”把草稿交给系统短信界面，由你自己点发送。</string>
+    <string name="perm_read">读取短信</string>
+    <string name="perm_send">发送短信</string>
+    <string name="perm_granted">已授予</string>
+    <string name="perm_missing">未授予</string>
+    <string name="perm_grant_button">授予短信权限</string>
+
+    <string name="guide_title">无法授予？先“允许受限制的设置”</string>
+    <string name="guide_intro">从 Android 15 起，不是从应用商店安装的 App 申请短信权限会被系统限制。这是系统的保护，不是出错了。按下面三步解除一次即可。</string>
+    <string name="guide_step1">打开应用信息</string>
+    <string name="guide_step2">点右上角 ⋮，选“允许受限制的设置”（可能要验证锁屏密码）</string>
+    <string name="guide_step3">回到这里，再点“授予短信权限”</string>
+    <string name="guide_open_info">打开应用信息</string>
+    <string name="guide_mock_title">应用信息</string>
+    <string name="guide_mock_menu">允许受限制的设置</string>
+    <string name="guide_note">应用信息里没有这个菜单项？说明系统没有限制本 App，直接授予权限即可。</string>
+
+    <string name="disclosure_title">短信内容的去向</string>
+    <string name="disclosure_body">Agent 读取的短信内容会进入会话历史，并发送给你在 AgentOS 里配置的模型端点。发送短信每次都需要你确认，验证码默认遮蔽。本 App 自己不联网，也不是默认短信应用。</string>
+    <string name="disclosure_ack">我知道了</string>
+
+    <string name="status_agent_title">Agent 能做什么</string>
+    <string name="status_agent_can">列会话、读消息、搜索、发送（高风险，每次确认）、查发送状态、撰写草稿</string>
+    <string name="status_agent_cannot">不能：彩信、群发、删除、标已读、选卡槽、自动回复来信</string>
+
+    <!-- 会话页 -->
+    <string name="chats_title">会话</string>
+    <string name="chats_empty_title">没有短信</string>
+    <string name="chats_empty_body">系统短信库里还没有短信。</string>
+    <string name="chats_no_permission_title">没有读取权限</string>
+    <string name="chats_no_permission_body">授予“读取短信”后，这里会显示你的会话（只读）。</string>
+    <string name="chats_go_status">去授权</string>
+    <string name="chats_masked_note">验证码已按设置遮蔽</string>
+    <string name="chats_readonly_note">这里是只读视图，回复请用系统短信 App。</string>
+    <string name="chats_open_composer">用短信 App 回复</string>
+    <string name="chats_unread" tools:ignore="PluralsCandidate">%1$d 未读</string>
+    <string name="back">返回</string>
+    <plurals name="messages_count">
+        <item quantity="other">%1$d 条</item>
+    </plurals>
+
+    <!-- Agent 发送记录 -->
+    <string name="agent_title">Agent 发送记录</string>
+    <string name="agent_empty_title">Agent 还没有发过短信</string>
+    <string name="agent_empty_body">Agent 通过 AgentOS 发送的短信会记在这里，并显示状态。</string>
+    <string name="agent_summary" tools:ignore="PluralsCandidate">最近 10 分钟已提交 %1$d / %2$d 条</string>
+    <string name="agent_note">送达回执可能很晚或收不到；“已发出”常常就是最终状态。</string>
+    <string name="state_queued">已提交</string>
+    <string name="state_sent">已发出</string>
+    <string name="state_delivered">已送达</string>
+    <string name="state_failed">失败</string>
+    <string name="reason_radio_off">无线电已关闭（开着飞行模式？）</string>
+    <string name="reason_no_service">没有网络信号</string>
+    <string name="reason_generic">手机或运营商拒绝了这条短信</string>
+    <string name="reason_limit">触发了系统的短信发送频率限制</string>
+    <string name="reason_short_code">系统不允许发给这个短号码</string>
+    <string name="reason_delivery_failed">对方没有收到（送达报告显示失败）</string>
+    <string name="reason_permission">没有发送短信的权限</string>
+    <string name="failed_reason">原因：%1$s</string>
+    <plurals name="parts_count">
+        <item quantity="other">%1$d 段</item>
+    </plurals>
+
+    <string name="drafts_title">等你打开的草稿</string>
+    <string name="drafts_hint">Agent 请求用短信界面撰写这些内容。Android 不允许后台 App 自动打开界面，如果没有弹出，点“打开”继续。</string>
+    <string name="draft_open">打开</string>
+    <string name="draft_dismiss">忽略</string>
+    <string name="draft_no_text">（没有预填文字）</string>
+
+    <!-- 设置页 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_safety">安全</string>
+    <string name="setting_codes_title">允许 Agent 读取验证码</string>
+    <string name="setting_codes_off">关闭：验证码显示为 ••••••，对 Agent 和本 App 的会话页都一样。</string>
+    <string name="setting_codes_on">开启：验证码会原样进入会话历史，并发送给模型端点。</string>
+    <string name="setting_short_title">允许发送给短号码</string>
+    <string name="setting_short_body">默认拒绝 10086、106 开头等服务号码，避免付费短信或订阅。</string>
+    <string name="setting_rate_title">发送频率上限</string>
+    <string name="setting_rate_body" tools:ignore="PluralsCandidate">10 分钟内最多提交 %1$d 条</string>
+    <string name="rate_decrease">减少</string>
+    <string name="rate_increase">增加</string>
+    <string name="settings_language">语言</string>
+    <string name="settings_language_body">在系统的“应用语言”里选择中文或英文</string>
+    <string name="settings_about">关于</string>
+    <string name="about_body">本 App 不是默认短信应用：读取系统短信库，用系统短信服务发送。不支持彩信、群发、删除和标已读。</string>
+    <string name="settings_version">版本 %1$s</string>
+</resources>

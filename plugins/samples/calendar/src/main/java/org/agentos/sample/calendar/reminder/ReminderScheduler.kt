@@ -8,7 +8,8 @@ import android.util.Log
 import org.agentos.sample.calendar.data.CalendarRepository
 
 /**
- * 用 AlarmManager 排“下一条提醒”：始终只挂一个精确闹钟，指向全部日程里最早的未触发提醒；
+ * 用 AlarmManager 排“下一条提醒”：始终只挂一个精确闹钟，指向本机日历全部日程里最早的未触发提醒
+ * （系统日历 / 账号日历的日程，提醒写进 Reminders 表，由系统日历 App 发通知，不归这里管）；
  * 触发时发出所有到点的通知，再排下一条。数据变化、开机、时区或系统时间变化、升级后都会重新排。
  */
 class ReminderScheduler(private val context: Context, private val repo: CalendarRepository) {
@@ -24,7 +25,7 @@ class ReminderScheduler(private val context: Context, private val repo: Calendar
         val now = repo.time.nowMs()
         if (catchUp) fireDue(now)
         prefs.edit().putLong(KEY_LAST_PROCESSED, now).apply()
-        val next = ReminderPlanner.next(repo.events.value, now, repo.zone)
+        val next = ReminderPlanner.next(repo.localEvents.value, now, repo.zone)
         val pending = pendingIntent()
         if (next == null) {
             alarmManager.cancel(pending)
@@ -70,7 +71,7 @@ class ReminderScheduler(private val context: Context, private val repo: Calendar
     private fun fireDue(now: Long) {
         val last = prefs.getLong(KEY_LAST_PROCESSED, now)
         val from = maxOf(last, now - MAX_CATCH_UP_MS)
-        val due = ReminderPlanner.between(repo.events.value, from, now, repo.zone)
+        val due = ReminderPlanner.between(repo.localEvents.value, from, now, repo.zone)
         for (r in due) {
             ReminderNotifications.post(context, r, repo.zone)
             Log.i(TAG, "reminder posted: '${r.title}' (-${r.minutesBefore} min)")

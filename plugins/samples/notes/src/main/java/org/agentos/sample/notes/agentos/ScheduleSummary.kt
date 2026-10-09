@@ -14,7 +14,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * 创建与否只取决于工具调用的状态和工具自己返回的结果。
  */
 
-enum class ItemKind { EVENT, ALARM, OTHER }
+enum class ItemKind { EVENT, ALARM, TODO, OTHER }
 
 /**
  * 一项的状态（界面上的五种说法加一个“已取消”：用户点了停止、或这一轮结束时它还没有结果）。
@@ -34,6 +34,9 @@ data class IsoWhen(val millis: Long, val offset: String, val dateOnly: Boolean)
 /** `alarm_create` 的结果里我们要的三个字段（time 是 "HH:mm"，label，days 是 mon..sun；空表示只响一次）。 */
 data class AlarmInfo(val time: String, val label: String, val days: List<String>)
 
+/** `todo_create` 的结果里我们要的两个字段（title；due 是日期 "2026-10-12"，或带偏移的 ISO-8601 时间，没有截止时间时缺省）。 */
+data class TodoInfo(val title: String, val due: String?)
+
 data class ScheduleItem(
     val id: String,
     val kind: ItemKind,
@@ -42,16 +45,19 @@ data class ScheduleItem(
     val status: ItemStatus,
     val event: EventInfo? = null,
     val alarm: AlarmInfo? = null,
+    val todo: TodoInfo? = null,
     /** 被拒绝 / 失败时工具说的一句话（可能没有）。 */
     val message: String? = null,
 )
 
-/** 汇总：创建了几个日程、几个闹钟，以及没成的。 */
+/** 汇总：创建了几个日程、几个待办、几个闹钟，以及没成的。 */
 data class ScheduleSummary(val items: List<ScheduleItem>) {
     val createdEvents: List<ScheduleItem> get() = items.filter { it.kind == ItemKind.EVENT && it.status == ItemStatus.CREATED }
     val createdAlarms: List<ScheduleItem> get() = items.filter { it.kind == ItemKind.ALARM && it.status == ItemStatus.CREATED }
+    val createdTodos: List<ScheduleItem> get() = items.filter { it.kind == ItemKind.TODO && it.status == ItemStatus.CREATED }
     val eventCount: Int get() = createdEvents.size
     val alarmCount: Int get() = createdAlarms.size
+    val todoCount: Int get() = createdTodos.size
     val createdCount: Int get() = items.count { it.status == ItemStatus.CREATED }
     val deniedCount: Int get() = items.count { it.status == ItemStatus.DENIED }
     val failedCount: Int get() = items.count { it.status == ItemStatus.FAILED }
@@ -68,6 +74,7 @@ object ScheduleItems {
         return when {
             name == "event_create" || (ref == null && name.endsWith("__event_create")) -> ItemKind.EVENT
             name == "alarm_create" || (ref == null && name.endsWith("__alarm_create")) -> ItemKind.ALARM
+            name == "todo_create" || (ref == null && name.endsWith("__todo_create")) -> ItemKind.TODO
             else -> ItemKind.OTHER
         }
     }
@@ -98,6 +105,7 @@ object ScheduleItems {
             status = status,
             event = if (kind == ItemKind.EVENT) parseEvent(fromResult) ?: base.event ?: parseEvent(call.argumentsJson) else base.event,
             alarm = if (kind == ItemKind.ALARM) parseAlarm(fromResult) ?: base.alarm ?: parseAlarm(call.argumentsJson) else base.alarm,
+            todo = if (kind == ItemKind.TODO) parseTodo(fromResult) ?: base.todo ?: parseTodo(call.argumentsJson) else base.todo,
             message = when (status) {
                 ItemStatus.DENIED, ItemStatus.FAILED -> messageOf(call.resultJson) ?: base.message
                 else -> base.message
@@ -146,6 +154,12 @@ object ScheduleItems {
         val time = obj.string("time") ?: return null
         val days = (obj["days"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
         return AlarmInfo(time, obj.string("label") ?: "", days)
+    }
+
+    fun parseTodo(resultJson: String?): TodoInfo? {
+        val obj = asObject(resultJson) ?: return null
+        val title = obj.string("title") ?: return null
+        return TodoInfo(title, obj.string("due"))
     }
 
     /** 被拒绝 / 失败时的一句话：结果是 JSON 就取 error / message，否则取原文；最多 200 字符。 */

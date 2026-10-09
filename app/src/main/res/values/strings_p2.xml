@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- P2（docs/next-apps-plan.md 7.3）：首次引导、设置页、模型与 key、状态与安全说明。key 前缀：onboarding_ settings_ status_ security_ battery_ byok_ model_ desktop_ jev_ chat_ -->
+<resources>
+    <!-- ============ 公共 ============ -->
+    <string name="ui_back_desc">返回</string>
+    <string name="settings_open_failed">这台手机上打不开这个系统设置</string>
+
+    <!-- ============ 电池优化（BatteryText） ============ -->
+    <string name="battery_action">允许忽略电池优化</string>
+    <string name="battery_denied_label">后台运行</string>
+    <string name="battery_denied_exempt">上一次进入前台被系统拒绝；现在已允许忽略电池优化，之后会恢复正常</string>
+    <string name="battery_denied_restricted">被系统限制：进行中的任务可能被暂停，电脑端接入可能没有响应。请允许 AgentOS 忽略电池优化</string>
+    <string name="battery_desktop_warning">还没有允许忽略电池优化：运行时在后台被重新拉起后可能进不了前台、被系统冻结，电脑端会连不上</string>
+    <string name="battery_desktop_dialog_title">允许 AgentOS 忽略电池优化？</string>
+    <string name="battery_desktop_dialog_message">电脑端接入打开期间，AgentOS 的运行时要一直在后台待命。没有这项豁免时，运行时被系统重新拉起后可能进不了前台、被系统冻结，电脑端就连不上。\n\n在接下来的系统弹窗里选择“允许”即可，以后可以在系统设置里撤销。</string>
+    <string name="battery_guide_dialog_title">还没有允许 AgentOS 忽略电池优化</string>
+    <string name="battery_guide_dialog_message">不允许的话，AgentOS 在后台运行会被系统限制：进行中的任务可能被暂停，电脑端接入可能没有响应。\n\n在接下来的系统弹窗里选择“允许”即可，以后可以在系统设置里撤销。</string>
+    <string name="battery_guide_step">忽略电池优化后，AgentOS 在后台和灭屏时才能保持运行；不允许的话，任务可能被系统暂停，电脑端接入可能没有响应。</string>
+    <string name="battery_dialog_allow">去允许</string>
+    <string name="battery_dialog_later">以后再说</string>
+    <string name="battery_dialog_not_now">暂不</string>
+
+    <!-- ============ 安全说明（SecurityText） ============ -->
+    <string name="security_level">best_effort（尽力而为）</string>
+    <string name="security_what_agentos_does">AgentOS 能做的是：key 用 Android Keystore 加密保存，只在发出模型请求的那一刻注入，不写进日志、诊断和通知；Agent 的代码不以 root 运行，模型和插件接触不到 root。</string>
+    <string name="security_settings_rooted">这台手机已经 root（本次开机收到了 AgentOS 模块监督进程的状态），其他获得 root 权限的应用可以读取 AgentOS 的全部数据，包括加密前后的 key、对话和日志。\n\n%1$s但它防不住拥有 root 权限的应用。请只给信任的应用授予 root 权限。</string>
+    <string name="security_settings_unknown">本次开机还没有收到 AgentOS 模块监督进程的状态，无法确认这台手机是否已经 root。\n\n如果已经 root：其他获得 root 权限的应用可以读取 AgentOS 的全部数据，包括加密前后的 key、对话和日志，请只给信任的应用授予 root 权限。如果没有 root：AgentOS 的数据由 Android 的应用隔离保护，其他应用读不到。\n\n%1$s</string>
+    <string name="security_welcome_rooted">安全等级：%1$s。这台手机已经 root，其他获得 root 权限的应用可以读取 AgentOS 的数据（包括 key），AgentOS 只能尽力保护，详见设置页。\n\n你现在打开了 App，AgentOS 模块的监督进程从此开始守护运行时：有任务时被系统杀掉会自动拉起。</string>
+    <string name="security_welcome_no_module">安全等级：%1$s，详见设置页。\n\n本次开机没有检测到 AgentOS 模块：对话照常可用，但运行时被系统杀掉后不会自动拉起。在 root 管理器里刷入 AgentOS 模块并重启后，这里会显示已检测到。</string>
+    <string name="security_welcome_unknown">安全等级：%1$s，详见设置页。</string>
+
+    <!-- ============ 运行状态（StatusText） ============ -->
+    <string name="status_runtime_label">运行时</string>
+    <string name="status_runtime_unreadable">读不到状态</string>
+    <string name="status_phase_starting">启动中</string>
+    <string name="status_phase_recovering">恢复中</string>
+    <string name="status_phase_ready">就绪</string>
+    <string name="status_unknown">未知</string>
+    <string name="status_runtime_value">%1$s（pid %2$s，已运行 %3$s）</string>
+    <string name="status_tasks_label">进行中的任务</string>
+    <string name="status_tasks_none">无</string>
+    <plurals name="status_tasks_count">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <plurals name="status_tasks_count_foreground">
+        <item quantity="other">%1$d 个，前台运行</item>
+    </plurals>
+    <string name="status_hold_label">保持前台</string>
+    <string name="status_hold_ok">为电脑端接入保持前台</string>
+    <string name="status_hold_not_foreground">电脑端接入需要保持前台，但现在不在前台</string>
+    <string name="status_supervisor_label">监督进程</string>
+    <string name="status_supervisor_missing">未运行：没有收到本次开机的监督状态。AgentOS 模块可能被禁用或没有安装；运行时照常可用，但被杀后不会自动拉起</string>
+    <string name="status_supervisor_none_yet">还没有收到监督状态</string>
+    <string name="status_supervisor_waiting">等待本次开机的监督状态</string>
+    <string name="status_supervisor_last_label">上次收到的状态（不是本次开机的）</string>
+    <string name="status_supervisor_ok">正常</string>
+    <plurals name="status_supervisor_backoff">
+        <item quantity="other">运行时异常退出，正在按退避重新拉起（10 分钟内 %1$d 次）</item>
+    </plurals>
+    <string name="status_supervisor_safe_mode">安全模式：%1$s。运行时不会被自动拉起，恢复出来的任务不会自动继续；在 root 管理器里用 AgentOS 模块的“动作”按钮退出</string>
+    <string name="status_safe_reason_crash_loop">运行时短时间内反复崩溃</string>
+    <string name="status_safe_reason_manual">手动进入</string>
+    <string name="status_safe_reason_unsupported_api">系统版本超出支持范围（可能刚做过系统更新）</string>
+    <string name="status_supervisor_stopped">已停止：%1$s</string>
+    <string name="status_stopped_reason_user_stopped">AgentOS 被强行停止过</string>
+    <string name="status_stopped_reason_not_launched">等待首次打开</string>
+    <string name="status_stopped_reason_module_disabled">模块已禁用</string>
+    <string name="status_stopped_reason_supervisor_exited">监督进程已退出</string>
+    <string name="status_stopped_reason_install_failed">模块安装 App 失败</string>
+    <string name="status_module_version_label">模块版本</string>
+    <string name="status_module_version_value">%1$s（%2$d）</string>
+    <string name="status_duration_seconds">%1$d 秒</string>
+    <string name="status_duration_minutes">%1$d 分钟</string>
+    <string name="status_duration_hours">%1$d 小时 %2$d 分钟</string>
+    <string name="status_duration_days">%1$d 天 %2$d 小时</string>
+
+    <!-- ============ 首次引导（Onboarding） ============ -->
+    <string name="onboarding_title">首次引导</string>
+    <string name="onboarding_start">开始使用</string>
+    <string name="onboarding_welcome_title">欢迎使用 AgentOS</string>
+    <string name="onboarding_welcome_detail">AgentOS 是常驻在这台手机上的 Agent 服务：本 App 和其他 App 都能通过 ACP 调用它，模型用你自己的 key。\n\n%1$s</string>
+    <string name="onboarding_model_title">选择模型并填写 key</string>
+    <string name="onboarding_model_loading">正在读取当前设置…</string>
+    <string name="onboarding_model_ready">已配置，可以开始对话。</string>
+    <string name="onboarding_model_saved_unusable">已保存，但暂时不可用，打开看看原因。</string>
+    <string name="onboarding_model_none">MiniMax（国际 / 国内）等厂商预设只需要填 key；也可以填自建的兼容端点。不配置就没法对话。</string>
+    <string name="onboarding_model_change">修改</string>
+    <string name="onboarding_model_set">去设置</string>
+    <string name="onboarding_notifications_title">允许通知</string>
+    <string name="onboarding_notifications_detail">Agent 在后台执行任务时会显示一条常驻通知；以后需要你确认的操作也会通过通知询问。</string>
+    <string name="onboarding_allow">允许</string>
+    <string name="onboarding_assistant_title">设为默认助理（可选）</string>
+    <string name="onboarding_assistant_held">AgentOS 已是默认助理。</string>
+    <string name="onboarding_assistant_detail">设为默认助理后，长按电源键即可唤起。这个入口由后续版本（W13）提供；现在可以先打开系统设置看看。</string>
+    <string name="onboarding_assistant_open">打开系统设置</string>
+    <string name="onboarding_battery_title">允许忽略电池优化</string>
+    <string name="onboarding_plugins_title">已发现的插件</string>
+    <string name="onboarding_plugins_none">还没有发现插件。安装了内嵌 AgentOS 插件的 App 之后，会在这里和设置页的插件管理里出现（M3a）。</string>
+    <plurals name="onboarding_plugins_found">
+        <item quantity="other">发现了 %1$d 个插件，可以在设置页里启用。</item>
+    </plurals>
+
+    <!-- ============ 电脑端接入（Desktop，AgentService 通知，设置页“电脑端接入”一节） ============ -->
+    <string name="settings_operation_failed">操作失败，请重试</string>
+    <string name="desktop_section">电脑端接入</string>
+    <string name="desktop_switch_label">开发者功能：允许电脑经 adb 连接</string>
+    <string name="settings_runtime_too_old">运行时版本过旧，不支持</string>
+    <string name="settings_loading">读取中…</string>
+    <string name="desktop_summary_off">关闭</string>
+    <string name="desktop_summary_listen_error">打不开监听（%1$s）：可能有别的 App 占用了 %2$s</string>
+    <string name="desktop_summary_starting">已打开，正在启动监听</string>
+    <string name="desktop_summary_on">已打开：%1$s，%2$s</string>
+    <plurals name="desktop_paired_count">
+        <item quantity="other">%1$d 台已配对</item>
+    </plurals>
+    <plurals name="desktop_connection_count">
+        <item quantity="other">%1$d 个连接</item>
+    </plurals>
+    <plurals name="desktop_computer_count">
+        <item quantity="other">%1$d 台电脑</item>
+    </plurals>
+    <plurals name="desktop_minutes">
+        <item quantity="other">%1$d 分钟</item>
+    </plurals>
+    <string name="desktop_how_to">推荐用项目提供的 acp-bridge（仓库里的 tools/acp-bridge）：电脑用 USB 连上手机，点下面的“生成配对码”，在电脑上运行 acp-bridge pair &lt;配对码&gt; 完成第一次配对；之后把 acp-bridge 设为 ACP 客户端（如 Zed）的 Agent 命令即可。只执行 adb forward tcp:8765 localabstract:agentos-acp 的话，普通 ACP 客户端不会发配对握手，连不上。手机上的确认照常出现，电脑端无法绕过。</string>
+    <string name="desktop_notification_title">电脑端接入已开启</string>
+    <string name="desktop_notification_action">关闭</string>
+    <string name="desktop_notification_text">允许电脑经 adb 连接。关闭会断开连接，并作废已配对的电脑。</string>
+    <string name="desktop_notification_busy">正在运行任务</string>
+    <string name="desktop_channel_name">电脑端接入</string>
+    <string name="desktop_foreground_note">打开期间 AgentOS 会保持在后台运行，并显示常驻通知“%1$s”。用完记得关闭：关掉这个开关，或点通知上的“%2$s”。</string>
+    <string name="desktop_error_disabled">请先打开电脑端接入</string>
+    <string name="desktop_paired_label">已配对</string>
+    <string name="desktop_default_label">电脑</string>
+    <string name="desktop_revoke">撤销</string>
+    <string name="desktop_revoke_all">全部撤销</string>
+    <string name="desktop_generate_code">生成配对码</string>
+    <string name="desktop_disable_title">关闭电脑端接入？</string>
+    <string name="desktop_disable_message">会断开 %1$s，并作废 %2$s的配对；以后再打开需要重新配对。</string>
+    <string name="desktop_disable_confirm">关闭</string>
+    <string name="desktop_revoke_all_title">撤销全部 %1$s的配对？</string>
+    <string name="desktop_revoke_all_message">它们的连接会立即断开，需要重新配对才能再连。</string>
+    <string name="desktop_code_title">配对码 %1$s</string>
+    <string name="desktop_code_message">电脑用 USB 连上手机，在 AgentOS 仓库目录里运行：\n\n%1$s\n\n约 %2$s内有效，配对成功或输错 5 次后作废。配对之后，把 acp-bridge 设为 ACP 客户端的 Agent 命令即可。</string>
+    <string name="desktop_code_ok">好</string>
+    <string name="settings_cancel">取消</string>
+    <string name="runtime_notification_channel">Agent 运行时</string>
+    <string name="runtime_notification_title">AgentOS 正在运行任务</string>
+
+    <!-- ============ 模型与 key（Byok、ModelSourceActivity） ============ -->
+    <string name="model_title">模型与 key</string>
+    <string name="model_tab_preset">厂商预设</string>
+    <string name="model_tab_custom">自定义兼容端点</string>
+    <string name="model_label_provider">模型厂商</string>
+    <string name="model_label_model">模型</string>
+    <string name="model_label_thinking">思考强度</string>
+    <string name="model_label_api">协议</string>
+    <string name="model_label_url">API 地址</string>
+    <string name="model_url_note">必须是 https://；唯一的例外是本机地址（127.0.0.1、localhost、::1）可以用 http://，给手机上运行的模型服务用。OpenAI Chat Completions 填到 /v1 这一级，Anthropic Messages 填 API 根地址。</string>
+    <string name="model_label_model_name">模型名</string>
+    <string name="model_hint_model_name">例如 deepseek-chat</string>
+    <string name="model_label_key">key</string>
+    <string name="model_hint_key">粘贴 key</string>
+    <string name="model_save">保存</string>
+    <string name="model_save_note">保存后从下一次模型请求起生效，不打断正在进行的这一轮。key 用 Android Keystore 加密保存，界面上只显示首尾各 4 位。</string>
+    <string name="model_load_failed">读取厂商目录失败：%1$s</string>
+    <string name="model_saved">已保存，下一次请求起生效</string>
+    <string name="model_saved_unusable">已保存，但暂时不可用</string>
+    <string name="model_key_keep">留空则沿用已保存的 key（%1$s）</string>
+    <string name="model_key_changed">换了厂商或地址，需要重新填写 key；key 不会被带到别的地址</string>
+    <string name="model_option_with_id">%1$s（%2$s）</string>
+    <string name="byok_pick_provider">请选择模型厂商</string>
+    <string name="byok_pick_model">请选择模型</string>
+    <string name="byok_pick_api">请选择协议</string>
+    <string name="byok_need_url">请填写 API 地址</string>
+    <string name="byok_url_rule">地址必须以 https:// 开头（http 只允许本机），且不能带用户名、? 参数或 # 片段</string>
+    <string name="byok_need_model_name">请填写模型名</string>
+    <string name="byok_model_no_space">模型名不能含空格</string>
+    <string name="byok_key_required">换了厂商或地址，需要重新填写 key</string>
+    <string name="byok_err_invalid_source">设置内容不完整或格式不对</string>
+    <string name="byok_err_unknown_provider">没有这个模型厂商（目录可能已更新），请重新选择</string>
+    <string name="byok_err_unknown_model">这个厂商没有这个模型，请重新选择</string>
+    <string name="byok_err_unsupported_api">不支持这个协议，只能选 Anthropic Messages 或 OpenAI Chat Completions</string>
+    <string name="byok_err_invalid_endpoint">API 地址不合法：必须是 https://（http 只允许本机），不能带用户名、? 参数或 # 片段</string>
+    <string name="byok_err_invalid_thinking_level">思考强度不在可选范围内</string>
+    <string name="byok_err_invalid_key">key 的格式不对：不能含空格或换行，最长 4096 个字符</string>
+    <string name="byok_err_catalog_unavailable">厂商目录读不出来，请重新安装 AgentOS</string>
+    <string name="byok_err_storage_failed">保存失败（存储或 Android Keystore 出错），请重试</string>
+    <string name="byok_err_save_failed">保存失败，请重试</string>
+    <string name="byok_err_save_failed_code">保存失败（%1$s）</string>
+    <string name="byok_problem_config_unreadable">保存的设置读不出来，请重新设置</string>
+    <string name="byok_problem_key_unreadable">key 无法解密（例如数据被恢复到了另一台手机），请重新填写 key</string>
+    <string name="byok_problem_key_endpoint_mismatch">App 更新后厂商地址变了，请重新填写 key</string>
+    <string name="byok_problem_model_not_in_catalog">这个模型已不在最新目录里，沿用保存的参数，仍然可用</string>
+    <string name="byok_problem_catalog_unavailable">厂商目录读不出来</string>
+    <string name="byok_thinking_off">关闭</string>
+    <string name="byok_thinking_minimal">最少</string>
+    <string name="byok_thinking_low">低</string>
+    <string name="byok_thinking_medium">中</string>
+    <string name="byok_thinking_high">高</string>
+
+    <!-- ============ 自动选择会话 Jev（Jev、JevSourceActivity） ============ -->
+    <string name="jev_title">自动选择会话（Jev）</string>
+    <string name="jev_label_key">Jev key</string>
+    <string name="jev_label_endpoint">服务地址（可选）</string>
+    <string name="jev_hint_endpoint">留空使用默认地址</string>
+    <string name="jev_endpoint_note">默认 %1$s。必须是 https://；本机地址（127.0.0.1、localhost、::1）可以用 http://。换了地址需要重新填写 key，key 不会被带到别的地址。</string>
+    <string name="jev_save_note">key 用 Android Keystore 加密保存。保存后从下一次自动选择起生效。</string>
+    <string name="jev_load_failed">读取失败：%1$s</string>
+    <string name="jev_saved">已保存，下一次自动选择起生效</string>
+    <string name="jev_key_changed_address">换了地址，需要重新填写 key</string>
+    <string name="jev_key_needed">请填写 Jev key</string>
+    <string name="jev_err_invalid_endpoint">地址不合法：必须是 https://（本机地址可以用 http://），不能带用户名、参数或片段</string>
+    <string name="jev_err_invalid_key">key 里有空格或控制字符，请重新粘贴</string>
+    <string name="jev_err_storage_failed">保存失败：Android Keystore 或存储出了问题，请重试</string>
+    <string name="jev_err_failed_code">操作失败（%1$s）</string>
+    <string name="jev_problem_key_unreadable">已保存的 key 解不开（设备的密钥库变了），请重新填写 key</string>
+    <string name="jev_problem_file_unreadable">保存的设置读不出来，请重新填写</string>
+    <string name="jev_status_not_configured">未配置：同一个调用方有多个历史会话时，每次都新建会话</string>
+    <string name="jev_status_enabled">已启用</string>
+    <string name="jev_explain">用户（或其他 App）不指定会话时，AgentOS 会把这次的问题和这个调用方自己最近几个会话的摘要发给 Jev 服务，由它挑出该继续哪个会话，挑不出来就新建。不配置也能正常使用，只是每次都新建会话。摘要含会话里的问答文字，不含模型 key。</string>
+
+    <!-- ============ 设置页（SettingsActivity） ============ -->
+    <string name="settings_connect_failed">连不上 AgentOS 运行时（%1$s）</string>
+    <string name="settings_model_runtime_too_old">运行时版本过旧，不支持在这里设置</string>
+    <string name="settings_model_not_configured">还没有配置：对话前需要选择模型厂商并填写 key</string>
+    <string name="settings_model_source">来源</string>
+    <string name="settings_model_address">地址</string>
+    <string name="settings_key_set">已设置</string>
+    <string name="settings_key_not_set">未设置</string>
+    <string name="settings_status">状态</string>
+    <string name="settings_usable">可用</string>
+    <string name="settings_not_usable">不可用</string>
+    <string name="settings_note">注意</string>
+    <string name="settings_change">更换</string>
+    <string name="settings_set_up">去设置</string>
+    <string name="settings_clear">清除</string>
+    <string name="settings_cleared">已清除</string>
+    <string name="settings_jev_endpoint">服务地址</string>
+    <string name="settings_jev_default_endpoint">默认（%1$s）</string>
+    <string name="settings_plugins_section">插件</string>
+    <string name="settings_plugins_note">其他 App 提供给 AgentOS 的工具（插件管理）；以及哪些第三方 App 被允许使用 AgentOS（已授权的应用）。第三方插件默认关闭，启用前会说明风险。</string>
+    <string name="settings_authorized_apps">已授权的应用</string>
+    <string name="settings_plugin_manager">插件管理</string>
+    <string name="settings_security_section">安全等级</string>
+    <string name="settings_security_level">等级</string>
+    <string name="settings_runtime_section">运行与监督</string>
+    <string name="settings_refresh">刷新</string>
+    <string name="settings_other_section">其他</string>
+    <string name="settings_app_language">应用语言</string>
+    <string name="settings_show_guide">重新查看首次引导</string>
+    <string name="settings_version">版本</string>
+    <string name="settings_version_value">AgentOS %1$s（%2$d）；运行时接口 v%3$d</string>
+    <string name="settings_clear_jev_title">清除 Jev key？</string>
+    <string name="settings_clear_jev_message">清除后立即作废：删除保存的 key 和它的加密密钥，正在进行的自动选择也会中止。之后每次都新建会话，直到重新设置。</string>
+    <string name="settings_clear_model_title">清除模型和 key？</string>
+    <string name="settings_clear_model_message">清除后立即作废：删除保存的 key 和它的加密密钥。之后的每一次模型请求都会失败，包括正在进行的这一轮里的下一次请求，不会再用旧 key 跑完。\n\n如果只是想换厂商、模型或 key，用“更换”即可，那样从下一次请求起生效，不打断正在进行的这一轮。</string>
+
+    <!-- ============ 对话页的提示与占位（ChatState、ChatController、AgentUpdate） ============ -->
+    <string name="chat_tool_default_title">工具调用</string>
+    <string name="chat_notice_cancelled">已取消</string>
+    <string name="chat_notice_max_turn_requests">工具调用轮次超过上限，已停止</string>
+    <string name="chat_notice_max_turn_requests_hint">可以接着说“继续”</string>
+    <string name="chat_notice_max_tokens">回复达到了长度上限</string>
+    <string name="chat_notice_max_tokens_hint">可以接着说“继续”</string>
+    <string name="chat_notice_refusal">模型拒绝回答这个请求</string>
+    <string name="chat_notice_turn_ended">本轮结束（%1$s）</string>
+    <string name="chat_notice_new_session">已开始新的会话</string>
+    <string name="chat_notice_new_session_hint">之前的会话在运行时重启后不再可用</string>
+    <string name="chat_notice_screen_closed">界面关闭时这一轮还在进行</string>
+    <string name="chat_notice_screen_closed_hint">运行时会继续把它做完；M2 起可以回到原来的会话查看结果</string>
+    <string name="chat_content_image">［图片］</string>
+    <string name="chat_content_audio">［音频］</string>
+    <string name="chat_content_link">［链接：%1$s］</string>
+    <string name="chat_content_resource">［资源］</string>
+</resources>
