@@ -6,7 +6,6 @@
   <b>简体中文</b> &nbsp;|&nbsp; <a href="README.en.md">English</a>
 </p>
 
-<h3>让 App 既能调用 Agent，也能为 Agent 提供能力。</h3>
 
 <p>Agent 可以是一种入口，也可以是一种基础的系统服务。<br>
 多个 App 共用同一套 Agent 运行时，不必各自内置完整的 Agent。</p>
