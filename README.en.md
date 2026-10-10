@@ -89,7 +89,7 @@ The two GIFs below are cut from real recordings, with the waiting and app-switch
 </tr>
 </table>
 
-Full recording (real device, real time, 44 seconds): [demo3.mp4](docs/assets/demo3.mp4). The GIF is not sped up, only cut.
+Full recording (real device, real time, 44 seconds): [demo3.mp4](docs/assets/demo3.mp4).
 
 #### Messages: new messages in a conversation become an event and a to-do
 
@@ -110,21 +110,7 @@ Full recording (real device, real time, 44 seconds): [demo3.mp4](docs/assets/dem
 </tr>
 </table>
 
-The GIF is 16 seconds cut from a 51-second recording. It drops the stretch after Allow where the screen sits on AgentOS settings, and the app switching in the recents screen. Only the seconds where the Agent reads the messages in step 4 are sped up 2×; everything else is real time. Full recording (real device, real time, 51 seconds, 720p): [demo4.mp4](docs/assets/demo4.mp4).
-
-> **What these demos show:** an app does not need to embed an Agent to get cross-app task handling from a shared runtime. The task starts in the original app, and progress and results come back to it. Both apps use the same SDK and the same authorization; only the source of the task differs: one note, or the messages in one conversation.
-
-A few things to know:
-
-- Notes plays both roles: it calls the Agent through the `acp-android` SDK, and through an embedded plugin it offers its own note tools to the Agent. Both apps are samples from this project, not outside third parties.
-- Authorization is asked once. You can revoke it later in AgentOS settings, and revoking cancels that app's running tasks immediately.
-- Both apps only requested "create" tools from the Agent: `event_create` and `alarm_create` for Notes; the event, to-do and alarm creation tools for Messages, with no tool to read or send messages. That is the minimal scope each chose for itself, to guard against prompt injection hidden in the text. AgentOS does not force third parties to do this (see [Status and boundaries](#status-and-boundaries)).
-- Whether each creation asks for confirmation first depends on your settings for these tools in AgentOS. For the Notes recording, the calendar and alarm creation tools were set to "always allow", so there are no per-call confirmation dialogs.
-- **The message text is handed to AgentOS and then sent to the model endpoint you configured in AgentOS**; the Messages app itself does not go online. Verification codes are masked according to the setting.
-- The 10 messages in the Messages demo are demo data written into the system SMS store with root (script: [`tests/device/acp-channel/sms_demo_seed.py`](tests/device/acp-channel/sms_demo_seed.py)), not real messages. Messages is not the default SMS app, and real-SIM messages have not been verified. To-do items are only created when the to-do sample app is installed and its plugin is enabled.
-- The model's judgment is not identical every time for the same sentence: it may create an alarm, or a weekly repeating event. The recordings show one such run.
-
-Design and acceptance for the Notes demo: [docs/third-party-acp.md](docs/third-party-acp.md) (Chinese). For the Messages demo see its section 5b and the [0.2.0 release notes](docs/release-notes/0.2.0.md).
+Full recording (real device, real time, 51 seconds, 720p): [demo4.mp4](docs/assets/demo4.mp4).
 
 <a id="demo-agent-to-app"></a>
 
