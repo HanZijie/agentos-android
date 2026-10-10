@@ -61,30 +61,70 @@ One app can play both roles. Users start tasks from the app they are already in,
 
 ## Demos
 
-Two real-device demos, one for each relationship above. The recordings were made with the Chinese UI, and quoted UI text is translated.
+Three real-device demos. The first two are App → Agent: two sample apps installed after the fact, Notes and Messages, each using AgentOS from inside its own screen. The third goes the other way, with the Agent calling tools that apps provide. The Notes demo was recorded with English app UIs (the note itself is Chinese), the Messages demo with a Chinese UI, and AgentOS's own dialogs are in Chinese in both. Quoted Chinese UI text is translated.
 
 <a id="demo-app-to-agent"></a>
 
 ### Main demo: App → Agent
 
-The Notes app is installed after the fact. It holds a note; one tap on a button hands the text to AgentOS, and the Agent reads the time and creates a calendar event and an alarm. Notes itself has no calendar or alarm permission, and no model key.
+Neither app has calendar or alarm permissions, or a model key. Each does one thing: it hands a piece of text to AgentOS, the Agent reads the times and items out of it and creates events, alarms or to-dos, and progress and results come back to the app that started the task. The user does not leave the app to retell the story in a separate chat screen.
 
-[![Key frames: confirm the text to send in Notes, authorize on first use, the result returns to Notes, and the event appears in the calendar. Click to watch the full recording](docs/assets/demo3-stills.png)](docs/assets/demo3.mp4)
+The two GIFs below are cut from real recordings, with the waiting and app-switching frames dropped. The numbers on the right match the dots under each GIF.
 
-Key frames, left to right: after tapping the AgentOS button, confirm the text to send; **on first use, AgentOS asks "Allow 'Notes' to use AgentOS?"** (showing the package name and signature digest, with focus on "Deny" by default); back in Notes, the panel shows 1 event and 1 alarm created; in the calendar, "Meeting with Mr. Wang (Room 3)" on Saturday at 15:00.
+#### Notes: one note becomes an event and an alarm
 
-Click the image to watch the full recording (real device, real time, not sped up, 44 seconds): [demo3.mp4](docs/assets/demo3.mp4). The flow: open the note "This week's plan" → tap the AgentOS button → confirm the text → authorize on first use and tap Allow → back in Notes to see the result → jump to the calendar and to the alarm clock (a weekly "Running" alarm at 07:00 on Mondays) to check.
+<table>
+<tr>
+<td valign="top" width="320"><img src="docs/assets/demo3.gif" width="300" alt="Tap the AgentOS button in Notes, authorize on first use, the Agent creates an event and an alarm, and both show up in the calendar and alarm apps"></td>
+<td valign="top">
+<ol>
+<li><b>The starting point.</b> The calendar has no events and the alarm app has no alarms.</li>
+<li><b>Start from the note.</b> Open the note "This week's plan": "Meeting with Mr. Wang tomorrow at 3 p.m., Room 3, remind me 15 minutes before; run at 7 a.m. every Monday." Tap the AgentOS button (<i>Let AgentOS schedule this</i>). The panel first lists <b>the whole text that will be sent</b>, and nothing is sent until you tap Start.</li>
+<li><b>First use needs the user's consent.</b> AgentOS asks "Allow 'Notes' to use AgentOS?", showing the package name and signature digest, with focus on "Deny" by default. Tap Allow.</li>
+<li><b>The Agent works and the result returns to Notes.</b> The panel shows the Agent's reasoning, then "Created 1 event and 1 alarm".</li>
+<li><b>Check in the calendar.</b> "Meeting with Mr. Wang (Room 3)" on Saturday, 15:00–16:00, with a reminder 15 minutes before.</li>
+<li><b>Check in the alarm app.</b> A weekly "Running" alarm at 07:00 on Mondays.</li>
+</ol>
+</td>
+</tr>
+</table>
 
-> **What this demo shows:** an app does not need to embed an Agent to get cross-app task handling from a shared runtime. The task starts in the original app, and progress and results come back to it.
+Full recording (real device, real time, 44 seconds): [demo3.mp4](docs/assets/demo3.mp4). The GIF is not sped up, only cut.
+
+#### Messages: new messages in a conversation become an event and a to-do
+
+<table>
+<tr>
+<td valign="top" width="320"><img src="docs/assets/demo4.gif" width="300" alt="Tap Schedule with AgentOS in Messages, preview the messages to send, authorize on first use, the Agent creates an event and a to-do, both show up in the to-do and calendar apps, and the bubbles are marked as handled by AgentOS"></td>
+<td valign="top">
+<ol>
+<li><b>Open the conversation.</b> The conversation list in Messages; open the colleague's conversation with 3 messages: "Product review meeting tomorrow at 10 a.m., Room 3, bring the prototype." "Also, send the Q3 data report before Friday." "By the way, remind everyone 15 minutes before the review." The "Schedule with AgentOS" button at the bottom carries a badge: "3 unprocessed".</li>
+<li><b>Preview first, then send.</b> The panel lists <b>the 3 messages that will be sent</b> (with the time each arrived) and a "Prompt" card (the default task description, which you can expand and edit). Nothing is sent until you tap Start.</li>
+<li><b>First use needs the user's consent.</b> AgentOS asks "Allow 'Messages' to use AgentOS?", again with the package name and signature digest and focus on "Deny". Tap Allow.</li>
+<li><b>The Agent reads the messages and creates items.</b> The seconds where the Agent reads the messages are sped up 2×. The Agent works out "tomorrow" and "Friday" from <b>the date each message arrived</b>, and creates a "Product review" event on Saturday at 10:00 and a to-do "Send Q3 data report" due today. The third message, "remind 15 minutes before", is folded into the event's reminder, with no separate alarm. The panel reads "Created 1 event, 1 to-do".</li>
+<li><b>Check in the to-do app.</b> "Send Q3 data report", due today, source "colleague's message".</li>
+<li><b>Check in the calendar.</b> Saturday, October 10, 10:00–11:00, "Product review", Room 3.</li>
+<li><b>Back in Messages.</b> The 3 bubbles are marked "Handled by AgentOS" and will not be sent again, so the same message does not keep creating duplicate to-dos.</li>
+</ol>
+</td>
+</tr>
+</table>
+
+The GIF is 16 seconds cut from a 51-second recording. It drops the stretch after Allow where the screen sits on AgentOS settings, and the app switching in the recents screen. Only the seconds where the Agent reads the messages in step 4 are sped up 2×; everything else is real time. Full recording (real device, real time, 51 seconds, 720p): [demo4.mp4](docs/assets/demo4.mp4).
+
+> **What these demos show:** an app does not need to embed an Agent to get cross-app task handling from a shared runtime. The task starts in the original app, and progress and results come back to it. Both apps use the same SDK and the same authorization; only the source of the task differs: one note, or the messages in one conversation.
 
 A few things to know:
 
-- Notes plays both roles: it calls the Agent through the `acp-android` SDK, and through an embedded plugin it offers its own note tools to the Agent. It is a sample app from this project, not an outside third party.
+- Notes plays both roles: it calls the Agent through the `acp-android` SDK, and through an embedded plugin it offers its own note tools to the Agent. Both apps are samples from this project, not outside third parties.
 - Authorization is asked once. You can revoke it later in AgentOS settings, and revoking cancels that app's running tasks immediately.
-- Notes only requested two tools from the Agent, `event_create` and `alarm_create`. That is the minimal scope it chose for itself, to guard against prompt injection hidden in note text. AgentOS does not force third parties to do this (see [Status and boundaries](#status-and-boundaries)).
-- For the recording, the calendar and alarm creation tools were set to "always allow", so there are no per-call confirmation dialogs. Without that setting, every creation still asks for confirmation.
+- Both apps only requested "create" tools from the Agent: `event_create` and `alarm_create` for Notes; the event, to-do and alarm creation tools for Messages, with no tool to read or send messages. That is the minimal scope each chose for itself, to guard against prompt injection hidden in the text. AgentOS does not force third parties to do this (see [Status and boundaries](#status-and-boundaries)).
+- Whether each creation asks for confirmation first depends on your settings for these tools in AgentOS. For the Notes recording, the calendar and alarm creation tools were set to "always allow", so there are no per-call confirmation dialogs.
+- **The message text is handed to AgentOS and then sent to the model endpoint you configured in AgentOS**; the Messages app itself does not go online. Verification codes are masked according to the setting.
+- The 10 messages in the Messages demo are demo data written into the system SMS store with root (script: [`tests/device/acp-channel/sms_demo_seed.py`](tests/device/acp-channel/sms_demo_seed.py)), not real messages. Messages is not the default SMS app, and real-SIM messages have not been verified. To-do items are only created when the to-do sample app is installed and its plugin is enabled.
+- The model's judgment is not identical every time for the same sentence: it may create an alarm, or a weekly repeating event. The recordings show one such run.
 
-Design and acceptance: [docs/third-party-acp.md](docs/third-party-acp.md) (Chinese).
+Design and acceptance for the Notes demo: [docs/third-party-acp.md](docs/third-party-acp.md) (Chinese). For the Messages demo see its section 5b and the [0.2.0 release notes](docs/release-notes/0.2.0.md).
 
 <a id="demo-agent-to-app"></a>
 
@@ -282,7 +322,7 @@ AgentOS is currently a prototype for validating the product shape and the techni
 
 | Status | Details |
 |---|---|
-| Real-device demos | The later-installed sample Notes app starts a task over ACP, authorizes on first use, and the event and alarm results come back to Notes; a task started in AgentOS operates the Notes, Calendar and Alarm sample apps through MCP |
+| Real-device demos | The later-installed sample Notes and Messages apps start tasks over ACP, authorize on first use, and progress and results for the events, alarms and to-dos they create come back to the app that started the task; a task started in AgentOS operates the Notes, Calendar and Alarm sample apps through MCP |
 | Passed real-device acceptance (Pixel 8, Magisk 30.7, Android 15) | The full module lifecycle: install, reboot, disable, enable, uninstall; ACP conformance tests on a computer (38 cases: 33 passed, 0 failed, 5 skipped); automated acceptance of the third-party ACP flow (34 checks, all passed in two consecutive runs, covering authorization, denial, revocation and prompt injection) |
 | Not verified yet | KernelSU; Android 16 / 17 real devices; screen-off and 24-hour residency; third-party apps other than this project's samples; conformance tests for the third-party channel; "first conversation within 10 minutes of flashing" (needs timing with beta users) |
 | Not implemented yet | Third-party permissions per (app, plugin, action); publishing `acp-android` to Maven |
